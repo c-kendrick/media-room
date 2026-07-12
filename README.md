@@ -21,6 +21,14 @@ No Second Brain notes, projects, university records, fitness data, database file
 - GitHub Pages-compatible Vite build
 - Included GitHub Actions deployment workflow
 
+## Supabase foundation
+
+The first Supabase pass is now included as a database-only migration. It does not change the current static site or add login/editing screens.
+
+- Run [the Supabase foundation setup](docs/SUPABASE-FOUNDATION.md) when you are ready to create the Supabase project.
+- The migration includes multi-user data modelling, pending/approved/rejected registrations, admin and ownership RLS policies, and a future-safe interest-marker table.
+- Never put a Supabase service-role key in this repository or browser code.
+
 ## Current limitation
 
 The GitHub Pages version is intentionally **read-only**. GitHub Pages cannot run the SQLite server. For now, make changes in the Local Media Room and export a fresh media snapshot into this project. Supabase will replace this export workflow later.
