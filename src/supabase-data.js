@@ -4,7 +4,7 @@ function query(table, parameters) {
   return table + '?' + new URLSearchParams(parameters).toString();
 }
 
-function mapSnapshot(collection, shelves, mediaItems, memberships) {
+function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [], publicProfiles = []) {
   const membershipsByItem = new Map();
 
   for (const membership of memberships) {
@@ -25,7 +25,7 @@ function mapSnapshot(collection, shelves, mediaItems, memberships) {
       name: shelf.name,
       section: shelf.section,
       position: shelf.position,
-      deleted_at: null,
+      deleted_at: shelf.deleted_at || null,
     })),
     media: mediaItems.map((item) => {
       const membership = membershipsByItem.get(item.id) || [];
@@ -49,9 +49,11 @@ function mapSnapshot(collection, shelves, mediaItems, memberships) {
         runtime: item.runtime,
         added_at: item.created_at,
         updated_at: item.updated_at,
-        deleted_at: null,
+        deleted_at: item.deleted_at || null,
         lists: membership.map((entry) => entry.shelf_id),
         list_positions: Object.fromEntries(membership.map((entry) => [entry.shelf_id, entry.position])),
+        external_ids: item.external_ids || {},
+        interests: interests.filter((entry) => entry.media_item_id === item.id).map((entry) => publicProfiles.find((profile) => profile.id === entry.user_id)).filter(Boolean),
       };
     }),
   };
@@ -61,9 +63,9 @@ export async function loadPublicCollections({ fresh = false } = {}) {
   return supabaseSelect(query('collections', { select: 'id,owner_id,title,slug', order: 'title.asc' }), { fresh });
 }
 
-export async function loadKitCollectionFromSupabase({ fresh = false } = {}) {
+export async function loadCollectionFromSupabase({ collectionId, fresh = false } = {}) {
   const collections = await supabaseSelect(query('collections', {
-    slug: 'eq.kits-collection',
+    ...(collectionId ? { id: 'eq.' + collectionId } : { slug: 'eq.kits-collection' }),
     select: 'id,owner_id,title,updated_at',
     limit: '1',
   }), { fresh });
@@ -74,12 +76,12 @@ export async function loadKitCollectionFromSupabase({ fresh = false } = {}) {
   const [shelves, mediaItems] = await Promise.all([
     supabaseSelect(query('shelves', {
       collection_id: 'eq.' + collection.id,
-      select: 'id,section,name,position',
+      select: 'id,section,name,position,deleted_at',
       order: 'section.asc,position.asc',
     }), { fresh }),
     supabaseSelect(query('media_items', {
       collection_id: 'eq.' + collection.id,
-      select: 'id,legacy_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,runtime,created_at,updated_at',
+      select: 'id,legacy_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,runtime,external_ids,deleted_at,created_at,updated_at',
       order: 'created_at.asc',
     }), { fresh }),
   ]);
@@ -92,5 +94,13 @@ export async function loadKitCollectionFromSupabase({ fresh = false } = {}) {
     }), { fresh })
     : [];
 
-  return mapSnapshot(collection, shelves, mediaItems, memberships);
+  const interests = mediaItems.length ? await supabaseSelect(query('media_interest', {
+    media_item_id: 'in.(' + mediaItems.map((item) => item.id).join(',') + ')',
+    select: 'media_item_id,user_id',
+  }), { fresh }) : [];
+  const publicProfiles = interests.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh }) : [];
+  return mapSnapshot(collection, shelves, mediaItems, memberships, interests, publicProfiles);
 }
+
+export const loadKitCollectionFromSupabase = (options) => loadCollectionFromSupabase(options);
+
