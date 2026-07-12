@@ -58,3 +58,18 @@ export async function replaceMediaShelfMemberships(accessToken, databaseId, curr
     throw error;
   }
 }
+
+export function setMediaDeleted(accessToken, databaseId, deleted) {
+  return supabaseRequest('/rest/v1/media_items?id=eq.' + encodeURIComponent(databaseId), {
+    method: 'PATCH', fresh: true,
+    body: { deleted_at: deleted ? new Date().toISOString() : null },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+  });
+}
+
+export function permanentlyDeleteMedia(accessToken, databaseId) {
+  return supabaseRequest('/rest/v1/media_items?id=eq.' + encodeURIComponent(databaseId), {
+    method: 'DELETE', fresh: true,
+    headers: { Authorization: 'Bearer ' + accessToken },
+  });
+}
