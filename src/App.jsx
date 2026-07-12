@@ -13,6 +13,7 @@ import {
   LogIn,
   LogOut,
   Menu,
+  Pencil,
   RotateCw,
   Search,
   Shuffle,
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, signInWithPassword, signOut } from './auth.js';
+import { updateMediaItem } from './media-write.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -262,6 +264,11 @@ export default function App() {
   }
 
   const selectedMedia = data.media.find((item) => item.item_id === selectedMediaId);
+  const canEditCollection = Boolean(
+    account?.profile?.approved_at
+    && data.ownerId
+    && (account.profile.id === data.ownerId || account.profile.role === 'admin'),
+  );
   const generatedAt = data.generatedAt ? new Date(data.generatedAt) : null;
 
   return (
@@ -323,6 +330,12 @@ export default function App() {
           item={selectedMedia}
           shelves={mediaShelvesForSection(data, mediaSection(selectedMedia))}
           onClose={() => setSelectedMediaId(null)}
+          canEdit={canEditCollection}
+          onUpdate={async (changes) => {
+            await updateMediaItem(account.session.access_token, selectedMedia.database_id, changes);
+            await refresh({ fresh: true });
+            setToast('Media details saved.');
+          }}
         />
       )}
 
@@ -527,7 +540,8 @@ function MediaCard({ item, onClick }) {
   );
 }
 
-function MediaDrawer({ item, shelves, onClose }) {
+function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate }) {
+  const [editing, setEditing] = useState(false);
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
   const memberShelves = shelves.filter((shelf) => item.lists?.includes(shelf.shelf_id));
@@ -555,6 +569,7 @@ function MediaDrawer({ item, shelves, onClose }) {
               {item.year && <span className="drawer-year">{item.year}</span>}
             </div>
             <p className="creator">{item.director || item.creator}</p>
+            {canEdit && <Button className="drawer-edit-button" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>}
             <p className="drawer-description">{item.description || item.notes || 'No description has been added yet.'}</p>
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-lists public-shelf-list">
@@ -566,6 +581,10 @@ function MediaDrawer({ item, shelves, onClose }) {
           </div>
         </div>
       </aside>
+      {editing && <EditMediaDialog item={item} onClose={() => setEditing(false)} onSave={async (changes) => {
+        await onUpdate(changes);
+        setEditing(false);
+      }} />}
     </div>
   );
 }
@@ -657,4 +676,71 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut }) {
       </section>
     </div>
   );
+}
+
+
+function EditMediaDialog({ item, onClose, onSave }) {
+  const [form, setForm] = useState({
+    title: item.title || '', year: item.year ?? '', creator: item.creator || '', director: item.director || '',
+    description: item.description || '', notes: item.notes || '', poster_url: item.poster_url || '',
+    format: item.format || '', platforms: (item.platforms || []).join(', '), genres: (item.genres || []).join(', '),
+    runtime: item.runtime ?? '', rating: item.rating ?? '',
+  });
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const set = (name) => (event) => setForm((current) => ({ ...current, [name]: event.target.value }));
+  const optionalNumber = (value, { integer = false, min, max } = {}) => {
+    if (value === '') return null;
+    const number = Number(value);
+    if (!Number.isFinite(number) || (integer && !Number.isInteger(number)) || (min !== undefined && number < min) || (max !== undefined && number > max)) return undefined;
+    return number;
+  };
+  const list = (value) => [...new Set(value.split(',').map((part) => part.trim()).filter(Boolean))];
+
+  const submit = async (event) => {
+    event.preventDefault();
+    const year = optionalNumber(form.year, { integer: true, min: 1000, max: 3000 });
+    const runtime = optionalNumber(form.runtime, { integer: true, min: 1 });
+    const rating = optionalNumber(form.rating, { min: 0, max: 10 });
+    if (year === undefined || runtime === undefined || rating === undefined || !form.title.trim()) {
+      setError('Enter a title, a whole year from 1000–3000, a positive whole runtime, and a rating from 0–10.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave({
+        title: form.title.trim(), year, creator: form.creator.trim() || null, director: form.director.trim() || null,
+        description: form.description.trim() || null, notes: form.notes.trim() || null, poster_url: form.poster_url.trim() || null,
+        format: form.format.trim() || null, platforms: list(form.platforms), genres: list(form.genres), runtime, rating,
+      });
+    } catch {
+      setError('The details could not be saved. Nothing on the page was changed.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <div className="modal-layer editor-layer">
+    <form className="media-edit-dialog" onSubmit={submit}>
+      <button className="close" type="button" onClick={onClose} aria-label="Close editor"><X /></button>
+      <span className="eyebrow">MEDIA DETAILS</span><h2>Edit {cleanImportedMediaTitle(item.title)}</h2>
+      <div className="media-edit-grid">
+        <label>Title<input value={form.title} onChange={set('title')} required /></label>
+        <label>Year<input type="number" value={form.year} onChange={set('year')} /></label>
+        <label>Creator<input value={form.creator} onChange={set('creator')} /></label>
+        <label>Director<input value={form.director} onChange={set('director')} /></label>
+        <label>Format<input value={form.format} onChange={set('format')} /></label>
+        <label>Platforms (comma separated)<input value={form.platforms} onChange={set('platforms')} /></label>
+        <label>Genres (comma separated)<input value={form.genres} onChange={set('genres')} /></label>
+        <label>Runtime (minutes)<input type="number" value={form.runtime} onChange={set('runtime')} /></label>
+        <label>Rating (0–10)<input type="number" step="0.1" value={form.rating} onChange={set('rating')} /></label>
+        <label className="full">Poster URL<input type="url" value={form.poster_url} onChange={set('poster_url')} /></label>
+        <label className="full">Description<textarea value={form.description} onChange={set('description')} rows="4" /></label>
+        <label className="full">Notes<textarea value={form.notes} onChange={set('notes')} rows="3" /></label>
+      </div>
+      {error && <p className="auth-error">{error}</p>}
+      <Button type="submit" icon={Pencil} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>
+    </form>
+  </div>;
 }
