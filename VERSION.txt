@@ -1,0 +1,4 @@
+Kit's Media Room — GitHub Pages Edition v0.1
+Prepared 12 July 2026
+Data source: static media-only JSON export from the Local Media Room
+Runtime: read-only Vite/React static site

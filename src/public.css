@@ -1,0 +1,44 @@
+.public-media-shell .media-card {
+  cursor: pointer;
+}
+
+.public-media-command {
+  margin-bottom: 24px;
+}
+
+.public-actions {
+  min-height: 42px;
+}
+
+.public-actions .clear-media-filters {
+  margin-left: 0;
+}
+
+.public-shelf-list {
+  align-items: center;
+}
+
+.public-shelf-chip {
+  border: 1px solid #a5b19f;
+  background: #e5eadf;
+  padding: 8px 10px;
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 10px;
+}
+
+.public-shelf-list small {
+  color: #837a6f;
+  font-size: 10px;
+}
+
+.public-media-shell .empty-poster {
+  cursor: default;
+}
+
+@media (max-width: 760px) {
+  .public-media-shell .today {
+    display: none;
+  }
+}

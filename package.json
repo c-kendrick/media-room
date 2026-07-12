@@ -1,0 +1,24 @@
+{
+  "name": "kits-media-github-pages",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 4175 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --port 4176 --strictPort",
+    "import-local": "node scripts/export-from-local-media.mjs",
+    "inspect-data": "node scripts/inspect-public-data.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "vite": "latest"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "description": "Read-only GitHub Pages edition of Kit's Media Room."
+}
