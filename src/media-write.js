@@ -94,12 +94,33 @@ export function deleteShelf(accessToken, shelfId) {
     headers: { Authorization: 'Bearer ' + accessToken } });
 }
 
-export function reorderShelfMedia(accessToken, shelfId, orderedMediaIds) {
-  return supabaseRequest('/rest/v1/rpc/reorder_shelf_media', { method: 'POST', fresh: true, body: { target_shelf_id: shelfId, ordered_media_ids: orderedMediaIds }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+export async function reorderShelfMedia(accessToken, shelfId, orderedMediaIds) {
+  try {
+    return await supabaseRequest('/rest/v1/rpc/reorder_shelf_media', { method: 'POST', fresh: true, body: { target_shelf_id: shelfId, ordered_media_ids: orderedMediaIds }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+  } catch {
+    // Compatibility fallback for projects where the RPC has not reached the
+    // PostgREST schema cache yet. RLS still enforces shelf ownership.
+    for (let index = 0; index < orderedMediaIds.length; index += 1) {
+      await supabaseRequest('/rest/v1/shelf_media_items?shelf_id=eq.' + encodeURIComponent(shelfId) + '&media_item_id=eq.' + encodeURIComponent(orderedMediaIds[index]), {
+        method: 'PATCH', fresh: true, body: { position: (index + 1) * 1000 },
+        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      });
+    }
+  }
 }
 
-export function reorderShelves(accessToken, collectionId, section, orderedShelfIds) {
-  return supabaseRequest('/rest/v1/rpc/reorder_shelves', { method: 'POST', fresh: true, body: { target_collection_id: collectionId, target_section: section, ordered_shelf_ids: orderedShelfIds }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+export async function reorderShelves(accessToken, collectionId, section, orderedShelfIds) {
+  try {
+    return await supabaseRequest('/rest/v1/rpc/reorder_shelves', { method: 'POST', fresh: true, body: { target_collection_id: collectionId, target_section: section, ordered_shelf_ids: orderedShelfIds }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+  } catch {
+    // Same ownership-safe fallback as media ordering.
+    for (let index = 0; index < orderedShelfIds.length; index += 1) {
+      await supabaseRequest('/rest/v1/shelves?id=eq.' + encodeURIComponent(orderedShelfIds[index]) + '&collection_id=eq.' + encodeURIComponent(collectionId) + '&section=eq.' + encodeURIComponent(section), {
+        method: 'PATCH', fresh: true, body: { position: (index + 1) * 1000 },
+        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      });
+    }
+  }
 }
 
 export function setInterest(accessToken, userId, mediaItemId, enabled) {
