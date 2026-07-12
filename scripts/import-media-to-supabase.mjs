@@ -46,6 +46,28 @@ function shelfKey(shelf) {
   return shelf.section + ':' + shelf.name;
 }
 
+function validYear(value) {
+  const year = Number(value);
+  return Number.isInteger(year) && year >= 1000 && year <= 3000 ? year : null;
+}
+
+function validRating(value) {
+  const rating = Number(value);
+  return Number.isFinite(rating) && rating >= 0 && rating <= 10
+    ? Math.round(rating * 10) / 10
+    : null;
+}
+
+function validRuntime(value) {
+  const runtime = Number(value);
+  return Number.isInteger(runtime) && runtime > 0 ? runtime : null;
+}
+
+function validPosition(value) {
+  const position = Number(value);
+  return Number.isFinite(position) ? position : 0;
+}
+
 const snapshot = JSON.parse(await readFile(new URL('../public/media-data.json', import.meta.url), 'utf8'));
 
 const profiles = await request('GET', 'profiles', {
@@ -87,7 +109,7 @@ const shelfRows = snapshot.mediaShelves
     collection_id: collection.id,
     section: shelf.section,
     name: shelf.name,
-    position: Number(shelf.position || 0),
+    position: validPosition(shelf.position),
   }));
 
 for (const rows of chunk(shelfRows)) {
@@ -113,7 +135,7 @@ const mediaRows = snapshot.media
     legacy_id: item.item_id,
     type: item.type,
     title: item.title,
-    year: item.year,
+    year: validYear(item.year),
     status: item.status,
     priority: item.priority,
     notes: item.notes,
@@ -124,8 +146,8 @@ const mediaRows = snapshot.media
     format: item.format,
     platforms: item.platforms || [],
     genres: item.genres || [],
-    rating: item.rating,
-    runtime: item.runtime,
+    rating: validRating(item.rating),
+    runtime: validRuntime(item.runtime),
   }));
 
 for (const rows of chunk(mediaRows)) {
@@ -155,7 +177,7 @@ for (const item of snapshot.media.filter((entry) => !entry.deleted_at)) {
     membershipRows.push({
       shelf_id: shelfId,
       media_item_id: mediaItemId,
-      position: Number(item.list_positions?.[sourceShelfId] || 0),
+      position: validPosition(item.list_positions?.[sourceShelfId]),
     });
   }
 }
