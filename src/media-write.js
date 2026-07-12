@@ -125,7 +125,8 @@ export async function reorderShelves(accessToken, collectionId, section, ordered
 
 export function setInterest(accessToken, userId, mediaItemId, enabled) {
   if (!accessToken || !userId || !mediaItemId) throw new Error('An approved signed-in account is required.');
-  const path = '/rest/v1/media_interest?media_item_id=eq.' + encodeURIComponent(mediaItemId);
+  const path = '/rest/v1/media_interest?media_item_id=eq.' + encodeURIComponent(mediaItemId)
+    + '&user_id=eq.' + encodeURIComponent(userId);
   return enabled
     ? supabaseRequest('/rest/v1/media_interest', { method: 'POST', fresh: true, body: { media_item_id: mediaItemId, user_id: userId }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'resolution=ignore-duplicates' } })
     : supabaseRequest(path, { method: 'DELETE', fresh: true, headers: { Authorization: 'Bearer ' + accessToken } });
