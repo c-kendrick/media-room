@@ -57,6 +57,10 @@ function mapSnapshot(collection, shelves, mediaItems, memberships) {
   };
 }
 
+export async function loadPublicCollections({ fresh = false } = {}) {
+  return supabaseSelect(query('collections', { select: 'id,owner_id,title,slug', order: 'title.asc' }), { fresh });
+}
+
 export async function loadKitCollectionFromSupabase({ fresh = false } = {}) {
   const collections = await supabaseSelect(query('collections', {
     slug: 'eq.kits-collection',
