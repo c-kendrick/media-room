@@ -309,8 +309,8 @@ with check (
   exists (
     select 1
     from public.shelves
-    join public.media_items on media_items.id = shelf_media_items.media_item_id
-    where shelves.id = shelf_media_items.shelf_id
+    join public.media_items on media_items.id = media_item_id
+    where shelves.id = shelf_id
       and shelves.collection_id = media_items.collection_id
       and public.can_manage_collection(shelves.collection_id)
   )
@@ -322,7 +322,7 @@ using (
   exists (
     select 1
     from public.shelves
-    where shelves.id = shelf_media_items.shelf_id
+    where shelves.id = shelf_id
       and public.can_manage_collection(shelves.collection_id)
   )
 )
@@ -330,8 +330,8 @@ with check (
   exists (
     select 1
     from public.shelves
-    join public.media_items on media_items.id = shelf_media_items.media_item_id
-    where shelves.id = shelf_media_items.shelf_id
+    join public.media_items on media_items.id = media_item_id
+    where shelves.id = shelf_id
       and shelves.collection_id = media_items.collection_id
       and public.can_manage_collection(shelves.collection_id)
   )
@@ -343,7 +343,7 @@ using (
   exists (
     select 1
     from public.shelves
-    where shelves.id = shelf_media_items.shelf_id
+    where shelves.id = shelf_id
       and public.can_manage_collection(shelves.collection_id)
   )
 );
