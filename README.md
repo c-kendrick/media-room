@@ -1,12 +1,12 @@
-# Kitâ€™s Media Room â€” GitHub Pages Edition
+# Kit’s Media Room — GitHub Pages Edition
 
-This is the **GitHub Pages version** of Kitâ€™s Media Room.
+This is the **GitHub Pages version** of Kit’s Media Room.
 
 It is a separate project from the editable **Local Media Room**:
 
 - **Local Media Room**: the editable app backed by `data/media.db`.
 - **GitHub Pages version**: the public, read-only site backed by `public/media-data.json`.
-- This folder is the local working copy of the GitHub Pages version, but it should still be called the **GitHub Pages version**, not â€œlocalâ€.
+- This folder is the local working copy of the GitHub Pages version, but it should still be called the **GitHub Pages version**, not “local”.
 
 No Second Brain notes, projects, university records, fitness data, database file, API keys, or server code are included in the public dataset.
 
@@ -135,4 +135,3 @@ The production files are generated in `dist`.
 Never copy `media.db`, `second-brain.db`, `.env`, TMDB keys, SteamGridDB keys, or other secrets into this repository. The included `.gitignore` excludes common local build files, but always review the files before publishing.
 
 See `docs/DATA-WORKFLOW.md` for the data flow and `docs/GITHUB-PAGES-SETUP.md` for the later deployment process.
-

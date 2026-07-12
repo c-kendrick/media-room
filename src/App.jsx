@@ -267,7 +267,7 @@ export default function App() {
   }, [toast]);
 
   if (loading) {
-    return <div className="loading-screen"><div className="brand-mark">KM</div><p>Opening Kitâ€™s Media Roomâ€¦</p></div>;
+    return <div className="loading-screen"><div className="brand-mark">KM</div><p>Opening Kit’s Media Room…</p></div>;
   }
 
   if (!data) {
@@ -293,24 +293,24 @@ export default function App() {
       <aside className={cls('sidebar', mobileNav && 'open')}>
         <button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
           <span className="brand-mark">KM</span>
-          <span><strong>Kitâ€™s Media<br />Room</strong><small>A LIVING LIBRARY</small></span>
+          <span><strong>Kit’s Media<br />Room</strong><small>A LIVING LIBRARY</small></span>
         </button>
         <nav>
           <button className="active" onClick={() => { setMobileNav(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
             <Clapperboard size={17} />Media
           </button>
           <small className="collection-nav-label">COLLECTIONS</small>
-          {collections.map((collection) => <button key={collection.id} className={collection.id === data?.collectionId ? 'active' : ''} onClick={() => { setCollectionId(collection.id); setMobileNav(false); }}>
+          {data?.storage === 'supabase' && collections.map((collection) => <button key={collection.id} className={collection.id === data?.collectionId ? 'active' : ''} onClick={() => { setCollectionId(collection.id); setMobileNav(false); }}>
             <UserRound size={17} />{collection.title}
           </button>)}
         </nav>
         <div className="sidebar-bottom">
-          <blockquote>â€œScreen, shelf & story.â€</blockquote>
+          <blockquote>“Screen, shelf & story.”</blockquote>
           <button className="drive-state" onClick={() => refresh({ fresh: true, notify: true })}>
             <Cloud size={16} />
             <span>
               <strong>Public collection</strong>
-              <small>{refreshing ? 'Refreshingâ€¦' : generatedAt ? `Published ${generatedAt.toLocaleDateString('en-AU')}` : 'Static snapshot'}</small>
+              <small>{refreshing ? 'Refreshing…' : generatedAt ? `Published ${generatedAt.toLocaleDateString('en-AU')}` : 'Static snapshot'}</small>
             </span>
           </button>
         </div>
@@ -322,11 +322,11 @@ export default function App() {
         <header className="topbar">
           <button className="mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button>
           <button className="search-trigger" onClick={() => setSearchOpen(true)}>
-            <Search size={17} /><span>Search the collectionâ€¦</span><kbd><Command size={12} />K</kbd>
+            <Search size={17} /><span>Search the collection…</span><kbd><Command size={12} />K</kbd>
           </button>
           <div className="top-actions">
             <span className="today"><CalendarDays size={14} />{new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}</span>
-            {authLoading ? <span className="account-state">Checking accountâ€¦</span> : (
+            {authLoading ? <span className="account-state">Checking account…</span> : (
               <Button className="account-button" icon={account ? UserRound : LogIn} onClick={() => setAccountOpen(true)}>
                 {account?.profile?.display_name || account?.profile?.username || 'Sign in'}
               </Button>
@@ -342,7 +342,7 @@ export default function App() {
         <main>
           <MediaView data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} accessToken={account?.session?.access_token} refresh={refresh} onExport={() => exportCollection(data)} />
         </main>
-        <footer>Published from Kitâ€™s Local Media Room.</footer>
+        <footer>Published from Kit’s Local Media Room.</footer>
       </div>
 
       {selectedMedia && (
@@ -472,7 +472,7 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
       <PageHero
         eyebrow="SCREEN, SHELF & STORY"
         title="The media room"
-        description="Kitâ€™s full watchlist, physical collection, books and games, built to browse, not merely store."
+        description="Kit’s full watchlist, physical collection, books and games, built to browse, not merely store."
         icon={Clapperboard}
         stats={[
           [items.filter((item) => ['watchlist', 'reading_list'].some((list) => item.lists?.includes(list))).length, 'to watch/read'],
@@ -488,7 +488,7 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
         </div>
 
         <div className={cls('media-filters', section === 'screen' && 'has-type')}>
-          <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}â€¦`} /></label>
+          <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}…`} /></label>
           <MultiSelect label="All lists" values={listFilters} options={shelves.map((shelf) => [shelf.shelf_id, shelf.name])} onChange={setListFilters} />
           {section === 'screen' && <MultiSelect label="Film & TV" values={typeFilters} options={sectionTypes} onChange={setTypeFilters} />}
           <MultiSelect label={section === 'game' ? 'All platforms' : 'All formats'} values={formatFilters} options={formats.map((value) => [value, value])} onChange={setFormatFilters} />
@@ -572,7 +572,7 @@ function MediaCard({ item, onClick, draggable, dragging, onDragStart, onDragEnd,
             {tags.map((tag) => <span className={cls('media-format-tag', mediaTagTone(tag, item.type === 'game'))} key={tag}>{tag}</span>)}
           </span>
         )}
-        {tags.length > 0 && item.year && <span className="media-meta-dash">â€”</span>}
+        {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
         {item.year && <span className="media-year">{item.year}</span>}
       </span>
     </button>
@@ -600,7 +600,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
               : <div className="poster-fallback"><Clapperboard /><span>{title}</span></div>}
           </div>
           <div className="drawer-copy">
-            <span className="eyebrow">{item.type}{item.runtime ? ` Â· ${item.runtime} min` : ''}</span>
+            <span className="eyebrow">{item.type}{item.runtime ? ` · ${item.runtime} min` : ''}</span>
             <h1>{title}</h1>
             <div className="drawer-meta-tags">
               {tags.length > 0 && (
@@ -608,9 +608,9 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
                   {tags.map((tag) => <span className={cls('drawer-format-tag', mediaTagTone(tag, item.type === 'game'))} key={tag}>{tag}</span>)}
                 </span>
               )}
-              {tags.length > 0 && item.year && <span className="media-meta-dash">â€”</span>}
+              {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
               {item.year && <span className="drawer-year">{item.year}</span>}
-              {item.interests?.map((person) => <span className="interest-initial" title={person.display_name} key={person.username}>â€” {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
+              {item.interests?.map((person) => <span className="interest-initial" title={person.display_name} key={person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
             </div>
             <p className="creator">{item.director || item.creator}</p>
             {canEdit && <div className="drawer-owner-actions">
@@ -645,7 +645,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
           try { await onUpdateShelves(item.lists || [], selectedShelves); setEditingShelves(false); }
           catch { setShelfError('The shelf membership could not be saved. Existing shelves were left in place.'); }
           finally { setSavingShelves(false); }
-        }}>{savingShelves ? 'Savingâ€¦' : 'Save shelves'}</Button>
+        }}>{savingShelves ? 'Saving…' : 'Save shelves'}</Button>
       </section></div>}
       {editing && <EditMediaDialog item={item} onClose={() => setEditing(false)} onSave={async (changes) => {
         await onUpdate(changes);
@@ -666,7 +666,7 @@ function SearchModal({ data, query, setQuery, onClose, onOpen }) {
       <div className="search-modal">
         <div className="search-box">
           <Search />
-          <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search films, television, books and video gamesâ€¦" />
+          <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search films, television, books and video games…" />
           <button onClick={onClose}><X /></button>
         </div>
         <div className="search-results">
@@ -751,7 +751,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
               <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} required /></label>
               {registering && <p>Use a recognisable real name for this private group, and do not reuse an important password.</p>}
               {error && <p className="auth-error">{error}</p>}
-              <Button type="submit" icon={LogIn} disabled={submitting}>{submitting ? 'Workingâ€¦' : registering ? 'Create account' : 'Sign in'}</Button>
+              <Button type="submit" icon={LogIn} disabled={submitting}>{submitting ? 'Working…' : registering ? 'Create account' : 'Sign in'}</Button>
               <button className="auth-switch" type="button" onClick={() => { setRegistering(!registering); setError(''); }}>{registering ? 'I already have an account' : 'Create an account'}</button>
             </form>
           </>
@@ -767,7 +767,7 @@ function AddMediaDialog({ section, shelves, onClose, onSave }) {
   return <div className="modal-layer editor-layer"><form className="media-edit-dialog" onSubmit={async (event) => { event.preventDefault(); if (!title.trim()) return; setSaving(true); setError(''); try { await onSave({ title: title.trim(), type, year: year ? Number(year) : null, platforms: [], genres: [] }, shelfIds); } catch { setError('The media item could not be saved. Check the fields and try again.'); setSaving(false); } }}>
     <button className="close" type="button" onClick={onClose}><X /></button><span className="eyebrow">NEW MEDIA</span><h2>Add media</h2>
     <div className="media-edit-grid"><label>Title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} required /></label><label>Type<select value={type} onChange={(event) => setType(event.target.value)}>{section === 'screen' ? <><option value="film">Film</option><option value="television">Television</option></> : <option value={section}>{section === 'book' ? 'Book' : 'Video game'}</option>}</select></label><label>Year<input type="number" min="1000" max="3000" value={year} onChange={(event) => setYear(event.target.value)} /></label><div className="full shelf-membership-options"><span>Shelves</span>{shelves.map((shelf) => <label key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} />{shelf.name}</label>)}</div></div>
-    {error && <p className="auth-error">{error}</p>}<Button type="submit" disabled={saving}>{saving ? 'Addingâ€¦' : 'Add media'}</Button>
+    {error && <p className="auth-error">{error}</p>}<Button type="submit" disabled={saving}>{saving ? 'Adding…' : 'Add media'}</Button>
   </form></div>;
 }
 
@@ -795,7 +795,7 @@ function EditMediaDialog({ item, onClose, onSave }) {
     const runtime = optionalNumber(form.runtime, { integer: true, min: 1 });
     const rating = optionalNumber(form.rating, { min: 0, max: 10 });
     if (year === undefined || runtime === undefined || rating === undefined || !form.title.trim()) {
-      setError('Enter a title, a whole year from 1000â€“3000, a positive whole runtime, and a rating from 0â€“10.');
+      setError('Enter a title, a whole year from 1000–3000, a positive whole runtime, and a rating from 0–10.');
       return;
     }
     setSaving(true);
@@ -826,13 +826,13 @@ function EditMediaDialog({ item, onClose, onSave }) {
         <label>Platforms (comma separated)<input value={form.platforms} onChange={set('platforms')} /></label>
         <label>Genres (comma separated)<input value={form.genres} onChange={set('genres')} /></label>
         <label>Runtime (minutes)<input type="number" value={form.runtime} onChange={set('runtime')} /></label>
-        <label>Rating (0â€“10)<input type="number" step="0.1" value={form.rating} onChange={set('rating')} /></label>
+        <label>Rating (0–10)<input type="number" step="0.1" value={form.rating} onChange={set('rating')} /></label>
         <label className="full">Poster URL<input type="url" value={form.poster_url} onChange={set('poster_url')} /></label>
         <label className="full">Description<textarea value={form.description} onChange={set('description')} rows="4" /></label>
         <label className="full">Notes<textarea value={form.notes} onChange={set('notes')} rows="3" /></label>
       </div>
       {error && <p className="auth-error">{error}</p>}
-      <Button type="submit" icon={Pencil} disabled={saving}>{saving ? 'Savingâ€¦' : 'Save changes'}</Button>
+      <Button type="submit" icon={Pencil} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>
     </form>
   </div>;
 }
@@ -844,4 +844,3 @@ function AdminUsers({ accessToken, onClose }) {
  const act=async(type,id)=>{setBusy(id);setError('');try{await (type==='approve'?approveProfile:rejectProfile)(accessToken,id);await load();}catch{setError('That user could not be updated.');}finally{setBusy('');}};
  return <div className="modal-layer"><section className="media-edit-dialog"><button className="close" onClick={onClose}><X/></button><span className="eyebrow">ADMIN</span><h2>User Management</h2>{error&&<p className="auth-error">{error}</p>}<div className="user-list">{users.map(u=><div className="user-row" key={u.id}><span><b>{u.display_name}</b><small>@{u.username}</small></span><span>{u.approved_at?'Approved':u.rejected_at?'Rejected':'Pending'}</span>{!u.approved_at&&!u.rejected_at&&<Button disabled={busy===u.id} onClick={()=>act('approve',u.id)}>Approve</Button>}{!u.approved_at&&!u.rejected_at&&<Button disabled={busy===u.id} onClick={()=>act('reject',u.id)}>Reject</Button>}</div>)}</div></section></div>;
 }
-
