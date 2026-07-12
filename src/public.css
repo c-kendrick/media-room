@@ -144,6 +144,7 @@
 .shelf-head>div:last-child{align-items:center}
 .shelf-head>div:last-child>button:not(.button){width:30px!important;height:30px!important;background:transparent!important;border-color:transparent!important;color:#82786d}
 .shelf-head>div:last-child>button:not(.button):hover{background:#eee4d7!important;color:#2d2924}
+.shelf-head>div:last-child>button:disabled{opacity:.2!important;cursor:not-allowed!important;background:transparent!important}
 .shelf-add-button{min-height:32px!important;padding:0 11px!important;border-radius:999px;background:#2f2b26!important;border-color:#2f2b26!important;color:#fff;box-shadow:none!important;font-size:10px!important}
 .shelf-add-button:hover{background:#4a433b!important}
 .delete-shelf{opacity:.55}
@@ -152,6 +153,21 @@
 .media-card[draggable="true"]:active{cursor:grabbing}
 .media-card.is-dragging{opacity:.35;transform:scale(.98)}
 .media-card.drag-over::before{border-radius:999px}
+.arrange-button{margin-left:3px!important}
+
+.arrange-dialog{width:min(680px,calc(100vw - 32px))!important;display:flex;flex-direction:column}
+.arrange-dialog h2{margin-bottom:4px!important}
+.arrange-list{list-style:none;margin:5px 0 0;padding:0;border-top:1px solid var(--line);overflow:auto;min-height:120px;max-height:min(56vh,620px)}
+.arrange-list li{display:grid;grid-template-columns:26px 34px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:48px;padding:6px 4px;border-bottom:1px solid #e6dccf}
+.arrange-list li:hover{background:rgba(239,230,218,.55)}
+.arrange-position{color:#a3988c;font-size:9px;text-align:center;font-variant-numeric:tabular-nums}
+.arrange-list img,.arrange-poster-fallback{width:30px;height:40px;object-fit:cover;border:1px solid #d4c8b9;background:#eee4d7}
+.arrange-poster-fallback{display:grid;place-items:center;color:#897f73}
+.arrange-list strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--serif);font-size:12px}
+.arrange-row-actions{display:flex;gap:2px}
+.arrange-row-actions button{width:28px;height:28px;border:0;border-radius:4px;background:transparent;color:#756b61;display:grid;place-items:center;cursor:pointer}
+.arrange-row-actions button:hover:not(:disabled){background:#e8ddd0;color:#27231f}
+.arrange-row-actions button:disabled{opacity:.2;cursor:not-allowed}
 
 .drawer-owner-actions{margin:16px 0 12px;gap:6px}
 .drawer-owner-actions .button{min-height:34px;border-radius:999px;background:transparent;box-shadow:none;font-size:10px}
@@ -191,6 +207,9 @@
   .shelf-add-button{font-size:0!important}.shelf-add-button svg{margin:0}
   .media-edit-dialog{padding:26px 20px!important}
   .drawer-danger-zone{flex-wrap:wrap}.drawer-danger-zone .permanent-delete{margin-left:0}
+  .arrange-list li{grid-template-columns:22px 30px minmax(0,1fr) auto;gap:7px}
+  .arrange-list img,.arrange-poster-fallback{width:27px;height:36px}
+  .arrange-row-actions button{width:25px;height:27px}
 }
 
 /* Refined navigation, discovery controls, and modal spacing -------------- */
