@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ArrowDown,
+  ArrowUp,
   BookOpen,
   CalendarDays,
   Check,
@@ -12,6 +14,7 @@ import {
   Download,
   Gamepad2,
   GripVertical,
+  ListOrdered,
   LogIn,
   LogOut,
   Menu,
@@ -23,6 +26,8 @@ import {
   SlidersHorizontal,
   Trophy,
   Trash2,
+  ChevronsDown,
+  ChevronsUp,
   UserRound,
   X,
 } from 'lucide-react';
@@ -477,6 +482,19 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
     setTypeFilters([]);
   };
 
+  const saveShelfOrder = async (ordered, previous) => {
+    setOptimisticShelfIds(ordered);
+    try {
+      await reorderShelves(accessToken, data.collectionId, section, ordered);
+      await refresh({ fresh: true });
+      notify('Shelf order saved.');
+    } catch {
+      setOptimisticShelfIds(previous);
+      notify('Shelf order could not be saved.');
+      throw new Error('Shelf order could not be saved.');
+    }
+  };
+
   return (
     <div className="page media-page">
       <PageHero
@@ -521,7 +539,7 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
             data.media,
           );
           if (!shelfItems.length && queryLower) return null;
-          return <MediaShelf key={shelf.shelf_id} shelf={shelf} items={shelfItems} onOpen={openMedia} canEdit={canEdit} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setOptimisticShelfIds(ordered); setDraggedShelfId(null); try { await reorderShelves(accessToken, data.collectionId, section, ordered); notify('Shelf order saved.'); } catch { setOptimisticShelfIds(previous); notify('Shelf order could not be saved.'); } }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} />;
+          return <MediaShelf key={shelf.shelf_id} shelf={shelf} items={shelfItems} onOpen={openMedia} canEdit={canEdit} canMoveUp={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < shelves.length - 1} onMoveShelf={async (direction) => { const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(shelf.shelf_id); const to = from + direction; if (to < 0 || to >= ordered.length) return; [ordered[from], ordered[to]] = [ordered[to], ordered[from]]; await saveShelfOrder(ordered, previous); }} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setDraggedShelfId(null); try { await saveShelfOrder(ordered, previous); } catch {} }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} />;
         })}
       </div>
 
@@ -532,11 +550,13 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
   );
 }
 
-function MediaShelf({ shelf, items, onOpen, canEdit, onAdd, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
+function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onMoveShelf, onAdd, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
   const trackRef = useRef(null);
   const [draggedId, setDraggedId] = useState(null);
   const [displayItems, setDisplayItems] = useState(items);
-  useEffect(() => { setDisplayItems(items); }, [items]);
+  const [arranging, setArranging] = useState(false);
+  const serverOrderKey = items.map((item) => `${item.database_id}:${item.list_positions?.[shelf.shelf_id] ?? ''}`).join('|');
+  useEffect(() => { setDisplayItems(items); }, [serverOrderKey]);
   const pages = chunk(displayItems, 14);
   const scrollPage = (direction) => {
     const track = trackRef.current;
@@ -553,6 +573,9 @@ function MediaShelf({ shelf, items, onOpen, canEdit, onAdd, shelfDragging, onShe
         </div>
         <div>
           {canEdit && <Button className="shelf-add-button" icon={Plus} onClick={onAdd}>Add item</Button>}
+          {canEdit && items.length > 1 && <button className="arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /></button>}
+          {canEdit && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => onMoveShelf(-1)}><ArrowUp size={15} /></button>}
+          {canEdit && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => onMoveShelf(1)}><ArrowDown size={15} /></button>}
           {canEdit && <button aria-label={`Rename ${shelf.name}`} onClick={onRename}><Pencil size={15} /></button>}
           {canEdit && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} onClick={onDelete}><X size={15} /></button>}
           <button aria-label={`Scroll ${shelf.name} left`} onClick={() => scrollPage(-1)}><ChevronLeft /></button>
@@ -567,8 +590,39 @@ function MediaShelf({ shelf, items, onOpen, canEdit, onAdd, shelfDragging, onShe
         ))}
         {!displayItems.length && <div className="empty-poster">No items on this shelf yet.</div>}
       </div>
+      {arranging && <ArrangeShelfDialog shelf={shelf} items={displayItems} onClose={() => setArranging(false)} onSave={async (nextItems) => { const previous = [...displayItems]; setDisplayItems(nextItems); setArranging(false); try { await onReorder(nextItems.map((item) => item.database_id)); } catch { setDisplayItems(previous); } }} />}
     </section>
   );
+}
+
+function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
+  const [ordered, setOrdered] = useState(items);
+  const [saving, setSaving] = useState(false);
+  const move = (index, destination) => {
+    if (destination < 0 || destination >= ordered.length || destination === index) return;
+    setOrdered((current) => {
+      const next = [...current];
+      next.splice(destination, 0, next.splice(index, 1)[0]);
+      return next;
+    });
+  };
+  return <div className="modal-layer editor-layer"><section className="media-edit-dialog arrange-dialog">
+    <button className="close" type="button" onClick={onClose} aria-label="Close arranger"><X /></button>
+    <span className="eyebrow">ARRANGE SHELF</span><h2>{shelf.name}</h2>
+    <p className="dialog-intro">Move anything directly, then save once. This is easier for long shelves than dragging across the screen.</p>
+    <ol className="arrange-list">{ordered.map((item, index) => <li key={item.database_id}>
+      <span className="arrange-position">{index + 1}</span>
+      {item.poster_url ? <img src={item.poster_url} alt="" /> : <span className="arrange-poster-fallback"><Clapperboard size={13} /></span>}
+      <strong>{cleanImportedMediaTitle(item.title)}</strong>
+      <div className="arrange-row-actions">
+        <button disabled={index === 0} onClick={() => move(index, 0)} title="Move to top" aria-label={`Move ${item.title} to top`}><ChevronsUp size={14} /></button>
+        <button disabled={index === 0} onClick={() => move(index, index - 1)} title="Move up" aria-label={`Move ${item.title} up`}><ArrowUp size={14} /></button>
+        <button disabled={index === ordered.length - 1} onClick={() => move(index, index + 1)} title="Move down" aria-label={`Move ${item.title} down`}><ArrowDown size={14} /></button>
+        <button disabled={index === ordered.length - 1} onClick={() => move(index, ordered.length - 1)} title="Move to end" aria-label={`Move ${item.title} to end`}><ChevronsDown size={14} /></button>
+      </div>
+    </li>)}</ol>
+    <div className="dialog-actions"><button className="text-button" onClick={onClose}>Cancel</button><Button disabled={saving} onClick={async () => { setSaving(true); try { await onSave(ordered); } finally { setSaving(false); } }}>{saving ? 'Saving…' : 'Save order'}</Button></div>
+  </section></div>;
 }
 
 function MediaCard({ item, onClick, draggable, dragging, onDragStart, onDragEnd, onDrop }) {
