@@ -23,7 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
-import { loadAuthenticatedAccount, signInWithPassword, signOut } from './auth.js';
+import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
 import { replaceMediaShelfMemberships, updateMediaItem } from './media-write.js';
 
 function cls(...values) {
@@ -652,6 +652,9 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [registering, setRegistering] = useState(false);
+  const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
 
   const submit = async (event) => {
@@ -665,6 +668,17 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut }) {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const register = async (event) => {
+    event.preventDefault();
+    setSubmitting(true); setError('');
+    try {
+      const result = await registerWithPassword({ email: email.trim(), password, username: username.trim().toLowerCase(), displayName: displayName.trim() });
+      if (result.session) onSignedIn(await loadAuthenticatedAccount());
+      else { setRegistering(false); setPassword(''); setError('Registration received. Check your email if Supabase asks you to confirm it, then wait for approval.'); }
+    } catch { setError('We could not create that account. Try a different email or username.'); }
+    finally { setSubmitting(false); }
   };
 
   const leave = async () => {
@@ -693,11 +707,14 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut }) {
             <span className="eyebrow">ACCOUNT</span>
             <h2>Sign in</h2>
             <p>Use your Media Room email and password.</p>
-            <form onSubmit={submit}>
+            <form onSubmit={registering ? register : submit}>
+              {registering && <><label>Recognisable name<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} pattern="[a-z0-9_-]{3,32}" required /></label></>}
               <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
-              <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>
+              <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} required /></label>
+              {registering && <p>Use a recognisable real name for this private group, and do not reuse an important password.</p>}
               {error && <p className="auth-error">{error}</p>}
-              <Button type="submit" icon={LogIn} disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in'}</Button>
+              <Button type="submit" icon={LogIn} disabled={submitting}>{submitting ? 'Working…' : registering ? 'Create account' : 'Sign in'}</Button>
+              <button className="auth-switch" type="button" onClick={() => { setRegistering(!registering); setError(''); }}>{registering ? 'I already have an account' : 'Create an account'}</button>
             </form>
           </>
         )}
