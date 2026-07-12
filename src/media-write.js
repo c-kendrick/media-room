@@ -39,12 +39,22 @@ export async function replaceMediaShelfMemberships(accessToken, databaseId, curr
     });
   }
 
-  // Remove only memberships that were explicitly deselected.
-  for (const shelfId of removals) {
-    await supabaseRequest('/rest/v1/shelf_media_items?media_item_id=eq.' + encodeURIComponent(databaseId) + '&shelf_id=eq.' + encodeURIComponent(shelfId), {
+  // Remove only memberships that were explicitly deselected. If a removal
+  // fails, undo newly-created memberships so the visible state stays truthful.
+  try {
+    for (const shelfId of removals) {
+      await supabaseRequest('/rest/v1/shelf_media_items?media_item_id=eq.' + encodeURIComponent(databaseId) + '&shelf_id=eq.' + encodeURIComponent(shelfId), {
+        method: 'DELETE',
+        fresh: true,
+        headers,
+      });
+    }
+  } catch (error) {
+    await Promise.all(additions.map((shelfId) => supabaseRequest('/rest/v1/shelf_media_items?media_item_id=eq.' + encodeURIComponent(databaseId) + '&shelf_id=eq.' + encodeURIComponent(shelfId), {
       method: 'DELETE',
       fresh: true,
       headers,
-    });
+    }).catch(() => null)));
+    throw error;
   }
 }
