@@ -115,3 +115,5 @@
 .shelf-membership-dialog { width:min(470px,calc(100vw - 32px)); }
 .shelf-membership-options { display:grid; gap:8px; margin:18px 0; }
 .shelf-membership-options label { display:flex; align-items:center; gap:8px; color:#51473d; font-size:13px; }
+
+.auth-switch { border: 0; background: transparent; color: #6b4333; padding: 3px 0; text-align:left; text-decoration: underline; font: inherit; font-size:12px; cursor:pointer; }
