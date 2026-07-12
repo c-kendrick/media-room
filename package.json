@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --port 4176 --strictPort",
     "import-local": "node scripts/export-from-local-media.mjs",
-    "inspect-data": "node scripts/inspect-public-data.mjs"
+    "inspect-data": "node scripts/inspect-public-data.mjs",
+    "import-supabase": "node scripts/import-media-to-supabase.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
