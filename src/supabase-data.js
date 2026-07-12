@@ -18,6 +18,7 @@ function mapSnapshot(collection, shelves, mediaItems, memberships) {
     storage: 'supabase',
     schemaVersion: 2,
     collectionId: collection.id,
+    ownerId: collection.owner_id,
     collectionTitle: collection.title,
     mediaShelves: shelves.map((shelf) => ({
       shelf_id: shelf.id,
@@ -30,6 +31,7 @@ function mapSnapshot(collection, shelves, mediaItems, memberships) {
       const membership = membershipsByItem.get(item.id) || [];
       return {
         item_id: item.legacy_id || item.id,
+        database_id: item.id,
         title: item.title,
         type: item.type,
         year: item.year,
@@ -58,7 +60,7 @@ function mapSnapshot(collection, shelves, mediaItems, memberships) {
 export async function loadKitCollectionFromSupabase({ fresh = false } = {}) {
   const collections = await supabaseSelect(query('collections', {
     slug: 'eq.kits-collection',
-    select: 'id,title,updated_at',
+    select: 'id,owner_id,title,updated_at',
     limit: '1',
   }), { fresh });
 
