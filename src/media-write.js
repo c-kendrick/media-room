@@ -73,3 +73,39 @@ export function permanentlyDeleteMedia(accessToken, databaseId) {
     headers: { Authorization: 'Bearer ' + accessToken },
   });
 }
+
+export function createMediaItem(accessToken, item) {
+  return supabaseRequest('/rest/v1/media_items', { method: 'POST', fresh: true, body: item,
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'return=representation' } });
+}
+
+export function createShelf(accessToken, shelf) {
+  return supabaseRequest('/rest/v1/shelves', { method: 'POST', fresh: true, body: shelf,
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'return=representation' } });
+}
+
+export function updateShelf(accessToken, shelfId, changes) {
+  return supabaseRequest('/rest/v1/shelves?id=eq.' + encodeURIComponent(shelfId), { method: 'PATCH', fresh: true, body: changes,
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'return=representation' } });
+}
+
+export function deleteShelf(accessToken, shelfId) {
+  return supabaseRequest('/rest/v1/shelves?id=eq.' + encodeURIComponent(shelfId), { method: 'DELETE', fresh: true,
+    headers: { Authorization: 'Bearer ' + accessToken } });
+}
+
+export function reorderShelfMedia(accessToken, shelfId, orderedMediaIds) {
+  return supabaseRequest('/rest/v1/rpc/reorder_shelf_media', { method: 'POST', fresh: true, body: { target_shelf_id: shelfId, ordered_media_ids: orderedMediaIds }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+}
+
+export function reorderShelves(accessToken, collectionId, section, orderedShelfIds) {
+  return supabaseRequest('/rest/v1/rpc/reorder_shelves', { method: 'POST', fresh: true, body: { target_collection_id: collectionId, target_section: section, ordered_shelf_ids: orderedShelfIds }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+}
+
+export function setInterest(accessToken, mediaItemId, enabled) {
+  const path = '/rest/v1/media_interest?media_item_id=eq.' + encodeURIComponent(mediaItemId);
+  return enabled
+    ? supabaseRequest('/rest/v1/media_interest', { method: 'POST', fresh: true, body: { media_item_id: mediaItemId }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'resolution=ignore-duplicates' } })
+    : supabaseRequest(path, { method: 'DELETE', fresh: true, headers: { Authorization: 'Bearer ' + accessToken } });
+}
+
