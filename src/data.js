@@ -1,4 +1,4 @@
-import { loadCollectionFromSupabase } from './supabase-data.js';
+import { loadCollectionFromSupabase, loadMainWatchlistFromSupabase } from './supabase-data.js';
 
 async function loadStaticSnapshot({ fresh = false } = {}) {
   const relative = `${import.meta.env.BASE_URL}media-data.json`;
@@ -20,7 +20,9 @@ function assertSnapshot(data) {
 
 export async function loadMediaSnapshot({ fresh = false, collectionId } = {}) {
   try {
-    const supabaseSnapshot = await loadCollectionFromSupabase({ fresh, collectionId });
+    const supabaseSnapshot = collectionId === 'main-watchlist'
+      ? await loadMainWatchlistFromSupabase({ fresh })
+      : await loadCollectionFromSupabase({ fresh, collectionId });
     if (supabaseSnapshot) return assertSnapshot(supabaseSnapshot);
   } catch (error) {
     // The static export keeps the public site available until the one-time

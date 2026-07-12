@@ -26,6 +26,7 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
       section: shelf.section,
       position: shelf.position,
       deleted_at: shelf.deleted_at || null,
+      required: shelf.section === 'screen' && shelf.name.trim().toLowerCase() === 'watchlist',
     })),
     media: mediaItems.map((item) => {
       const membership = membershipsByItem.get(item.id) || [];
@@ -103,6 +104,52 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
   }), { fresh }) : [];
   const publicProfiles = interests.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh }) : [];
   return mapSnapshot(collection, shelves, mediaItems, memberships, interests, publicProfiles);
+}
+
+export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
+  const collections = await loadPublicCollections({ fresh });
+  if (!collections.length) return null;
+
+  const collectionIds = collections.map((collection) => collection.id);
+  const shelves = await supabaseSelect(query('shelves', {
+    collection_id: 'in.(' + collectionIds.join(',') + ')',
+    section: 'eq.screen',
+    name: 'eq.Watchlist',
+    deleted_at: 'is.null',
+    select: 'id,collection_id,section,name,position,deleted_at',
+  }), { fresh });
+  const shelfIds = shelves.map((shelf) => shelf.id);
+  const memberships = shelfIds.length ? await supabaseSelect(query('shelf_media_items', {
+    shelf_id: 'in.(' + shelfIds.join(',') + ')',
+    select: 'shelf_id,media_item_id,position',
+    order: 'position.asc',
+  }), { fresh }) : [];
+  const mediaIds = memberships.map((membership) => membership.media_item_id);
+  const mediaItems = mediaIds.length ? await supabaseSelect(query('media_items', {
+    id: 'in.(' + mediaIds.join(',') + ')',
+    deleted_at: 'is.null',
+    select: 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,runtime,deleted_at,created_at,updated_at,external_ids',
+    order: 'created_at.asc',
+  }), { fresh }) : [];
+  const interests = mediaItems.length ? await supabaseSelect(query('media_interest', {
+    select: 'media_item_id,user_id',
+  }), { fresh }) : [];
+  const publicProfiles = interests.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh }) : [];
+  const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
+  const collectionOrder = new Map(collections.map((collection, index) => [collection.id, index]));
+  const snapshot = mapSnapshot(
+    { id: 'main-watchlist', owner_id: null, title: 'Main Watchlist', updated_at: new Date().toISOString() },
+    [...shelves].sort((a, b) => collectionOrder.get(a.collection_id) - collectionOrder.get(b.collection_id)).map((shelf) => {
+      const collection = collectionById.get(shelf.collection_id);
+      const ownerName = collection?.title?.replace(/[’']s Collection$/i, '') || 'Member';
+      return { ...shelf, name: ownerName + '’s Watchlist' };
+    }),
+    mediaItems,
+    memberships,
+    interests,
+    publicProfiles,
+  );
+  return { ...snapshot, mainWatchlist: true };
 }
 
 export const loadKitCollectionFromSupabase = (options) => loadCollectionFromSupabase(options);
