@@ -287,7 +287,7 @@ export default function App() {
   const canEditCollection = Boolean(
     account?.profile?.approved_at
     && data.ownerId
-    && (account.profile.id === data.ownerId || account.profile.role === 'admin'),
+    && account.profile.id === data.ownerId,
   );
   const generatedAt = data.generatedAt ? new Date(data.generatedAt) : null;
 
@@ -367,7 +367,7 @@ export default function App() {
           }}
           canInterest={Boolean(account?.profile?.approved_at && ['film', 'television'].includes(selectedMedia.type))}
           interested={Boolean(selectedMedia.interests?.some((person) => person?.username === account?.profile?.username))}
-          onInterest={async (enabled) => { try { await setInterest(account.session.access_token, account.profile.id, selectedMedia.database_id, enabled); await refresh({ fresh: true }); setToast(enabled ? 'Priority Watch added.' : 'Priority Watch removed.'); } catch { setToast('Priority Watch could not be updated. Please try again.'); } }}
+          onInterest={async (enabled) => { try { await setInterest(account.session.access_token, account.profile.id, selectedMedia.database_id, enabled); await refresh({ fresh: true }); setToast(enabled ? 'Priority Watch added.' : 'Priority Watch removed.'); } catch (error) { setToast('Priority Watch could not be updated. Please try again.'); throw error; } }}
           onDelete={async (permanent) => { if (!window.confirm(permanent ? 'Permanently delete this item? This cannot be undone.' : 'Move this item to Bin?')) return; permanent ? await permanentlyDeleteMedia(account.session.access_token, selectedMedia.database_id) : await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); setSelectedMediaId(null); await refresh({ fresh: true }); setToast(permanent ? 'Media permanently deleted.' : 'Media moved to Bin.'); }}
           onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
         />
@@ -421,8 +421,12 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
   const [addingMedia, setAddingMedia] = useState(false);
   const [addToShelfIds, setAddToShelfIds] = useState([]);
   const [draggedShelfId, setDraggedShelfId] = useState(null);
+  const [optimisticShelfIds, setOptimisticShelfIds] = useState([]);
 
-  const shelves = mediaShelvesForSection(data, section);
+  const sourceShelves = mediaShelvesForSection(data, section);
+  useEffect(() => { setOptimisticShelfIds(sourceShelves.map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves, section]);
+  const shelfIndex = new Map(optimisticShelfIds.map((id, index) => [id, index]));
+  const shelves = [...sourceShelves].sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
   const items = active(data.media).filter((item) => mediaSection(item) === section);
   const formats = unique(items.flatMap(mediaDisplayTags)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const genres = unique(items.flatMap((item) => item.genres || [])).sort((a, b) => a.localeCompare(b));
@@ -517,7 +521,7 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
             data.media,
           );
           if (!shelfItems.length && queryLower) return null;
-          return <MediaShelf key={shelf.shelf_id} shelf={shelf} items={shelfItems} onOpen={openMedia} canEdit={canEdit} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const ordered = shelves.map((row) => row.shelf_id); const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); try { await reorderShelves(accessToken, data.collectionId, section, ordered); await refresh({ fresh: true }); notify('Shelf order saved.'); } catch { notify('Shelf order could not be saved.'); } finally { setDraggedShelfId(null); } }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch { notify('Item order could not be saved.'); } }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} />;
+          return <MediaShelf key={shelf.shelf_id} shelf={shelf} items={shelfItems} onOpen={openMedia} canEdit={canEdit} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setOptimisticShelfIds(ordered); setDraggedShelfId(null); try { await reorderShelves(accessToken, data.collectionId, section, ordered); notify('Shelf order saved.'); } catch { setOptimisticShelfIds(previous); notify('Shelf order could not be saved.'); } }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} />;
         })}
       </div>
 
@@ -531,7 +535,9 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
 function MediaShelf({ shelf, items, onOpen, canEdit, onAdd, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
   const trackRef = useRef(null);
   const [draggedId, setDraggedId] = useState(null);
-  const pages = chunk(items, 14);
+  const [displayItems, setDisplayItems] = useState(items);
+  useEffect(() => { setDisplayItems(items); }, [items]);
+  const pages = chunk(displayItems, 14);
   const scrollPage = (direction) => {
     const track = trackRef.current;
     if (!track) return;
@@ -556,10 +562,10 @@ function MediaShelf({ shelf, items, onOpen, canEdit, onAdd, shelfDragging, onShe
       <div className="poster-track" ref={trackRef}>
         {pages.map((page, pageIndex) => (
           <div className="poster-page" key={pageIndex}>
-            {page.map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} draggable={canEdit} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const ids = items.map((row) => row.database_id); const from = ids.indexOf(draggedId); const to = ids.indexOf(item.database_id); ids.splice(to, 0, ids.splice(from, 1)[0]); try { await onReorder(ids); } finally { setDraggedId(null); } }} />)}
+            {page.map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} draggable={canEdit} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const previous = [...displayItems]; const next = [...displayItems]; const from = next.findIndex((row) => row.database_id === draggedId); const to = next.findIndex((row) => row.database_id === item.database_id); next.splice(to, 0, next.splice(from, 1)[0]); setDisplayItems(next); setDraggedId(null); try { await onReorder(next.map((row) => row.database_id)); } catch { setDisplayItems(previous); } }} />)}
           </div>
         ))}
-        {!items.length && <div className="empty-poster">No items on this shelf yet.</div>}
+        {!displayItems.length && <div className="empty-poster">No items on this shelf yet.</div>}
       </div>
     </section>
   );
@@ -582,6 +588,7 @@ function MediaCard({ item, onClick, draggable, dragging, onDragStart, onDragEnd,
         )}
         {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
         {item.year && <span className="media-year">{item.year}</span>}
+        {item.interests?.map((person) => <span className="card-interest" title={person.display_name || person.username} key={person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
       </span>
     </button>
   );
@@ -593,6 +600,8 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
   const [selectedShelves, setSelectedShelves] = useState([]);
   const [savingShelves, setSavingShelves] = useState(false);
   const [shelfError, setShelfError] = useState('');
+  const [optimisticInterest, setOptimisticInterest] = useState(interested);
+  useEffect(() => { setOptimisticInterest(interested); }, [interested, item.database_id]);
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
   const memberShelves = shelves.filter((shelf) => item.lists?.includes(shelf.shelf_id));
@@ -621,7 +630,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
               {item.interests?.map((person) => <span className="interest-initial" title={person.display_name} key={person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
             </div>
             <p className="creator">{item.director || item.creator}</p>
-            {canInterest && <button className={cls('priority-watch', interested && 'active')} onClick={() => onInterest(!interested)}><span>{interested ? '✓' : '+'}</span>{interested ? 'Priority Watch' : 'Mark Priority Watch'}</button>}
+            {canInterest && <button className={cls('priority-watch', optimisticInterest && 'active')} onClick={async () => { const previous = optimisticInterest; const next = !previous; setOptimisticInterest(next); try { await onInterest(next); } catch { setOptimisticInterest(previous); } }}><span>{optimisticInterest ? '✓' : '+'}</span>{optimisticInterest ? 'Priority Watch' : 'Mark Priority Watch'}</button>}
             {canEdit && <div className="drawer-owner-actions">
               <Button className="drawer-edit-button primary" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>
               <Button className="drawer-edit-button" onClick={() => {
