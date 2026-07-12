@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.npm-cache/
 .DS_Store
 *.log
 public/media-data.json.backup-*
@@ -8,3 +9,4 @@ public/media-data.json.backup-*
 .env
 .env.*
 !.env.example
+
