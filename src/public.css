@@ -119,3 +119,76 @@
 .auth-switch { border: 0; background: transparent; color: #6b4333; padding: 3px 0; text-align:left; text-decoration: underline; font: inherit; font-size:12px; cursor:pointer; }
 
 .user-list{display:grid;gap:8px}.user-row{display:flex;gap:10px;align-items:center;border-top:1px solid #d7cbbb;padding:10px 0}.user-row span:first-child{margin-right:auto;display:grid}.user-row small{color:#837a6f}
+
+/* Clean owner interface --------------------------------------------------- */
+.collection-nav-label{display:block;margin:15px 10px 5px;color:#9b9185;font-size:8px;letter-spacing:.16em;font-weight:800}
+.sidebar nav button{border-radius:4px!important;color:#564f47}
+.sidebar nav button.active{background:#ede3d5!important;color:#211e1a;box-shadow:inset 2px 0 0 var(--clay)!important}
+.account-button,.sync-button{border-radius:999px;background:transparent!important;box-shadow:none!important;min-height:34px!important}
+.sync-button{border-color:transparent!important;color:#786f65}
+.sync-button:hover{border-color:var(--line)!important}
+
+.media-command{border-bottom:1px solid var(--line);padding-bottom:14px}
+.media-action-row.public-actions{margin-top:8px}
+.collection-tools{margin:48px 0 0;padding:18px 0 0;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr minmax(320px,auto) auto;align-items:center;gap:14px}
+.collection-tools p{margin:4px 0 0;color:#8a8176;font-size:10px}
+.inline-create{display:flex;align-items:center;gap:7px}
+.inline-create input{height:38px;min-width:220px;border:1px solid var(--line);background:#fffaf2;padding:0 12px;outline:none}
+.inline-create input:focus{border-color:#a87963;box-shadow:0 0 0 3px rgba(168,121,99,.1)}
+.quiet-button{background:transparent!important;border-color:transparent!important;box-shadow:none!important;color:#746a60}
+
+.shelf-head{min-height:42px}
+.shelf-title{gap:6px}
+.shelf-drag-handle{opacity:.38;background:transparent!important;color:#766d63!important;transition:opacity .15s}
+.media-shelf:hover .shelf-drag-handle{opacity:1}
+.shelf-head>div:last-child{align-items:center}
+.shelf-head>div:last-child>button:not(.button){width:30px!important;height:30px!important;background:transparent!important;border-color:transparent!important;color:#82786d}
+.shelf-head>div:last-child>button:not(.button):hover{background:#eee4d7!important;color:#2d2924}
+.shelf-add-button{min-height:32px!important;padding:0 11px!important;border-radius:999px;background:#2f2b26!important;border-color:#2f2b26!important;color:#fff;box-shadow:none!important;font-size:10px!important}
+.shelf-add-button:hover{background:#4a433b!important}
+.delete-shelf{opacity:.55}
+
+.media-card[draggable="true"]{cursor:grab}
+.media-card[draggable="true"]:active{cursor:grabbing}
+.media-card.is-dragging{opacity:.35;transform:scale(.98)}
+.media-card.drag-over::before{border-radius:999px}
+
+.drawer-owner-actions{margin:16px 0 12px;gap:6px}
+.drawer-owner-actions .button{min-height:34px;border-radius:999px;background:transparent;box-shadow:none;font-size:10px}
+.drawer-owner-actions .primary{background:#2f2b26!important;border-color:#2f2b26!important;color:#fff}
+.priority-watch{border:0;background:transparent;color:#7f302d;display:inline-flex;align-items:center;gap:7px;margin:2px 0 10px;padding:6px 0;font-size:10px;font-weight:700;cursor:pointer}
+.priority-watch span{width:19px;height:19px;border:1px solid #b56c63;border-radius:50%;display:grid;place-items:center}
+.priority-watch.active span{background:#7f302d;border-color:#7f302d;color:#fff}
+.drawer-danger-zone{margin-top:30px;padding-top:12px;border-top:1px solid #e0d5c7;display:flex;align-items:center;gap:14px}
+.drawer-danger-zone button{border:0;background:transparent;padding:5px 0;color:#8a7f73;display:inline-flex;align-items:center;gap:5px;font-size:9px;cursor:pointer}
+.drawer-danger-zone button:hover{color:#8e3d35}
+.drawer-danger-zone .permanent-delete{margin-left:auto;color:#a15b52}
+
+.media-edit-dialog{border-radius:6px!important;background:#fbf6ee!important;padding:34px!important}
+.add-media-dialog{width:min(580px,calc(100vw - 32px))!important}
+.add-media-dialog h2{font-size:29px;margin:7px 0 4px!important}
+.dialog-intro{margin:0 0 24px;color:#7f7569;font-family:var(--serif);font-size:12px;line-height:1.45}
+.media-edit-grid label{gap:7px;color:#635b52;font-size:9px;font-weight:700;letter-spacing:.04em}
+.media-edit-grid input,.media-edit-grid select,.media-edit-grid textarea{border:1px solid #d2c6b7;background:#fffdf8;border-radius:3px;padding:10px;outline:none}
+.media-edit-grid input:focus,.media-edit-grid select:focus,.media-edit-grid textarea:focus{border-color:#9f6f5b;box-shadow:0 0 0 3px rgba(159,111,91,.1)}
+.optional{float:right;color:#aaa095;font-weight:400}
+.shelf-picker{border:0;border-top:1px solid var(--line);padding:16px 0 0;margin:8px 0 0;display:flex;flex-wrap:wrap;gap:7px}
+.shelf-picker legend{padding:0 8px 0 0;color:#8a7f73;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.shelf-picker label{display:inline-flex;align-items:center;gap:0;border:1px solid var(--line);border-radius:999px;padding:8px 11px;background:#fffaf2;cursor:pointer;font-size:10px;font-weight:500;letter-spacing:0}
+.shelf-picker label.selected{background:#e4e9df;border-color:#aeb9a7;color:#3f4a3b}
+.shelf-picker input{position:absolute;opacity:0;pointer-events:none}
+.dialog-actions{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:24px}
+.dialog-actions .button{border-radius:999px;background:#2f2b26;color:#fff;border-color:#2f2b26;box-shadow:none}
+.text-button{border:0;background:transparent;color:#7e7468;cursor:pointer;padding:8px 10px}
+
+.account-dialog{border-radius:6px!important;background:#fbf6ee!important;box-shadow:0 24px 80px rgba(44,34,23,.25)!important}
+.account-dialog .button{border-radius:999px;box-shadow:none}
+.account-dialog input{border-radius:3px;background:#fffdf8}
+
+@media(max-width:760px){
+  .collection-tools{grid-template-columns:1fr;align-items:stretch}
+  .inline-create{width:100%}.inline-create input{min-width:0;flex:1}
+  .shelf-add-button{font-size:0!important}.shelf-add-button svg{margin:0}
+  .media-edit-dialog{padding:26px 20px!important}
+  .drawer-danger-zone{flex-wrap:wrap}.drawer-danger-zone .permanent-delete{margin-left:0}
+}

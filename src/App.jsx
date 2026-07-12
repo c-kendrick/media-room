@@ -9,16 +9,20 @@ import {
   Cloud,
   Command,
   Film,
+  Download,
   Gamepad2,
+  GripVertical,
   LogIn,
   LogOut,
   Menu,
   Pencil,
+  Plus,
   RotateCw,
   Search,
   Shuffle,
   SlidersHorizontal,
   Trophy,
+  Trash2,
   UserRound,
   X,
 } from 'lucide-react';
@@ -363,7 +367,7 @@ export default function App() {
           }}
           canInterest={Boolean(account?.profile?.approved_at && ['film', 'television'].includes(selectedMedia.type))}
           interested={Boolean(selectedMedia.interests?.some((person) => person?.username === account?.profile?.username))}
-          onInterest={async (enabled) => { await setInterest(account.session.access_token, selectedMedia.database_id, enabled); await refresh({ fresh: true }); }}
+          onInterest={async (enabled) => { try { await setInterest(account.session.access_token, account.profile.id, selectedMedia.database_id, enabled); await refresh({ fresh: true }); setToast(enabled ? 'Priority Watch added.' : 'Priority Watch removed.'); } catch { setToast('Priority Watch could not be updated. Please try again.'); } }}
           onDelete={async (permanent) => { if (!window.confirm(permanent ? 'Permanently delete this item? This cannot be undone.' : 'Move this item to Bin?')) return; permanent ? await permanentlyDeleteMedia(account.session.access_token, selectedMedia.database_id) : await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); setSelectedMediaId(null); await refresh({ fresh: true }); setToast(permanent ? 'Media permanently deleted.' : 'Media moved to Bin.'); }}
           onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
         />
@@ -415,6 +419,7 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
   const [typeFilters, setTypeFilters] = useState([]);
   const [newShelf, setNewShelf] = useState('');
   const [addingMedia, setAddingMedia] = useState(false);
+  const [addToShelfIds, setAddToShelfIds] = useState([]);
   const [draggedShelfId, setDraggedShelfId] = useState(null);
 
   const shelves = mediaShelvesForSection(data, section);
@@ -472,8 +477,8 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
     <div className="page media-page">
       <PageHero
         eyebrow="SCREEN, SHELF & STORY"
-        title="The media room"
-        description="Kit’s full watchlist, physical collection, books and games, built to browse, not merely store."
+        title={data.collectionTitle || 'The media room'}
+        description="A living collection of films, television, books and games."
         icon={Clapperboard}
         stats={[
           [items.filter((item) => ['watchlist', 'reading_list'].some((list) => item.lists?.includes(list))).length, 'to watch/read'],
@@ -498,7 +503,6 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
 
         <div className="media-action-row public-actions">
           <Button className="random-pick" icon={Shuffle} onClick={pickRandom}>Pick a {singularLabel}</Button>
-          {canEdit && <><Button onClick={() => setAddingMedia(true)}>Add media</Button><Button onClick={onExport}>Export backup</Button><form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="New shelf" aria-label="New shelf name" /><Button type="submit">Add shelf</Button></form></>}
           {(listFilters.length || formatFilters.length || genreFilters.length || typeFilters.length || query) && (
             <button className="clear-media-filters" type="button" onClick={clearFilters}><SlidersHorizontal size={14} />Clear filters</button>
           )}
@@ -513,17 +517,18 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
             data.media,
           );
           if (!shelfItems.length && queryLower) return null;
-          return <MediaShelf key={shelf.shelf_id} shelf={shelf} items={shelfItems} onOpen={openMedia} canEdit={canEdit} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={() => setDraggedShelfId(shelf.shelf_id)} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const ordered = shelves.map((row) => row.shelf_id); const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); try { await reorderShelves(accessToken, data.collectionId, section, ordered); await refresh({ fresh: true }); notify('Shelf order saved.'); } finally { setDraggedShelfId(null); } }} onReorder={async (ordered) => { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} />;
+          return <MediaShelf key={shelf.shelf_id} shelf={shelf} items={shelfItems} onOpen={openMedia} canEdit={canEdit} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const ordered = shelves.map((row) => row.shelf_id); const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); try { await reorderShelves(accessToken, data.collectionId, section, ordered); await refresh({ fresh: true }); notify('Shelf order saved.'); } catch { notify('Shelf order could not be saved.'); } finally { setDraggedShelfId(null); } }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch { notify('Item order could not be saved.'); } }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} />;
         })}
       </div>
 
       {!randomPool.length && <Empty>No media matches those filters.</Empty>}
-      {addingMedia && <AddMediaDialog section={section} shelves={shelves} onClose={() => setAddingMedia(false)} onSave={async (item, shelfIds) => { const created = await createMediaItem(accessToken, { ...item, collection_id: data.collectionId }); await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); setAddingMedia(false); await refresh({ fresh: true }); notify('Media added.'); }} />}
+      {canEdit && <section className="collection-tools"><div><span className="eyebrow">COLLECTION TOOLS</span><p>Manage this section without cluttering the shelves.</p></div><form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="Name a new shelf" aria-label="New shelf name" /><Button type="submit" icon={Plus}>Add shelf</Button></form><Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button></section>}
+      {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={async (item, shelfIds) => { const created = await createMediaItem(accessToken, { ...item, collection_id: data.collectionId }); await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); setAddingMedia(false); setAddToShelfIds([]); await refresh({ fresh: true }); notify('Media added.'); }} />}
     </div>
   );
 }
 
-function MediaShelf({ shelf, items, onOpen, canEdit, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
+function MediaShelf({ shelf, items, onOpen, canEdit, onAdd, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
   const trackRef = useRef(null);
   const [draggedId, setDraggedId] = useState(null);
   const pages = chunk(items, 14);
@@ -537,10 +542,11 @@ function MediaShelf({ shelf, items, onOpen, canEdit, shelfDragging, onShelfDragS
     <section className={cls('media-shelf', shelfDragging && 'shelf-dragging')} onDragOver={(event) => canEdit && event.preventDefault()} onDrop={(event) => { event.preventDefault(); onShelfDrop?.(); }}>
       <div className="shelf-head">
         <div className="shelf-title">
-          {canEdit && <button className="shelf-drag-handle" aria-label={`Drag ${shelf.name} to reorder`} title="Drag to reorder shelf" draggable onDragStart={onShelfDragStart} onDragEnd={onShelfDragEnd}>⋮⋮</button>}
+          {canEdit && <button className="shelf-drag-handle" aria-label={`Drag ${shelf.name} to reorder`} title="Drag to reorder shelf" draggable onDragStart={onShelfDragStart} onDragEnd={onShelfDragEnd}><GripVertical size={16} /></button>}
           <h2><Trophy size={21} />{shelf.name}<span>{items.length}</span></h2>
         </div>
         <div>
+          {canEdit && <Button className="shelf-add-button" icon={Plus} onClick={onAdd}>Add item</Button>}
           {canEdit && <button aria-label={`Rename ${shelf.name}`} onClick={onRename}><Pencil size={15} /></button>}
           {canEdit && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} onClick={onDelete}><X size={15} /></button>}
           <button aria-label={`Scroll ${shelf.name} left`} onClick={() => scrollPage(-1)}><ChevronLeft /></button>
@@ -550,7 +556,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, shelfDragging, onShelfDragS
       <div className="poster-track" ref={trackRef}>
         {pages.map((page, pageIndex) => (
           <div className="poster-page" key={pageIndex}>
-            {page.map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} draggable={canEdit} dragging={draggedId === item.database_id} onDragStart={() => setDraggedId(item.database_id)} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const ids = items.map((row) => row.database_id); const from = ids.indexOf(draggedId); const to = ids.indexOf(item.database_id); ids.splice(to, 0, ids.splice(from, 1)[0]); try { await onReorder(ids); } finally { setDraggedId(null); } }} />)}
+            {page.map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} draggable={canEdit} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const ids = items.map((row) => row.database_id); const from = ids.indexOf(draggedId); const to = ids.indexOf(item.database_id); ids.splice(to, 0, ids.splice(from, 1)[0]); try { await onReorder(ids); } finally { setDraggedId(null); } }} />)}
           </div>
         ))}
         {!items.length && <div className="empty-poster">No items on this shelf yet.</div>}
@@ -615,17 +621,15 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
               {item.interests?.map((person) => <span className="interest-initial" title={person.display_name} key={person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
             </div>
             <p className="creator">{item.director || item.creator}</p>
+            {canInterest && <button className={cls('priority-watch', interested && 'active')} onClick={() => onInterest(!interested)}><span>{interested ? '✓' : '+'}</span>{interested ? 'Priority Watch' : 'Mark Priority Watch'}</button>}
             {canEdit && <div className="drawer-owner-actions">
-              <Button className="drawer-edit-button" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>
+              <Button className="drawer-edit-button primary" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>
               <Button className="drawer-edit-button" onClick={() => {
                 setSelectedShelves(item.lists || []);
                 setShelfError('');
                 setEditingShelves(true);
               }}>Edit shelves</Button>
-              {item.deleted_at ? <Button onClick={onRestore}>Restore from Bin</Button> : <Button onClick={() => onDelete(false)}>Move to Bin</Button>}
-              <Button onClick={() => onDelete(true)}>Permanently delete</Button>
             </div>}
-            {canInterest && <Button className="priority-watch" onClick={() => onInterest(!interested)}>{interested ? 'Remove Priority Watch' : 'Priority Watch'}</Button>}
             <p className="drawer-description">{item.description || item.notes || 'No description has been added yet.'}</p>
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-lists public-shelf-list">
@@ -634,6 +638,10 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
                 ? memberShelves.map((shelf) => <span className="public-shelf-chip" key={shelf.shelf_id}><Check size={13} />{shelf.name}</span>)
                 : <small>No public shelf membership.</small>}
             </div>
+            {canEdit && <div className="drawer-danger-zone">
+              {item.deleted_at ? <button onClick={onRestore}>Restore from Bin</button> : <button onClick={() => onDelete(false)}><Trash2 size={14} />Move to Bin</button>}
+              <button className="permanent-delete" onClick={() => onDelete(true)}>Delete permanently</button>
+            </div>}
           </div>
         </div>
       </aside>
@@ -764,12 +772,13 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
 }
 
 
-function AddMediaDialog({ section, shelves, onClose, onSave }) {
-  const [title, setTitle] = useState(''); const [type, setType] = useState(section === 'screen' ? 'film' : section); const [year, setYear] = useState(''); const [shelfIds, setShelfIds] = useState([]); const [saving, setSaving] = useState(false); const [error, setError] = useState('');
-  return <div className="modal-layer editor-layer"><form className="media-edit-dialog" onSubmit={async (event) => { event.preventDefault(); if (!title.trim()) return; setSaving(true); setError(''); try { await onSave({ title: title.trim(), type, year: year ? Number(year) : null, platforms: [], genres: [] }, shelfIds); } catch { setError('The media item could not be saved. Check the fields and try again.'); setSaving(false); } }}>
-    <button className="close" type="button" onClick={onClose}><X /></button><span className="eyebrow">NEW MEDIA</span><h2>Add media</h2>
-    <div className="media-edit-grid"><label>Title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} required /></label><label>Type<select value={type} onChange={(event) => setType(event.target.value)}>{section === 'screen' ? <><option value="film">Film</option><option value="television">Television</option></> : <option value={section}>{section === 'book' ? 'Book' : 'Video game'}</option>}</select></label><label>Year<input type="number" min="1000" max="3000" value={year} onChange={(event) => setYear(event.target.value)} /></label><div className="full shelf-membership-options"><span>Shelves</span>{shelves.map((shelf) => <label key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} />{shelf.name}</label>)}</div></div>
-    {error && <p className="auth-error">{error}</p>}<Button type="submit" disabled={saving}>{saving ? 'Adding…' : 'Add media'}</Button>
+function AddMediaDialog({ section, shelves, initialShelfIds = [], onClose, onSave }) {
+  const [title, setTitle] = useState(''); const [type, setType] = useState(section === 'screen' ? 'film' : section); const [year, setYear] = useState(''); const [shelfIds, setShelfIds] = useState(initialShelfIds); const [saving, setSaving] = useState(false); const [error, setError] = useState('');
+  const destination = shelves.find((shelf) => shelfIds.includes(shelf.shelf_id));
+  return <div className="modal-layer editor-layer"><form className="media-edit-dialog add-media-dialog" onSubmit={async (event) => { event.preventDefault(); if (!title.trim()) return; setSaving(true); setError(''); try { await onSave({ title: title.trim(), type, year: year ? Number(year) : null, platforms: [], genres: [] }, shelfIds); } catch { setError('The media item could not be saved. Check the fields and try again.'); setSaving(false); } }}>
+    <button className="close" type="button" onClick={onClose} aria-label="Close add item"><X /></button><span className="eyebrow">ADD TO {destination?.name?.toUpperCase() || 'COLLECTION'}</span><h2>Add an item</h2><p className="dialog-intro">Start with the essentials. You can add artwork, notes and full details after saving.</p>
+    <div className="media-edit-grid"><label className="full">Title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title" required /></label><label>Type<select value={type} onChange={(event) => setType(event.target.value)}>{section === 'screen' ? <><option value="film">Film</option><option value="television">Television</option></> : <option value={section}>{section === 'book' ? 'Book' : 'Video game'}</option>}</select></label><label>Year <span className="optional">optional</span><input type="number" min="1000" max="3000" placeholder="YYYY" value={year} onChange={(event) => setYear(event.target.value)} /></label><fieldset className="full shelf-picker"><legend>Also add to</legend>{shelves.map((shelf) => <label className={shelfIds.includes(shelf.shelf_id) ? 'selected' : ''} key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} /><span>{shelf.name}</span></label>)}</fieldset></div>
+    {error && <p className="auth-error">{error}</p>}<div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={saving}>{saving ? 'Adding…' : 'Add item'}</Button></div>
   </form></div>;
 }
 
