@@ -49,6 +49,20 @@ function active(rows) {
   return (rows || []).filter((row) => !row.deleted_at);
 }
 
+function useEscape(onClose, active = true) {
+  useEffect(() => {
+    if (!active) return undefined;
+    const close = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', close, true);
+    return () => window.removeEventListener('keydown', close, true);
+  }, [active, onClose]);
+}
+
 function exportCollection(snapshot) {
   const payload = { exported_at: new Date().toISOString(), format: 'media-room/v1', collection: { id: snapshot.collectionId, title: snapshot.collectionTitle, owner_id: snapshot.ownerId }, shelves: snapshot.mediaShelves, media: snapshot.media };
   const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
@@ -103,14 +117,6 @@ function mediaTagTone(value, isGame = false) {
 function cleanImportedMediaTitle(value) {
   const title = String(value ?? '');
   return /^\d{4}\.0$/.test(title) ? title.slice(0, -2) : title;
-}
-
-function chunk(values, size) {
-  const pages = [];
-  for (let index = 0; index < values.length; index += size) {
-    pages.push(values.slice(index, index + size));
-  }
-  return pages;
 }
 
 function mediaShelvesForSection(data, section) {
@@ -557,7 +563,8 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onM
   const [arranging, setArranging] = useState(false);
   const serverOrderKey = items.map((item) => `${item.database_id}:${item.list_positions?.[shelf.shelf_id] ?? ''}`).join('|');
   useEffect(() => { setDisplayItems(items); }, [serverOrderKey]);
-  const pages = chunk(displayItems, 14);
+  const rowBreak = Math.ceil(displayItems.length / 2);
+  const displayRows = [displayItems.slice(0, rowBreak), displayItems.slice(rowBreak)];
   const scrollPage = (direction) => {
     const track = trackRef.current;
     if (!track) return;
@@ -583,11 +590,11 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onM
         </div>
       </div>
       <div className="poster-track" ref={trackRef}>
-        {pages.map((page, pageIndex) => (
-          <div className="poster-page" key={pageIndex}>
-            {page.map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} draggable={canEdit} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const previous = [...displayItems]; const next = [...displayItems]; const from = next.findIndex((row) => row.database_id === draggedId); const to = next.findIndex((row) => row.database_id === item.database_id); next.splice(to, 0, next.splice(from, 1)[0]); setDisplayItems(next); setDraggedId(null); try { await onReorder(next.map((row) => row.database_id)); } catch { setDisplayItems(previous); } }} />)}
-          </div>
-        ))}
+        <div className="poster-two-row">
+          {displayRows.map((row, rowIndex) => <div className="poster-continuous-row" key={rowIndex} data-row={rowIndex + 1}>
+            {row.map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} draggable={canEdit} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const previous = [...displayItems]; const next = [...displayItems]; const from = next.findIndex((entry) => entry.database_id === draggedId); const to = next.findIndex((entry) => entry.database_id === item.database_id); next.splice(to, 0, next.splice(from, 1)[0]); setDisplayItems(next); setDraggedId(null); try { await onReorder(next.map((entry) => entry.database_id)); } catch { setDisplayItems(previous); } }} />)}
+          </div>)}
+        </div>
         {!displayItems.length && <div className="empty-poster">No items on this shelf yet.</div>}
       </div>
       {arranging && <ArrangeShelfDialog shelf={shelf} items={displayItems} onClose={() => setArranging(false)} onSave={async (nextItems) => { const previous = [...displayItems]; setDisplayItems(nextItems); setArranging(false); try { await onReorder(nextItems.map((item) => item.database_id)); } catch { setDisplayItems(previous); } }} />}
@@ -596,8 +603,11 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onM
 }
 
 function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
+  useEscape(onClose);
   const [ordered, setOrdered] = useState(items);
   const [saving, setSaving] = useState(false);
+  const [draggedItemId, setDraggedItemId] = useState(null);
+  const [positionDrafts, setPositionDrafts] = useState({});
   const move = (index, destination) => {
     if (destination < 0 || destination >= ordered.length || destination === index) return;
     setOrdered((current) => {
@@ -606,21 +616,36 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
       return next;
     });
   };
+  const moveById = (itemId, destination) => {
+    const index = ordered.findIndex((item) => item.database_id === itemId);
+    move(index, destination);
+  };
+  const commitPosition = (itemId, currentIndex) => {
+    const raw = positionDrafts[itemId];
+    const destination = Math.max(0, Math.min(ordered.length - 1, Number(raw) - 1));
+    if (Number.isInteger(destination)) move(currentIndex, destination);
+    setPositionDrafts((current) => { const next = { ...current }; delete next[itemId]; return next; });
+  };
+  const rowBreak = Math.ceil(ordered.length / 2);
+  const rows = [ordered.slice(0, rowBreak), ordered.slice(rowBreak)];
   return <div className="modal-layer editor-layer"><section className="media-edit-dialog arrange-dialog">
     <button className="close" type="button" onClick={onClose} aria-label="Close arranger"><X /></button>
     <span className="eyebrow">ARRANGE SHELF</span><h2>{shelf.name}</h2>
-    <p className="dialog-intro">Move anything directly, then save once. This is easier for long shelves than dragging across the screen.</p>
-    <ol className="arrange-list">{ordered.map((item, index) => <li key={item.database_id}>
-      <span className="arrange-position">{index + 1}</span>
-      {item.poster_url ? <img src={item.poster_url} alt="" /> : <span className="arrange-poster-fallback"><Clapperboard size={13} /></span>}
-      <strong>{cleanImportedMediaTitle(item.title)}</strong>
-      <div className="arrange-row-actions">
-        <button disabled={index === 0} onClick={() => move(index, 0)} title="Move to top" aria-label={`Move ${item.title} to top`}><ChevronsUp size={14} /></button>
-        <button disabled={index === 0} onClick={() => move(index, index - 1)} title="Move up" aria-label={`Move ${item.title} up`}><ArrowUp size={14} /></button>
-        <button disabled={index === ordered.length - 1} onClick={() => move(index, index + 1)} title="Move down" aria-label={`Move ${item.title} down`}><ArrowDown size={14} /></button>
-        <button disabled={index === ordered.length - 1} onClick={() => move(index, ordered.length - 1)} title="Move to end" aria-label={`Move ${item.title} to end`}><ChevronsDown size={14} /></button>
-      </div>
-    </li>)}</ol>
+    <p className="dialog-intro">Drag an item anywhere—including between rows—or click its position number and type exactly where it should go.</p>
+    <div className="arrange-help"><span><GripVertical size={13} />Drag to move</span><span className="position-demo">12</span><span>Click a number to enter a position</span></div>
+    <div className="arrange-rows">{rows.map((row, rowIndex) => <section className="arrange-row" key={rowIndex}>
+      <header><span>ROW {rowIndex + 1}</span><small>{row.length ? `${rowIndex === 0 ? 1 : rowBreak + 1}–${rowIndex === 0 ? rowBreak : ordered.length}` : 'Empty'}</small></header>
+      <ol className="arrange-list">{row.map((item) => { const index = ordered.findIndex((entry) => entry.database_id === item.database_id); return <li className={draggedItemId === item.database_id ? 'dragging' : ''} key={item.database_id} draggable onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedItemId(item.database_id); }} onDragEnd={() => setDraggedItemId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (draggedItemId && draggedItemId !== item.database_id) moveById(draggedItemId, index); setDraggedItemId(null); }}>
+        <GripVertical className="arrange-grip" size={14} />
+        <input className="arrange-position" aria-label={`Position for ${item.title}`} inputMode="numeric" value={positionDrafts[item.database_id] ?? index + 1} onFocus={() => setPositionDrafts((current) => ({ ...current, [item.database_id]: String(index + 1) }))} onChange={(event) => setPositionDrafts((current) => ({ ...current, [item.database_id]: event.target.value.replace(/\D/g, '') }))} onBlur={() => commitPosition(item.database_id, index)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
+        {item.poster_url ? <img src={item.poster_url} alt="" /> : <span className="arrange-poster-fallback"><Clapperboard size={13} /></span>}
+        <strong>{cleanImportedMediaTitle(item.title)}</strong>
+        <div className="arrange-row-actions">
+          <button disabled={index === 0} onClick={() => move(index, 0)} title="Move to beginning" aria-label={`Move ${item.title} to beginning`}><ChevronsUp size={14} /></button>
+          <button disabled={index === ordered.length - 1} onClick={() => move(index, ordered.length - 1)} title="Move to end" aria-label={`Move ${item.title} to end`}><ChevronsDown size={14} /></button>
+        </div>
+      </li>; })}</ol>
+    </section>)}</div>
     <div className="dialog-actions"><button className="text-button" onClick={onClose}>Cancel</button><Button disabled={saving} onClick={async () => { setSaving(true); try { await onSave(ordered); } finally { setSaving(false); } }}>{saving ? 'Saving…' : 'Save order'}</Button></div>
   </section></div>;
 }
@@ -655,6 +680,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
   const [savingShelves, setSavingShelves] = useState(false);
   const [shelfError, setShelfError] = useState('');
   const [optimisticInterest, setOptimisticInterest] = useState(interested);
+  useEscape(() => setEditingShelves(false), editingShelves);
   useEffect(() => { setOptimisticInterest(interested); }, [interested, item.database_id]);
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
@@ -729,6 +755,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
 }
 
 function SearchModal({ data, query, setQuery, onClose, onOpen }) {
+  useEscape(onClose);
   const normalizedQuery = query.trim().toLowerCase();
   const results = normalizedQuery
     ? active(data.media).filter((item) => `${item.title} ${item.creator || ''} ${item.director || ''} ${item.type} ${(item.genres || []).join(' ')}`.toLowerCase().includes(normalizedQuery))
@@ -760,6 +787,7 @@ function SearchModal({ data, query, setQuery, onClose, onOpen }) {
 
 
 function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers }) {
+  useEscape(onClose);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -836,6 +864,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
 
 
 function AddMediaDialog({ section, shelves, initialShelfIds = [], onClose, onSave }) {
+  useEscape(onClose);
   const [title, setTitle] = useState(''); const [type, setType] = useState(section === 'screen' ? 'film' : section); const [year, setYear] = useState(''); const [shelfIds, setShelfIds] = useState(initialShelfIds); const [saving, setSaving] = useState(false); const [error, setError] = useState('');
   const destination = shelves.find((shelf) => shelfIds.includes(shelf.shelf_id));
   return <div className="modal-layer editor-layer"><form className="media-edit-dialog add-media-dialog" onSubmit={async (event) => { event.preventDefault(); if (!title.trim()) return; setSaving(true); setError(''); try { await onSave({ title: title.trim(), type, year: year ? Number(year) : null, platforms: [], genres: [] }, shelfIds); } catch { setError('The media item could not be saved. Check the fields and try again.'); setSaving(false); } }}>
@@ -846,6 +875,7 @@ function AddMediaDialog({ section, shelves, initialShelfIds = [], onClose, onSav
 }
 
 function EditMediaDialog({ item, onClose, onSave }) {
+  useEscape(onClose);
   const [form, setForm] = useState({
     title: item.title || '', year: item.year ?? '', creator: item.creator || '', director: item.director || '',
     description: item.description || '', notes: item.notes || '', poster_url: item.poster_url || '',
@@ -912,6 +942,7 @@ function EditMediaDialog({ item, onClose, onSave }) {
 }
 
 function AdminUsers({ accessToken, onClose }) {
+ useEscape(onClose);
  const [users,setUsers]=useState([]); const [error,setError]=useState(''); const [busy,setBusy]=useState('');
  const load=()=>listProfiles(accessToken).then(setUsers).catch(()=>setError('Could not load users.'));
  useEffect(()=>{load();},[]);
