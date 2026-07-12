@@ -110,3 +110,8 @@
 .media-edit-grid .full { grid-column: 1 / -1; }
 .media-edit-grid input, .media-edit-grid textarea { box-sizing: border-box; width: 100%; border: 1px solid #bdb09e; background:#fffdf8; color:#332b25; padding:10px 11px; font: inherit; }
 @media (max-width: 620px) { .media-edit-grid { grid-template-columns: 1fr; } .media-edit-grid .full { grid-column: auto; } }
+
+.drawer-owner-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.shelf-membership-dialog { width:min(470px,calc(100vw - 32px)); }
+.shelf-membership-options { display:grid; gap:8px; margin:18px 0; }
+.shelf-membership-options label { display:flex; align-items:center; gap:8px; color:#51473d; font-size:13px; }
