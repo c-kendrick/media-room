@@ -215,6 +215,17 @@ grant execute on function public.is_admin() to anon, authenticated;
 grant execute on function public.is_approved_user() to authenticated;
 grant execute on function public.can_manage_collection(uuid) to authenticated;
 
+-- This is the only public profile surface. It deliberately excludes approval
+-- and role fields, which are available only to the account owner and admins.
+create or replace view public.public_profiles
+with (security_invoker = false)
+as
+  select id, username, display_name
+  from public.profiles
+  where approved_at is not null;
+
+grant select on public.public_profiles to anon, authenticated;
+
 alter table public.profiles enable row level security;
 alter table public.collections enable row level security;
 alter table public.shelves enable row level security;
@@ -223,10 +234,11 @@ alter table public.shelf_media_items enable row level security;
 alter table public.media_interest enable row level security;
 
 -- Public browsing is deliberate. Unapproved users can view collections but
--- cannot make changes. Profiles expose only public identity fields by policy.
-create policy "Public can read approved profiles"
+-- cannot make changes. Profile approval and role data stay private; public
+-- navigation uses public.public_profiles instead.
+create policy "Users and admins can read private profiles"
 on public.profiles for select
-using (approved_at is not null or id = auth.uid() or public.is_admin());
+using (id = auth.uid() or public.is_admin());
 
 create policy "Admins can update profiles"
 on public.profiles for update to authenticated
