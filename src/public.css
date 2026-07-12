@@ -42,3 +42,61 @@
     display: none;
   }
 }
+
+.account-button {
+  white-space: nowrap;
+}
+
+.account-state {
+  color: #837a6f;
+  font-size: 11px;
+}
+
+.account-dialog {
+  width: min(420px, calc(100vw - 32px));
+  position: relative;
+  background: #f7f1e7;
+  border: 1px solid #c4b9a9;
+  box-shadow: 0 24px 70px rgba(52, 38, 26, 0.25);
+  padding: 30px;
+}
+
+.account-dialog h2 {
+  margin: 8px 0;
+  font-family: Georgia, serif;
+  font-size: 28px;
+}
+
+.account-dialog p {
+  color: #6e6256;
+  margin: 0 0 22px;
+}
+
+.account-dialog form {
+  display: grid;
+  gap: 14px;
+}
+
+.account-dialog label {
+  display: grid;
+  gap: 6px;
+  color: #51473d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.account-dialog input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #bdb09e;
+  background: #fffdf8;
+  color: #332b25;
+  padding: 10px 11px;
+  font: inherit;
+}
+
+.account-dialog .auth-error {
+  color: #8d2d28;
+  font-size: 12px;
+  margin: 0;
+}
