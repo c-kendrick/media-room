@@ -94,8 +94,11 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
     }), { fresh })
     : [];
 
+  // Do not put every media UUID into an `in.(...)` URL parameter. A large
+  // collection exceeds common URL limits and makes the whole snapshot fall
+  // back to static data. Interest markers are a small public relation, so
+  // retrieve them once and associate them in mapSnapshot instead.
   const interests = mediaItems.length ? await supabaseSelect(query('media_interest', {
-    media_item_id: 'in.(' + mediaItems.map((item) => item.id).join(',') + ')',
     select: 'media_item_id,user_id',
   }), { fresh }) : [];
   const publicProfiles = interests.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh }) : [];
@@ -103,4 +106,3 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
 }
 
 export const loadKitCollectionFromSupabase = (options) => loadCollectionFromSupabase(options);
-
