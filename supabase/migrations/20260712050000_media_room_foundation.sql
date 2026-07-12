@@ -14,10 +14,13 @@ create table public.profiles (
   role public.profile_role not null default 'member',
   approved_at timestamptz,
   approved_by uuid references public.profiles(id) on delete set null,
+  rejected_at timestamptz,
+  rejected_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint profiles_username_format check (username ~ '^[a-z0-9][a-z0-9_-]{2,31}$'),
-  constraint profiles_display_name_length check (char_length(trim(display_name)) between 2 and 80)
+  constraint profiles_display_name_length check (char_length(trim(display_name)) between 2 and 80),
+  constraint profiles_registration_state check (approved_at is null or rejected_at is null)
 );
 
 create unique index profiles_username_lower_key on public.profiles (lower(username));
