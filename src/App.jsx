@@ -222,10 +222,13 @@ export default function App() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [collections, setCollections] = useState([]);
+  const [collectionsLoading, setCollectionsLoading] = useState(true);
   const [collectionId, setCollectionId] = useState(null);
   const [collectionLoading, setCollectionLoading] = useState(false);
+  const [landingApplied, setLandingApplied] = useState(false);
   const snapshotCache = useRef(new Map());
   const latestRequest = useRef(0);
+  const userSelectedCollection = useRef(false);
 
   const cacheSnapshot = (snapshot, requestedCollectionId = null) => {
     if (snapshot?.collectionId) snapshotCache.current.set(snapshot.collectionId, snapshot);
@@ -238,6 +241,7 @@ export default function App() {
     try {
       const snapshot = await loadMediaSnapshot({ fresh, collectionId: targetCollectionId });
       cacheSnapshot(snapshot, targetCollectionId);
+      if (fresh && snapshot.collectionId !== MAIN_WATCHLIST_ID) snapshotCache.current.delete(MAIN_WATCHLIST_ID);
       if (request !== latestRequest.current) return;
       setData(snapshot);
       setError('');
@@ -254,7 +258,8 @@ export default function App() {
     }
   };
 
-  const selectCollection = (nextCollectionId) => {
+  const selectCollection = (nextCollectionId, { userInitiated = true } = {}) => {
+    if (userInitiated) userSelectedCollection.current = true;
     if (nextCollectionId === collectionId || nextCollectionId === data?.collectionId) return;
     const cached = snapshotCache.current.get(nextCollectionId);
     setCollectionId(nextCollectionId);
@@ -270,8 +275,11 @@ export default function App() {
   }, [collectionId]);
 
   useEffect(() => {
-    loadPublicCollections({ fresh: true }).then(setCollections).catch(() => setCollections([]));
-  }, [data?.collectionId]);
+    loadPublicCollections({ fresh: true })
+      .then(setCollections)
+      .catch(() => setCollections([]))
+      .finally(() => setCollectionsLoading(false));
+  }, []);
 
   useEffect(() => {
     if (!data?.collectionId || !collections.length) return undefined;
@@ -296,6 +304,15 @@ export default function App() {
       else window.clearTimeout(idle);
     };
   }, [collections, data?.collectionId]);
+
+  useEffect(() => {
+    if (authLoading || !collections.length || landingApplied || userSelectedCollection.current) return;
+    const landingCollection = account?.profile?.approved_at
+      ? collections.find((collection) => collection.owner_id === account.profile.id)
+      : collections.find((collection) => collection.slug === 'kits-collection');
+    setLandingApplied(true);
+    if (landingCollection) selectCollection(landingCollection.id, { userInitiated: false });
+  }, [account, authLoading, collections, landingApplied]);
 
   useEffect(() => {
     let cancelled = false;
@@ -331,7 +348,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  if (loading) {
+  if (loading || authLoading || collectionsLoading || (!landingApplied && collections.length > 0)) {
     return <div className="loading-screen"><div className="brand-mark">KM</div><p>Opening Kit’s Media Room…</p></div>;
   }
 
@@ -361,9 +378,12 @@ export default function App() {
           <span><strong>Kit’s Media<br />Room</strong><small>A LIVING LIBRARY</small></span>
         </button>
         <nav>
-          <button className="active" onClick={() => { setMobileNav(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+          <button onClick={() => { setMobileNav(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
             <Clapperboard size={17} />Media
           </button>
+          {data?.storage === 'supabase' && <button className={data.mainWatchlist ? 'active' : ''} onClick={() => selectCollection(MAIN_WATCHLIST_ID)}>
+            <ListOrdered size={17} />Main Watchlist
+          </button>}
           <small className="collection-nav-label">COLLECTIONS</small>
           {data?.storage === 'supabase' && collections.map((collection) => <button key={collection.id} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)}>
             <UserRound size={17} />{collection.title}
@@ -417,9 +437,29 @@ export default function App() {
           onClose={() => setSelectedMediaId(null)}
           canEdit={canEditCollection}
           onUpdate={async (changes) => {
-            await updateMediaItem(account.session.access_token, selectedMedia.database_id, changes);
-            await refresh({ fresh: true });
-            setToast('Media details saved.');
+            const previousData = data;
+            const applyMediaUpdate = (currentData, mediaChanges) => ({
+              ...currentData,
+              media: currentData.media.map((item) => item.database_id === selectedMedia.database_id
+                ? { ...item, ...mediaChanges }
+                : item),
+            });
+            const optimisticData = applyMediaUpdate(data, { ...changes, updated_at: new Date().toISOString() });
+            setData(optimisticData);
+            cacheSnapshot(optimisticData, data.collectionId);
+            try {
+              const updated = await updateMediaItem(account.session.access_token, selectedMedia.database_id, changes);
+              const confirmedData = applyMediaUpdate(optimisticData, updated);
+              setData((currentData) => currentData?.collectionId === data.collectionId ? confirmedData : currentData);
+              cacheSnapshot(confirmedData, data.collectionId);
+              snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+              setToast('Media details saved.');
+            } catch (error) {
+              setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
+              cacheSnapshot(previousData, previousData.collectionId);
+              setToast('Media details could not be saved.');
+              throw error;
+            }
           }}
           onUpdateShelves={async (currentShelfIds, selectedShelfIds) => {
             await replaceMediaShelfMemberships(account.session.access_token, selectedMedia.database_id, currentShelfIds, selectedShelfIds);
@@ -474,11 +514,15 @@ export default function App() {
           onSignedIn={(nextAccount) => {
             setAccount(nextAccount);
             setAccountOpen(false);
+            setLandingApplied(false);
+            userSelectedCollection.current = false;
             setToast('Signed in securely.');
           }}
           onSignedOut={() => {
             setAccount(null);
             setAccountOpen(false);
+            setLandingApplied(false);
+            userSelectedCollection.current = false;
             setToast('Signed out.');
           }}
           onManageUsers={() => { setAccountOpen(false); setAdminOpen(true); }}
@@ -574,21 +618,21 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
   return (
     <div className="page media-page">
       <PageHero
-        eyebrow="SCREEN, SHELF & STORY"
+        eyebrow={data.mainWatchlist ? 'EVERYONE’S NEXT WATCH' : 'SCREEN, SHELF & STORY'}
         title={data.collectionTitle || 'The media room'}
-        description="A living collection of films, television, books and games."
+        description={data.mainWatchlist ? 'Every approved member’s Watchlist, gathered live from their own collection.' : 'A living collection of films, television, books and games.'}
         icon={Clapperboard}
         stats={[
-          [items.filter((item) => ['watchlist', 'reading_list'].some((list) => item.lists?.includes(list))).length, 'to watch/read'],
+          [data.mainWatchlist ? items.length : items.filter((item) => ['watchlist', 'reading_list'].some((list) => item.lists?.includes(list))).length, 'to watch/read'],
           [items.filter((item) => ['collection', 'library', 'top_shelf', 'xbox', 'rpg', 'action_adventure', 'building_puzzle', 'strategy', 'vr'].some((list) => item.lists?.includes(list))).length, 'owned'],
         ]}
       />
 
       <div className="media-command public-media-command">
-        <div className="media-tabs">
+        <div className={cls('media-tabs', data.mainWatchlist && 'single')}>
           <button className={section === 'screen' ? 'active' : ''} onClick={() => switchSection('screen')}><Film />Film & TV</button>
-          <button className={section === 'book' ? 'active' : ''} onClick={() => switchSection('book')}><BookOpen />Books</button>
-          <button className={section === 'game' ? 'active' : ''} onClick={() => switchSection('game')}><Gamepad2 />Video Games</button>
+          {!data.mainWatchlist && <button className={section === 'book' ? 'active' : ''} onClick={() => switchSection('book')}><BookOpen />Books</button>}
+          {!data.mainWatchlist && <button className={section === 'game' ? 'active' : ''} onClick={() => switchSection('game')}><Gamepad2 />Video Games</button>}
         </div>
 
         <div className={cls('media-filters', section === 'screen' && 'has-type')}>
@@ -631,7 +675,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onM
   const [draggedId, setDraggedId] = useState(null);
   const [displayItems, setDisplayItems] = useState(items);
   const [arranging, setArranging] = useState(false);
-  const serverOrderKey = items.map((item) => `${item.database_id}:${item.list_positions?.[shelf.shelf_id] ?? ''}`).join('|');
+  const serverOrderKey = items.map((item) => `${item.database_id}:${item.updated_at || ''}:${item.list_positions?.[shelf.shelf_id] ?? ''}:${(item.interests || []).map((person) => person.id || person.username).sort().join(',')}`).join('|');
   useEffect(() => { setDisplayItems(items); }, [serverOrderKey]);
   const rowBreak = Math.ceil(displayItems.length / 2);
   const displayRows = [displayItems.slice(0, rowBreak), displayItems.slice(rowBreak)];
@@ -655,8 +699,8 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onM
           {canEdit && items.length > 1 && <button className="arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /></button>}
           {canEdit && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => onMoveShelf(-1)}><ArrowUp size={15} /></button>}
           {canEdit && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => onMoveShelf(1)}><ArrowDown size={15} /></button>}
-          {canEdit && <button aria-label={`Rename ${shelf.name}`} onClick={onRename}><Pencil size={15} /></button>}
-          {canEdit && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} onClick={onDelete}><X size={15} /></button>}
+          {canEdit && !shelf.required && <button aria-label={`Rename ${shelf.name}`} onClick={onRename}><Pencil size={15} /></button>}
+          {canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} onClick={onDelete}><X size={15} /></button>}
           <button aria-label={`Scroll ${shelf.name} left`} onClick={() => scrollPage(-1)}><ChevronLeft /></button>
           <button aria-label={`Scroll ${shelf.name} right`} onClick={() => scrollPage(1)}><ChevronRight /></button>
         </div>
@@ -671,6 +715,8 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onM
     </section>
   );
 }
+
+const MAIN_WATCHLIST_ID = 'main-watchlist';
 
 function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
   useEscape(onClose);
