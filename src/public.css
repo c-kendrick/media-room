@@ -100,3 +100,13 @@
   font-size: 12px;
   margin: 0;
 }
+
+.drawer-edit-button { margin: 4px 0 14px; }
+.editor-layer { z-index: 20; }
+.media-edit-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; position: relative; background: #f7f1e7; border: 1px solid #c4b9a9; box-shadow: 0 24px 70px rgba(52,38,26,.25); padding: 30px; }
+.media-edit-dialog h2 { margin: 8px 0 22px; font-family: Georgia, serif; }
+.media-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; margin-bottom: 18px; }
+.media-edit-grid label { display: grid; gap: 6px; color: #51473d; font-size: 12px; font-weight: 700; }
+.media-edit-grid .full { grid-column: 1 / -1; }
+.media-edit-grid input, .media-edit-grid textarea { box-sizing: border-box; width: 100%; border: 1px solid #bdb09e; background:#fffdf8; color:#332b25; padding:10px 11px; font: inherit; }
+@media (max-width: 620px) { .media-edit-grid { grid-template-columns: 1fr; } .media-edit-grid .full { grid-column: auto; } }
