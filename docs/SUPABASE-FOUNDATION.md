@@ -30,6 +30,8 @@ After Christopher has created an Auth account and the trigger has created their 
 ```sql
 update public.profiles
 set
+  username = 'christopher',
+  display_name = 'Christopher',
   role = 'admin',
   approved_at = now(),
   approved_by = id
@@ -37,6 +39,21 @@ where id = 'AUTH-USER-UUID-HERE';
 ```
 
 This is intentionally a manual, one-time database-admin action. It avoids any unsafe “first person to claim the Christopher username becomes admin” rule.
+
+## Import Kit’s existing collection
+
+1. Run [the legacy-ID migration](../supabase/migrations/20260712060000_add_legacy_media_id.sql) in the SQL Editor.
+2. On your own computer, set the service-role key only for the current PowerShell session. Do not paste it into the repository, GitHub Actions, or chat:
+
+```powershell
+$env:SUPABASE_URL = 'https://sswmltwdflqqspsokyrb.supabase.co'
+$env:SUPABASE_SERVICE_ROLE_KEY = 'your-service-role-key'
+npm run import-supabase
+```
+
+The importer creates `Kit’s Collection` from `public/media-data.json`, including shelves, media details, memberships, and positions. It refuses to overwrite an existing collection. Use `npm run import-supabase -- --replace` only when you deliberately want to replace the entire imported Kit collection from the static export.
+
+The service-role key is required only because this is a one-time trusted migration. The browser uses only the Supabase publishable key and is protected by RLS.
 
 ## Security checks
 
