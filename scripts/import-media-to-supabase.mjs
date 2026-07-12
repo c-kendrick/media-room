@@ -49,11 +49,13 @@ function shelfKey(shelf) {
 const snapshot = JSON.parse(await readFile(new URL('../public/media-data.json', import.meta.url), 'utf8'));
 
 const profiles = await request('GET', 'profiles', {
-  query: { username: 'eq.christopher', select: 'id,role,approved_at', limit: '1' },
+  query: process.env.SUPABASE_OWNER_ID
+    ? { id: 'eq.' + process.env.SUPABASE_OWNER_ID, select: 'id,role,approved_at', limit: '1' }
+    : { role: 'eq.admin', approved_at: 'not.is.null', select: 'id,role,approved_at', limit: '2' },
 });
 const owner = profiles[0];
-if (!owner || owner.role !== 'admin' || !owner.approved_at) {
-  throw new Error('Could not find an approved Christopher admin profile.');
+if (!owner || owner.role !== 'admin' || !owner.approved_at || (!process.env.SUPABASE_OWNER_ID && profiles.length !== 1)) {
+  throw new Error('Set SUPABASE_OWNER_ID to Christopher’s Auth UUID, or ensure there is exactly one approved admin.');
 }
 
 const existingCollections = await request('GET', 'collections', {
