@@ -102,10 +102,10 @@ export function reorderShelves(accessToken, collectionId, section, orderedShelfI
   return supabaseRequest('/rest/v1/rpc/reorder_shelves', { method: 'POST', fresh: true, body: { target_collection_id: collectionId, target_section: section, ordered_shelf_ids: orderedShelfIds }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
-export function setInterest(accessToken, mediaItemId, enabled) {
+export function setInterest(accessToken, userId, mediaItemId, enabled) {
+  if (!accessToken || !userId || !mediaItemId) throw new Error('An approved signed-in account is required.');
   const path = '/rest/v1/media_interest?media_item_id=eq.' + encodeURIComponent(mediaItemId);
   return enabled
-    ? supabaseRequest('/rest/v1/media_interest', { method: 'POST', fresh: true, body: { media_item_id: mediaItemId }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'resolution=ignore-duplicates' } })
+    ? supabaseRequest('/rest/v1/media_interest', { method: 'POST', fresh: true, body: { media_item_id: mediaItemId, user_id: userId }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'resolution=ignore-duplicates' } })
     : supabaseRequest(path, { method: 'DELETE', fresh: true, headers: { Authorization: 'Bearer ' + accessToken } });
 }
-
