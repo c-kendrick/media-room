@@ -223,20 +223,46 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [collections, setCollections] = useState([]);
   const [collectionId, setCollectionId] = useState(null);
+  const [collectionLoading, setCollectionLoading] = useState(false);
+  const snapshotCache = useRef(new Map());
+  const latestRequest = useRef(0);
 
-  const refresh = async ({ fresh = false, notify = false } = {}) => {
+  const cacheSnapshot = (snapshot, requestedCollectionId = null) => {
+    if (snapshot?.collectionId) snapshotCache.current.set(snapshot.collectionId, snapshot);
+    if (!requestedCollectionId) snapshotCache.current.set('default', snapshot);
+  };
+
+  const refresh = async ({ fresh = false, notify = false, targetCollectionId = collectionId } = {}) => {
+    const request = ++latestRequest.current;
     if (fresh) setRefreshing(true);
     try {
-      const snapshot = await loadMediaSnapshot({ fresh, collectionId });
+      const snapshot = await loadMediaSnapshot({ fresh, collectionId: targetCollectionId });
+      cacheSnapshot(snapshot, targetCollectionId);
+      if (request !== latestRequest.current) return;
       setData(snapshot);
       setError('');
       if (notify) setToast('Public media data refreshed.');
     } catch (loadError) {
+      if (request !== latestRequest.current) return;
       setError(loadError.message);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (request === latestRequest.current) {
+        setLoading(false);
+        setRefreshing(false);
+        setCollectionLoading(false);
+      }
     }
+  };
+
+  const selectCollection = (nextCollectionId) => {
+    if (nextCollectionId === collectionId || nextCollectionId === data?.collectionId) return;
+    const cached = snapshotCache.current.get(nextCollectionId);
+    setCollectionId(nextCollectionId);
+    setSelectedMediaId(null);
+    setError('');
+    if (cached) setData(cached);
+    setCollectionLoading(!cached);
+    setMobileNav(false);
   };
 
   useEffect(() => {
@@ -246,6 +272,30 @@ export default function App() {
   useEffect(() => {
     loadPublicCollections({ fresh: true }).then(setCollections).catch(() => setCollections([]));
   }, [data?.collectionId]);
+
+  useEffect(() => {
+    if (!data?.collectionId || !collections.length) return undefined;
+    let cancelled = false;
+    const prefetch = async () => {
+      for (const collection of collections) {
+        if (cancelled || snapshotCache.current.has(collection.id)) continue;
+        try {
+          const snapshot = await loadMediaSnapshot({ collectionId: collection.id });
+          if (!cancelled) cacheSnapshot(snapshot, collection.id);
+        } catch {
+          // Prefetch is best-effort; foreground navigation retains its own error state.
+        }
+      }
+    };
+    const idle = window.requestIdleCallback
+      ? window.requestIdleCallback(prefetch, { timeout: 1800 })
+      : window.setTimeout(prefetch, 500);
+    return () => {
+      cancelled = true;
+      if (window.cancelIdleCallback) window.cancelIdleCallback(idle);
+      else window.clearTimeout(idle);
+    };
+  }, [collections, data?.collectionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -315,7 +365,7 @@ export default function App() {
             <Clapperboard size={17} />Media
           </button>
           <small className="collection-nav-label">COLLECTIONS</small>
-          {data?.storage === 'supabase' && collections.map((collection) => <button key={collection.id} className={collection.id === data?.collectionId ? 'active' : ''} onClick={() => { setCollectionId(collection.id); setMobileNav(false); }}>
+          {data?.storage === 'supabase' && collections.map((collection) => <button key={collection.id} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)}>
             <UserRound size={17} />{collection.title}
           </button>)}
         </nav>
@@ -354,7 +404,7 @@ export default function App() {
 
         {error && <div className="error-banner">The public collection could not refresh: {error}</div>}
 
-        <main>
+        <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
           <MediaView data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} accessToken={account?.session?.access_token} refresh={refresh} onExport={() => exportCollection(data)} />
         </main>
         <footer>Published from Kit’s Local Media Room.</footer>
@@ -378,7 +428,27 @@ export default function App() {
           }}
           canInterest={Boolean(account?.profile?.approved_at && ['film', 'television'].includes(selectedMedia.type))}
           interested={Boolean(selectedMedia.interests?.some((person) => person?.username === account?.profile?.username))}
-          onInterest={async (enabled) => { try { await setInterest(account.session.access_token, account.profile.id, selectedMedia.database_id, enabled); await refresh({ fresh: true }); setToast(enabled ? 'Priority Watch added.' : 'Priority Watch removed.'); } catch (error) { setToast('Priority Watch could not be updated. Please try again.'); throw error; } }}
+          onInterest={async (enabled) => {
+            const previousData = data;
+            const person = { id: account.profile.id, username: account.profile.username, display_name: account.profile.display_name };
+            const optimisticData = {
+              ...data,
+              media: data.media.map((item) => item.database_id === selectedMedia.database_id
+                ? { ...item, interests: enabled ? [...(item.interests || []).filter((entry) => entry.id !== person.id), person] : (item.interests || []).filter((entry) => entry.id !== person.id) }
+                : item),
+            };
+            setData(optimisticData);
+            cacheSnapshot(optimisticData, data.collectionId);
+            try {
+              await setInterest(account.session.access_token, account.profile.id, selectedMedia.database_id, enabled);
+              setToast(enabled ? 'Priority Watch added.' : 'Priority Watch removed.');
+            } catch (error) {
+              cacheSnapshot(previousData, previousData.collectionId);
+              setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
+              setToast('Priority Watch could not be updated. Please try again.');
+              throw error;
+            }
+          }}
           onDelete={async (permanent) => { if (!window.confirm(permanent ? 'Permanently delete this item? This cannot be undone.' : 'Move this item to Bin?')) return; permanent ? await permanentlyDeleteMedia(account.session.access_token, selectedMedia.database_id) : await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); setSelectedMediaId(null); await refresh({ fresh: true }); setToast(permanent ? 'Media permanently deleted.' : 'Media moved to Bin.'); }}
           onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
         />
