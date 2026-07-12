@@ -25,6 +25,7 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
 import { replaceMediaShelfMemberships, updateMediaItem } from './media-write.js';
+import { approveProfile, listProfiles, rejectProfile } from './admin.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -196,6 +197,7 @@ export default function App() {
   const [account, setAccount] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   const refresh = async ({ fresh = false, notify = false } = {}) => {
     if (fresh) setRefreshing(true);
@@ -371,9 +373,11 @@ export default function App() {
             setAccountOpen(false);
             setToast('Signed out.');
           }}
+          onManageUsers={() => { setAccountOpen(false); setAdminOpen(true); }}
         />
       )}
 
+      {adminOpen && <AdminUsers accessToken={account?.session?.access_token} onClose={() => setAdminOpen(false)} />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
     </div>
   );
@@ -648,7 +652,7 @@ function SearchModal({ data, query, setQuery, onClose, onOpen }) {
 }
 
 
-function AccountDialog({ account, onClose, onSignedIn, onSignedOut }) {
+function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -700,7 +704,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut }) {
             <span className="eyebrow">SIGNED IN</span>
             <h2>{account.profile?.display_name || account.profile?.username || 'Media Room member'}</h2>
             <p>{account.profile?.role === 'admin' ? 'Administrator account' : account.profile?.approved_at ? 'Approved member' : 'Pending approval'}</p>
-            <Button icon={LogOut} onClick={leave} disabled={submitting}>Sign out</Button>
+            {account.profile?.role === 'admin' && <Button onClick={onManageUsers}>User management</Button>}<Button icon={LogOut} onClick={leave} disabled={submitting}>Sign out</Button>
           </>
         ) : (
           <>
@@ -788,4 +792,12 @@ function EditMediaDialog({ item, onClose, onSave }) {
       <Button type="submit" icon={Pencil} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>
     </form>
   </div>;
+}
+
+function AdminUsers({ accessToken, onClose }) {
+ const [users,setUsers]=useState([]); const [error,setError]=useState(''); const [busy,setBusy]=useState('');
+ const load=()=>listProfiles(accessToken).then(setUsers).catch(()=>setError('Could not load users.'));
+ useEffect(()=>{load();},[]);
+ const act=async(type,id)=>{setBusy(id);setError('');try{await (type==='approve'?approveProfile:rejectProfile)(accessToken,id);await load();}catch{setError('That user could not be updated.');}finally{setBusy('');}};
+ return <div className="modal-layer"><section className="media-edit-dialog"><button className="close" onClick={onClose}><X/></button><span className="eyebrow">ADMIN</span><h2>User Management</h2>{error&&<p className="auth-error">{error}</p>}<div className="user-list">{users.map(u=><div className="user-row" key={u.id}><span><b>{u.display_name}</b><small>@{u.username}</small></span><span>{u.approved_at?'Approved':u.rejected_at?'Rejected':'Pending'}</span>{!u.approved_at&&!u.rejected_at&&<Button disabled={busy===u.id} onClick={()=>act('approve',u.id)}>Approve</Button>}{!u.approved_at&&!u.rejected_at&&<Button disabled={busy===u.id} onClick={()=>act('reject',u.id)}>Reject</Button>}</div>)}</div></section></div>;
 }
