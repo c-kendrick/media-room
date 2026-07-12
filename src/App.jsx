@@ -49,6 +49,20 @@ function active(rows) {
   return (rows || []).filter((row) => !row.deleted_at);
 }
 
+function useEscape(onClose, active = true) {
+  useEffect(() => {
+    if (!active) return undefined;
+    const close = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', close, true);
+    return () => window.removeEventListener('keydown', close, true);
+  }, [active, onClose]);
+}
+
 function exportCollection(snapshot) {
   const payload = { exported_at: new Date().toISOString(), format: 'media-room/v1', collection: { id: snapshot.collectionId, title: snapshot.collectionTitle, owner_id: snapshot.ownerId }, shelves: snapshot.mediaShelves, media: snapshot.media };
   const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
@@ -103,14 +117,6 @@ function mediaTagTone(value, isGame = false) {
 function cleanImportedMediaTitle(value) {
   const title = String(value ?? '');
   return /^\d{4}\.0$/.test(title) ? title.slice(0, -2) : title;
-}
-
-function chunk(values, size) {
-  const pages = [];
-  for (let index = 0; index < values.length; index += size) {
-    pages.push(values.slice(index, index + size));
-  }
-  return pages;
 }
 
 function mediaShelvesForSection(data, section) {
@@ -276,7 +282,7 @@ export default function App() {
   }, [toast]);
 
   if (loading) {
-    return <div className="loading-screen"><div className="brand-mark">KM</div><p>Opening Kit’s Media Room…</p></div>;
+    return <div className="loading-screen"><div className="brand-mark">KM</div><p>Opening Kitâ€™s Media Roomâ€¦</p></div>;
   }
 
   if (!data) {
@@ -302,7 +308,7 @@ export default function App() {
       <aside className={cls('sidebar', mobileNav && 'open')}>
         <button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
           <span className="brand-mark">KM</span>
-          <span><strong>Kit’s Media<br />Room</strong><small>A LIVING LIBRARY</small></span>
+          <span><strong>Kitâ€™s Media<br />Room</strong><small>A LIVING LIBRARY</small></span>
         </button>
         <nav>
           <button className="active" onClick={() => { setMobileNav(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
@@ -314,12 +320,12 @@ export default function App() {
           </button>)}
         </nav>
         <div className="sidebar-bottom">
-          <blockquote>“Screen, shelf & story.”</blockquote>
+          <blockquote>â€œScreen, shelf & story.â€</blockquote>
           <button className="drive-state" onClick={() => refresh({ fresh: true, notify: true })}>
             <Cloud size={16} />
             <span>
               <strong>Public collection</strong>
-              <small>{refreshing ? 'Refreshing…' : generatedAt ? `Published ${generatedAt.toLocaleDateString('en-AU')}` : 'Static snapshot'}</small>
+              <small>{refreshing ? 'Refreshingâ€¦' : generatedAt ? `Published ${generatedAt.toLocaleDateString('en-AU')}` : 'Static snapshot'}</small>
             </span>
           </button>
         </div>
@@ -331,11 +337,11 @@ export default function App() {
         <header className="topbar">
           <button className="mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button>
           <button className="search-trigger" onClick={() => setSearchOpen(true)}>
-            <Search size={17} /><span>Search the collection…</span><kbd><Command size={12} />K</kbd>
+            <Search size={17} /><span>Search the collectionâ€¦</span><kbd><Command size={12} />K</kbd>
           </button>
           <div className="top-actions">
             <span className="today"><CalendarDays size={14} />{new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}</span>
-            {authLoading ? <span className="account-state">Checking account…</span> : (
+            {authLoading ? <span className="account-state">Checking accountâ€¦</span> : (
               <Button className="account-button" icon={account ? UserRound : LogIn} onClick={() => setAccountOpen(true)}>
                 {account?.profile?.display_name || account?.profile?.username || 'Sign in'}
               </Button>
@@ -351,7 +357,7 @@ export default function App() {
         <main>
           <MediaView data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} accessToken={account?.session?.access_token} refresh={refresh} onExport={() => exportCollection(data)} />
         </main>
-        <footer>Published from Kit’s Local Media Room.</footer>
+        <footer>Published from Kitâ€™s Local Media Room.</footer>
       </div>
 
       {selectedMedia && (
@@ -516,7 +522,7 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
         </div>
 
         <div className={cls('media-filters', section === 'screen' && 'has-type')}>
-          <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}…`} /></label>
+          <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}â€¦`} /></label>
           <MultiSelect label="All lists" values={listFilters} options={shelves.map((shelf) => [shelf.shelf_id, shelf.name])} onChange={setListFilters} />
           {section === 'screen' && <MultiSelect label="Film & TV" values={typeFilters} options={sectionTypes} onChange={setTypeFilters} />}
           <MultiSelect label={section === 'game' ? 'All platforms' : 'All formats'} values={formatFilters} options={formats.map((value) => [value, value])} onChange={setFormatFilters} />
@@ -557,7 +563,10 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onM
   const [arranging, setArranging] = useState(false);
   const serverOrderKey = items.map((item) => `${item.database_id}:${item.list_positions?.[shelf.shelf_id] ?? ''}`).join('|');
   useEffect(() => { setDisplayItems(items); }, [serverOrderKey]);
-  const pages = chunk(displayItems, 14);
+  const rowBreak = Math.ceil(displayItems.length / 2);
+  const displayRows = [displayItems.slice(0, rowBreak), displayItems.slice(rowBreak)];
+  const pageCount = Math.ceil(Math.max(...displayRows.map((row) => row.length), 0) / 7);
+  const displayPages = Array.from({ length: pageCount }, (_, pageIndex) => displayRows.map((row) => row.slice(pageIndex * 7, (pageIndex + 1) * 7)));
   const scrollPage = (direction) => {
     const track = trackRef.current;
     if (!track) return;
@@ -583,11 +592,9 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onM
         </div>
       </div>
       <div className="poster-track" ref={trackRef}>
-        {pages.map((page, pageIndex) => (
-          <div className="poster-page" key={pageIndex}>
-            {page.map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} draggable={canEdit} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const previous = [...displayItems]; const next = [...displayItems]; const from = next.findIndex((row) => row.database_id === draggedId); const to = next.findIndex((row) => row.database_id === item.database_id); next.splice(to, 0, next.splice(from, 1)[0]); setDisplayItems(next); setDraggedId(null); try { await onReorder(next.map((row) => row.database_id)); } catch { setDisplayItems(previous); } }} />)}
-          </div>
-        ))}
+        {displayPages.map((pageRows, pageIndex) => <div className="poster-page" key={pageIndex}>
+          {pageRows.flat().map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} draggable={canEdit} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const previous = [...displayItems]; const next = [...displayItems]; const from = next.findIndex((entry) => entry.database_id === draggedId); const to = next.findIndex((entry) => entry.database_id === item.database_id); next.splice(to, 0, next.splice(from, 1)[0]); setDisplayItems(next); setDraggedId(null); try { await onReorder(next.map((entry) => entry.database_id)); } catch { setDisplayItems(previous); } }} />)}
+        </div>)}
         {!displayItems.length && <div className="empty-poster">No items on this shelf yet.</div>}
       </div>
       {arranging && <ArrangeShelfDialog shelf={shelf} items={displayItems} onClose={() => setArranging(false)} onSave={async (nextItems) => { const previous = [...displayItems]; setDisplayItems(nextItems); setArranging(false); try { await onReorder(nextItems.map((item) => item.database_id)); } catch { setDisplayItems(previous); } }} />}
@@ -596,8 +603,11 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onM
 }
 
 function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
+  useEscape(onClose);
   const [ordered, setOrdered] = useState(items);
   const [saving, setSaving] = useState(false);
+  const [draggedItemId, setDraggedItemId] = useState(null);
+  const [positionDrafts, setPositionDrafts] = useState({});
   const move = (index, destination) => {
     if (destination < 0 || destination >= ordered.length || destination === index) return;
     setOrdered((current) => {
@@ -606,22 +616,37 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
       return next;
     });
   };
+  const moveById = (itemId, destination) => {
+    const index = ordered.findIndex((item) => item.database_id === itemId);
+    move(index, destination);
+  };
+  const commitPosition = (itemId, currentIndex) => {
+    const raw = positionDrafts[itemId];
+    const destination = Math.max(0, Math.min(ordered.length - 1, Number(raw) - 1));
+    if (Number.isInteger(destination)) move(currentIndex, destination);
+    setPositionDrafts((current) => { const next = { ...current }; delete next[itemId]; return next; });
+  };
+  const rowBreak = Math.ceil(ordered.length / 2);
+  const rows = [ordered.slice(0, rowBreak), ordered.slice(rowBreak)];
   return <div className="modal-layer editor-layer"><section className="media-edit-dialog arrange-dialog">
     <button className="close" type="button" onClick={onClose} aria-label="Close arranger"><X /></button>
     <span className="eyebrow">ARRANGE SHELF</span><h2>{shelf.name}</h2>
-    <p className="dialog-intro">Move anything directly, then save once. This is easier for long shelves than dragging across the screen.</p>
-    <ol className="arrange-list">{ordered.map((item, index) => <li key={item.database_id}>
-      <span className="arrange-position">{index + 1}</span>
-      {item.poster_url ? <img src={item.poster_url} alt="" /> : <span className="arrange-poster-fallback"><Clapperboard size={13} /></span>}
-      <strong>{cleanImportedMediaTitle(item.title)}</strong>
-      <div className="arrange-row-actions">
-        <button disabled={index === 0} onClick={() => move(index, 0)} title="Move to top" aria-label={`Move ${item.title} to top`}><ChevronsUp size={14} /></button>
-        <button disabled={index === 0} onClick={() => move(index, index - 1)} title="Move up" aria-label={`Move ${item.title} up`}><ArrowUp size={14} /></button>
-        <button disabled={index === ordered.length - 1} onClick={() => move(index, index + 1)} title="Move down" aria-label={`Move ${item.title} down`}><ArrowDown size={14} /></button>
-        <button disabled={index === ordered.length - 1} onClick={() => move(index, ordered.length - 1)} title="Move to end" aria-label={`Move ${item.title} to end`}><ChevronsDown size={14} /></button>
-      </div>
-    </li>)}</ol>
-    <div className="dialog-actions"><button className="text-button" onClick={onClose}>Cancel</button><Button disabled={saving} onClick={async () => { setSaving(true); try { await onSave(ordered); } finally { setSaving(false); } }}>{saving ? 'Saving…' : 'Save order'}</Button></div>
+    <p className="dialog-intro">Drag an item anywhereâ€”including between rowsâ€”or click its position number and type exactly where it should go.</p>
+    <div className="arrange-help"><span><GripVertical size={13} />Drag to move</span><span className="position-demo">12</span><span>Click a number to enter a position</span></div>
+    <div className="arrange-rows">{rows.map((row, rowIndex) => <section className="arrange-row" key={rowIndex}>
+      <header><span>ROW {rowIndex + 1}</span><small>{row.length ? `${rowIndex === 0 ? 1 : rowBreak + 1}â€“${rowIndex === 0 ? rowBreak : ordered.length}` : 'Empty'}</small></header>
+      <ol className="arrange-list">{row.map((item) => { const index = ordered.findIndex((entry) => entry.database_id === item.database_id); return <li className={draggedItemId === item.database_id ? 'dragging' : ''} key={item.database_id} draggable onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedItemId(item.database_id); }} onDragEnd={() => setDraggedItemId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (draggedItemId && draggedItemId !== item.database_id) moveById(draggedItemId, index); setDraggedItemId(null); }}>
+        <GripVertical className="arrange-grip" size={14} />
+        <input className="arrange-position" aria-label={`Position for ${item.title}`} inputMode="numeric" value={positionDrafts[item.database_id] ?? index + 1} onFocus={() => setPositionDrafts((current) => ({ ...current, [item.database_id]: String(index + 1) }))} onChange={(event) => setPositionDrafts((current) => ({ ...current, [item.database_id]: event.target.value.replace(/\D/g, '') }))} onBlur={() => commitPosition(item.database_id, index)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
+        {item.poster_url ? <img src={item.poster_url} alt="" /> : <span className="arrange-poster-fallback"><Clapperboard size={13} /></span>}
+        <strong>{cleanImportedMediaTitle(item.title)}</strong>
+        <div className="arrange-row-actions">
+          <button disabled={index === 0} onClick={() => move(index, 0)} title="Move to beginning" aria-label={`Move ${item.title} to beginning`}><ChevronsUp size={14} /></button>
+          <button disabled={index === ordered.length - 1} onClick={() => move(index, ordered.length - 1)} title="Move to end" aria-label={`Move ${item.title} to end`}><ChevronsDown size={14} /></button>
+        </div>
+      </li>; })}</ol>
+    </section>)}</div>
+    <div className="dialog-actions"><button className="text-button" onClick={onClose}>Cancel</button><Button disabled={saving} onClick={async () => { setSaving(true); try { await onSave(ordered); } finally { setSaving(false); } }}>{saving ? 'Savingâ€¦' : 'Save order'}</Button></div>
   </section></div>;
 }
 
@@ -640,9 +665,9 @@ function MediaCard({ item, onClick, draggable, dragging, onDragStart, onDragEnd,
             {tags.map((tag) => <span className={cls('media-format-tag', mediaTagTone(tag, item.type === 'game'))} key={tag}>{tag}</span>)}
           </span>
         )}
-        {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
+        {tags.length > 0 && item.year && <span className="media-meta-dash">â€”</span>}
         {item.year && <span className="media-year">{item.year}</span>}
-        {item.interests?.map((person) => <span className="card-interest" title={person.display_name || person.username} key={person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
+        {item.interests?.map((person) => <span className="card-interest" title={person.display_name || person.username} key={person.username}>â€” {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
       </span>
     </button>
   );
@@ -655,6 +680,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
   const [savingShelves, setSavingShelves] = useState(false);
   const [shelfError, setShelfError] = useState('');
   const [optimisticInterest, setOptimisticInterest] = useState(interested);
+  useEscape(() => setEditingShelves(false), editingShelves);
   useEffect(() => { setOptimisticInterest(interested); }, [interested, item.database_id]);
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
@@ -671,7 +697,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
               : <div className="poster-fallback"><Clapperboard /><span>{title}</span></div>}
           </div>
           <div className="drawer-copy">
-            <span className="eyebrow">{item.type}{item.runtime ? ` · ${item.runtime} min` : ''}</span>
+            <span className="eyebrow">{item.type}{item.runtime ? ` Â· ${item.runtime} min` : ''}</span>
             <h1>{title}</h1>
             <div className="drawer-meta-tags">
               {tags.length > 0 && (
@@ -679,12 +705,12 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
                   {tags.map((tag) => <span className={cls('drawer-format-tag', mediaTagTone(tag, item.type === 'game'))} key={tag}>{tag}</span>)}
                 </span>
               )}
-              {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
+              {tags.length > 0 && item.year && <span className="media-meta-dash">â€”</span>}
               {item.year && <span className="drawer-year">{item.year}</span>}
-              {item.interests?.map((person) => <span className="interest-initial" title={person.display_name} key={person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
+              {item.interests?.map((person) => <span className="interest-initial" title={person.display_name} key={person.username}>â€” {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
             </div>
             <p className="creator">{item.director || item.creator}</p>
-            {canInterest && <button className={cls('priority-watch', optimisticInterest && 'active')} onClick={async () => { const previous = optimisticInterest; const next = !previous; setOptimisticInterest(next); try { await onInterest(next); } catch { setOptimisticInterest(previous); } }}><span>{optimisticInterest ? '✓' : '+'}</span>{optimisticInterest ? 'Priority Watch' : 'Mark Priority Watch'}</button>}
+            {canInterest && <button className={cls('priority-watch', optimisticInterest && 'active')} onClick={async () => { const previous = optimisticInterest; const next = !previous; setOptimisticInterest(next); try { await onInterest(next); } catch { setOptimisticInterest(previous); } }}><span>{optimisticInterest ? 'âœ“' : '+'}</span>{optimisticInterest ? 'Priority Watch' : 'Mark Priority Watch'}</button>}
             {canEdit && <div className="drawer-owner-actions">
               <Button className="drawer-edit-button primary" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>
               <Button className="drawer-edit-button" onClick={() => {
@@ -718,7 +744,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
           try { await onUpdateShelves(item.lists || [], selectedShelves); setEditingShelves(false); }
           catch { setShelfError('The shelf membership could not be saved. Existing shelves were left in place.'); }
           finally { setSavingShelves(false); }
-        }}>{savingShelves ? 'Saving…' : 'Save shelves'}</Button>
+        }}>{savingShelves ? 'Savingâ€¦' : 'Save shelves'}</Button>
       </section></div>}
       {editing && <EditMediaDialog item={item} onClose={() => setEditing(false)} onSave={async (changes) => {
         await onUpdate(changes);
@@ -729,6 +755,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
 }
 
 function SearchModal({ data, query, setQuery, onClose, onOpen }) {
+  useEscape(onClose);
   const normalizedQuery = query.trim().toLowerCase();
   const results = normalizedQuery
     ? active(data.media).filter((item) => `${item.title} ${item.creator || ''} ${item.director || ''} ${item.type} ${(item.genres || []).join(' ')}`.toLowerCase().includes(normalizedQuery))
@@ -739,7 +766,7 @@ function SearchModal({ data, query, setQuery, onClose, onOpen }) {
       <div className="search-modal">
         <div className="search-box">
           <Search />
-          <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search films, television, books and video games…" />
+          <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search films, television, books and video gamesâ€¦" />
           <button onClick={onClose}><X /></button>
         </div>
         <div className="search-results">
@@ -760,6 +787,7 @@ function SearchModal({ data, query, setQuery, onClose, onOpen }) {
 
 
 function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers }) {
+  useEscape(onClose);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -824,7 +852,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
               <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} required /></label>
               {registering && <p>Use a recognisable real name for this private group, and do not reuse an important password.</p>}
               {error && <p className="auth-error">{error}</p>}
-              <Button type="submit" icon={LogIn} disabled={submitting}>{submitting ? 'Working…' : registering ? 'Create account' : 'Sign in'}</Button>
+              <Button type="submit" icon={LogIn} disabled={submitting}>{submitting ? 'Workingâ€¦' : registering ? 'Create account' : 'Sign in'}</Button>
               <button className="auth-switch" type="button" onClick={() => { setRegistering(!registering); setError(''); }}>{registering ? 'I already have an account' : 'Create an account'}</button>
             </form>
           </>
@@ -836,16 +864,18 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
 
 
 function AddMediaDialog({ section, shelves, initialShelfIds = [], onClose, onSave }) {
+  useEscape(onClose);
   const [title, setTitle] = useState(''); const [type, setType] = useState(section === 'screen' ? 'film' : section); const [year, setYear] = useState(''); const [shelfIds, setShelfIds] = useState(initialShelfIds); const [saving, setSaving] = useState(false); const [error, setError] = useState('');
   const destination = shelves.find((shelf) => shelfIds.includes(shelf.shelf_id));
   return <div className="modal-layer editor-layer"><form className="media-edit-dialog add-media-dialog" onSubmit={async (event) => { event.preventDefault(); if (!title.trim()) return; setSaving(true); setError(''); try { await onSave({ title: title.trim(), type, year: year ? Number(year) : null, platforms: [], genres: [] }, shelfIds); } catch { setError('The media item could not be saved. Check the fields and try again.'); setSaving(false); } }}>
     <button className="close" type="button" onClick={onClose} aria-label="Close add item"><X /></button><span className="eyebrow">ADD TO {destination?.name?.toUpperCase() || 'COLLECTION'}</span><h2>Add an item</h2><p className="dialog-intro">Start with the essentials. You can add artwork, notes and full details after saving.</p>
     <div className="media-edit-grid"><label className="full">Title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title" required /></label><label>Type<select value={type} onChange={(event) => setType(event.target.value)}>{section === 'screen' ? <><option value="film">Film</option><option value="television">Television</option></> : <option value={section}>{section === 'book' ? 'Book' : 'Video game'}</option>}</select></label><label>Year <span className="optional">optional</span><input type="number" min="1000" max="3000" placeholder="YYYY" value={year} onChange={(event) => setYear(event.target.value)} /></label><fieldset className="full shelf-picker"><legend>Also add to</legend>{shelves.map((shelf) => <label className={shelfIds.includes(shelf.shelf_id) ? 'selected' : ''} key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} /><span>{shelf.name}</span></label>)}</fieldset></div>
-    {error && <p className="auth-error">{error}</p>}<div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={saving}>{saving ? 'Adding…' : 'Add item'}</Button></div>
+    {error && <p className="auth-error">{error}</p>}<div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={saving}>{saving ? 'Addingâ€¦' : 'Add item'}</Button></div>
   </form></div>;
 }
 
 function EditMediaDialog({ item, onClose, onSave }) {
+  useEscape(onClose);
   const [form, setForm] = useState({
     title: item.title || '', year: item.year ?? '', creator: item.creator || '', director: item.director || '',
     description: item.description || '', notes: item.notes || '', poster_url: item.poster_url || '',
@@ -869,7 +899,7 @@ function EditMediaDialog({ item, onClose, onSave }) {
     const runtime = optionalNumber(form.runtime, { integer: true, min: 1 });
     const rating = optionalNumber(form.rating, { min: 0, max: 10 });
     if (year === undefined || runtime === undefined || rating === undefined || !form.title.trim()) {
-      setError('Enter a title, a whole year from 1000–3000, a positive whole runtime, and a rating from 0–10.');
+      setError('Enter a title, a whole year from 1000â€“3000, a positive whole runtime, and a rating from 0â€“10.');
       return;
     }
     setSaving(true);
@@ -900,21 +930,23 @@ function EditMediaDialog({ item, onClose, onSave }) {
         <label>Platforms (comma separated)<input value={form.platforms} onChange={set('platforms')} /></label>
         <label>Genres (comma separated)<input value={form.genres} onChange={set('genres')} /></label>
         <label>Runtime (minutes)<input type="number" value={form.runtime} onChange={set('runtime')} /></label>
-        <label>Rating (0–10)<input type="number" step="0.1" value={form.rating} onChange={set('rating')} /></label>
+        <label>Rating (0â€“10)<input type="number" step="0.1" value={form.rating} onChange={set('rating')} /></label>
         <label className="full">Poster URL<input type="url" value={form.poster_url} onChange={set('poster_url')} /></label>
         <label className="full">Description<textarea value={form.description} onChange={set('description')} rows="4" /></label>
         <label className="full">Notes<textarea value={form.notes} onChange={set('notes')} rows="3" /></label>
       </div>
       {error && <p className="auth-error">{error}</p>}
-      <Button type="submit" icon={Pencil} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>
+      <Button type="submit" icon={Pencil} disabled={saving}>{saving ? 'Savingâ€¦' : 'Save changes'}</Button>
     </form>
   </div>;
 }
 
 function AdminUsers({ accessToken, onClose }) {
+ useEscape(onClose);
  const [users,setUsers]=useState([]); const [error,setError]=useState(''); const [busy,setBusy]=useState('');
  const load=()=>listProfiles(accessToken).then(setUsers).catch(()=>setError('Could not load users.'));
  useEffect(()=>{load();},[]);
  const act=async(type,id)=>{setBusy(id);setError('');try{await (type==='approve'?approveProfile:rejectProfile)(accessToken,id);await load();}catch{setError('That user could not be updated.');}finally{setBusy('');}};
  return <div className="modal-layer"><section className="media-edit-dialog"><button className="close" onClick={onClose}><X/></button><span className="eyebrow">ADMIN</span><h2>User Management</h2>{error&&<p className="auth-error">{error}</p>}<div className="user-list">{users.map(u=><div className="user-row" key={u.id}><span><b>{u.display_name}</b><small>@{u.username}</small></span><span>{u.approved_at?'Approved':u.rejected_at?'Rejected':'Pending'}</span>{!u.approved_at&&!u.rejected_at&&<Button disabled={busy===u.id} onClick={()=>act('approve',u.id)}>Approve</Button>}{!u.approved_at&&!u.rejected_at&&<Button disabled={busy===u.id} onClick={()=>act('reject',u.id)}>Reject</Button>}</div>)}</div></section></div>;
 }
+
