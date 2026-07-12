@@ -1,4 +1,4 @@
-import { loadKitCollectionFromSupabase } from './supabase-data.js';
+import { loadCollectionFromSupabase } from './supabase-data.js';
 
 async function loadStaticSnapshot({ fresh = false } = {}) {
   const relative = `${import.meta.env.BASE_URL}media-data.json`;
@@ -18,9 +18,9 @@ function assertSnapshot(data) {
   return data;
 }
 
-export async function loadMediaSnapshot({ fresh = false } = {}) {
+export async function loadMediaSnapshot({ fresh = false, collectionId } = {}) {
   try {
-    const supabaseSnapshot = await loadKitCollectionFromSupabase({ fresh });
+    const supabaseSnapshot = await loadCollectionFromSupabase({ fresh, collectionId });
     if (supabaseSnapshot) return assertSnapshot(supabaseSnapshot);
   } catch (error) {
     // The static export keeps the public site available until the one-time
@@ -28,5 +28,7 @@ export async function loadMediaSnapshot({ fresh = false } = {}) {
     console.warn('Falling back to the static Media Room export.', error);
   }
 
+  if (collectionId) throw new Error('That collection is temporarily unavailable. Please try again.');
   return assertSnapshot(await loadStaticSnapshot({ fresh }));
 }
+

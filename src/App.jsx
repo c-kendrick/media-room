@@ -24,7 +24,8 @@ import {
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
-import { replaceMediaShelfMemberships, updateMediaItem } from './media-write.js';
+import { loadPublicCollections } from './supabase-data.js';
+import { createMediaItem, createShelf, deleteShelf, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, listProfiles, rejectProfile } from './admin.js';
 
 function cls(...values) {
@@ -37,6 +38,13 @@ function unique(values) {
 
 function active(rows) {
   return (rows || []).filter((row) => !row.deleted_at);
+}
+
+function exportCollection(snapshot) {
+  const payload = { exported_at: new Date().toISOString(), format: 'media-room/v1', collection: { id: snapshot.collectionId, title: snapshot.collectionTitle, owner_id: snapshot.ownerId }, shelves: snapshot.mediaShelves, media: snapshot.media };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url; link.download = `${snapshot.collectionTitle.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase()}-backup.json`; link.click(); URL.revokeObjectURL(url);
 }
 
 function normalizePlatform(value) {
@@ -198,11 +206,13 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [accountOpen, setAccountOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [collections, setCollections] = useState([]);
+  const [collectionId, setCollectionId] = useState(null);
 
   const refresh = async ({ fresh = false, notify = false } = {}) => {
     if (fresh) setRefreshing(true);
     try {
-      const snapshot = await loadMediaSnapshot({ fresh });
+      const snapshot = await loadMediaSnapshot({ fresh, collectionId });
       setData(snapshot);
       setError('');
       if (notify) setToast('Public media data refreshed.');
@@ -216,7 +226,11 @@ export default function App() {
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [collectionId]);
+
+  useEffect(() => {
+    loadPublicCollections({ fresh: true }).then(setCollections).catch(() => setCollections([]));
+  }, [data?.collectionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -253,7 +267,7 @@ export default function App() {
   }, [toast]);
 
   if (loading) {
-    return <div className="loading-screen"><div className="brand-mark">KM</div><p>Opening Kit’s Media Room…</p></div>;
+    return <div className="loading-screen"><div className="brand-mark">KM</div><p>Opening Kitâ€™s Media Roomâ€¦</p></div>;
   }
 
   if (!data) {
@@ -279,20 +293,24 @@ export default function App() {
       <aside className={cls('sidebar', mobileNav && 'open')}>
         <button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
           <span className="brand-mark">KM</span>
-          <span><strong>Kit’s Media<br />Room</strong><small>A LIVING LIBRARY</small></span>
+          <span><strong>Kitâ€™s Media<br />Room</strong><small>A LIVING LIBRARY</small></span>
         </button>
         <nav>
           <button className="active" onClick={() => { setMobileNav(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
             <Clapperboard size={17} />Media
           </button>
+          <small className="collection-nav-label">COLLECTIONS</small>
+          {collections.map((collection) => <button key={collection.id} className={collection.id === data?.collectionId ? 'active' : ''} onClick={() => { setCollectionId(collection.id); setMobileNav(false); }}>
+            <UserRound size={17} />{collection.title}
+          </button>)}
         </nav>
         <div className="sidebar-bottom">
-          <blockquote>“Screen, shelf & story.”</blockquote>
+          <blockquote>â€œScreen, shelf & story.â€</blockquote>
           <button className="drive-state" onClick={() => refresh({ fresh: true, notify: true })}>
             <Cloud size={16} />
             <span>
               <strong>Public collection</strong>
-              <small>{refreshing ? 'Refreshing…' : generatedAt ? `Published ${generatedAt.toLocaleDateString('en-AU')}` : 'Static snapshot'}</small>
+              <small>{refreshing ? 'Refreshingâ€¦' : generatedAt ? `Published ${generatedAt.toLocaleDateString('en-AU')}` : 'Static snapshot'}</small>
             </span>
           </button>
         </div>
@@ -304,11 +322,11 @@ export default function App() {
         <header className="topbar">
           <button className="mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button>
           <button className="search-trigger" onClick={() => setSearchOpen(true)}>
-            <Search size={17} /><span>Search the collection…</span><kbd><Command size={12} />K</kbd>
+            <Search size={17} /><span>Search the collectionâ€¦</span><kbd><Command size={12} />K</kbd>
           </button>
           <div className="top-actions">
             <span className="today"><CalendarDays size={14} />{new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}</span>
-            {authLoading ? <span className="account-state">Checking account…</span> : (
+            {authLoading ? <span className="account-state">Checking accountâ€¦</span> : (
               <Button className="account-button" icon={account ? UserRound : LogIn} onClick={() => setAccountOpen(true)}>
                 {account?.profile?.display_name || account?.profile?.username || 'Sign in'}
               </Button>
@@ -322,9 +340,9 @@ export default function App() {
         {error && <div className="error-banner">The public collection could not refresh: {error}</div>}
 
         <main>
-          <MediaView data={data} notify={setToast} openMedia={setSelectedMediaId} />
+          <MediaView data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} accessToken={account?.session?.access_token} refresh={refresh} onExport={() => exportCollection(data)} />
         </main>
-        <footer>Published from Kit’s Local Media Room.</footer>
+        <footer>Published from Kitâ€™s Local Media Room.</footer>
       </div>
 
       {selectedMedia && (
@@ -343,6 +361,11 @@ export default function App() {
             await refresh({ fresh: true });
             setToast('Shelf membership saved.');
           }}
+          canInterest={Boolean(account?.profile?.approved_at && ['film', 'television'].includes(selectedMedia.type))}
+          interested={Boolean(selectedMedia.interests?.some((person) => person?.username === account?.profile?.username))}
+          onInterest={async (enabled) => { await setInterest(account.session.access_token, selectedMedia.database_id, enabled); await refresh({ fresh: true }); }}
+          onDelete={async (permanent) => { if (!window.confirm(permanent ? 'Permanently delete this item? This cannot be undone.' : 'Move this item to Bin?')) return; permanent ? await permanentlyDeleteMedia(account.session.access_token, selectedMedia.database_id) : await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); setSelectedMediaId(null); await refresh({ fresh: true }); setToast(permanent ? 'Media permanently deleted.' : 'Media moved to Bin.'); }}
+          onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
         />
       )}
 
@@ -383,13 +406,15 @@ export default function App() {
   );
 }
 
-function MediaView({ data, notify, openMedia }) {
+function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onExport }) {
   const [section, setSection] = useState('screen');
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
   const [formatFilters, setFormatFilters] = useState([]);
   const [genreFilters, setGenreFilters] = useState([]);
   const [typeFilters, setTypeFilters] = useState([]);
+  const [newShelf, setNewShelf] = useState('');
+  const [addingMedia, setAddingMedia] = useState(false);
 
   const shelves = mediaShelvesForSection(data, section);
   const items = active(data.media).filter((item) => mediaSection(item) === section);
@@ -447,7 +472,7 @@ function MediaView({ data, notify, openMedia }) {
       <PageHero
         eyebrow="SCREEN, SHELF & STORY"
         title="The media room"
-        description="Kit’s full watchlist, physical collection, books and games, built to browse, not merely store."
+        description="Kitâ€™s full watchlist, physical collection, books and games, built to browse, not merely store."
         icon={Clapperboard}
         stats={[
           [items.filter((item) => ['watchlist', 'reading_list'].some((list) => item.lists?.includes(list))).length, 'to watch/read'],
@@ -463,7 +488,7 @@ function MediaView({ data, notify, openMedia }) {
         </div>
 
         <div className={cls('media-filters', section === 'screen' && 'has-type')}>
-          <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}…`} /></label>
+          <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}â€¦`} /></label>
           <MultiSelect label="All lists" values={listFilters} options={shelves.map((shelf) => [shelf.shelf_id, shelf.name])} onChange={setListFilters} />
           {section === 'screen' && <MultiSelect label="Film & TV" values={typeFilters} options={sectionTypes} onChange={setTypeFilters} />}
           <MultiSelect label={section === 'game' ? 'All platforms' : 'All formats'} values={formatFilters} options={formats.map((value) => [value, value])} onChange={setFormatFilters} />
@@ -472,6 +497,7 @@ function MediaView({ data, notify, openMedia }) {
 
         <div className="media-action-row public-actions">
           <Button className="random-pick" icon={Shuffle} onClick={pickRandom}>Pick a {singularLabel}</Button>
+          {canEdit && <><Button onClick={() => setAddingMedia(true)}>Add media</Button><Button onClick={onExport}>Export backup</Button><form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="New shelf" aria-label="New shelf name" /><Button type="submit">Add shelf</Button></form></>}
           {(listFilters.length || formatFilters.length || genreFilters.length || typeFilters.length || query) && (
             <button className="clear-media-filters" type="button" onClick={clearFilters}><SlidersHorizontal size={14} />Clear filters</button>
           )}
@@ -486,17 +512,19 @@ function MediaView({ data, notify, openMedia }) {
             data.media,
           );
           if (!shelfItems.length && queryLower) return null;
-          return <MediaShelf key={shelf.shelf_id} shelf={shelf} items={shelfItems} onOpen={openMedia} />;
+          return <MediaShelf key={shelf.shelf_id} shelf={shelf} items={shelfItems} onOpen={openMedia} canEdit={canEdit} onReorder={async (ordered) => { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} />;
         })}
       </div>
 
       {!randomPool.length && <Empty>No media matches those filters.</Empty>}
+      {addingMedia && <AddMediaDialog section={section} shelves={shelves} onClose={() => setAddingMedia(false)} onSave={async (item, shelfIds) => { const created = await createMediaItem(accessToken, { ...item, collection_id: data.collectionId }); await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); setAddingMedia(false); await refresh({ fresh: true }); notify('Media added.'); }} />}
     </div>
   );
 }
 
-function MediaShelf({ shelf, items, onOpen }) {
+function MediaShelf({ shelf, items, onOpen, canEdit, onReorder, onRename, onDelete }) {
   const trackRef = useRef(null);
+  const [draggedId, setDraggedId] = useState(null);
   const pages = chunk(items, 14);
   const scrollPage = (direction) => {
     const track = trackRef.current;
@@ -511,6 +539,8 @@ function MediaShelf({ shelf, items, onOpen }) {
           <h2><Trophy size={21} />{shelf.name}<span>{items.length}</span></h2>
         </div>
         <div>
+          {canEdit && <button aria-label={`Rename ${shelf.name}`} onClick={onRename}><Pencil size={15} /></button>}
+          {canEdit && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} onClick={onDelete}><X size={15} /></button>}
           <button aria-label={`Scroll ${shelf.name} left`} onClick={() => scrollPage(-1)}><ChevronLeft /></button>
           <button aria-label={`Scroll ${shelf.name} right`} onClick={() => scrollPage(1)}><ChevronRight /></button>
         </div>
@@ -518,7 +548,7 @@ function MediaShelf({ shelf, items, onOpen }) {
       <div className="poster-track" ref={trackRef}>
         {pages.map((page, pageIndex) => (
           <div className="poster-page" key={pageIndex}>
-            {page.map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} />)}
+            {page.map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} draggable={canEdit} dragging={draggedId === item.database_id} onDragStart={() => setDraggedId(item.database_id)} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const ids = items.map((row) => row.database_id); const from = ids.indexOf(draggedId); const to = ids.indexOf(item.database_id); ids.splice(to, 0, ids.splice(from, 1)[0]); try { await onReorder(ids); } finally { setDraggedId(null); } }} />)}
           </div>
         ))}
         {!items.length && <div className="empty-poster">No items on this shelf yet.</div>}
@@ -527,11 +557,11 @@ function MediaShelf({ shelf, items, onOpen }) {
   );
 }
 
-function MediaCard({ item, onClick }) {
+function MediaCard({ item, onClick, draggable, dragging, onDragStart, onDragEnd, onDrop }) {
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
   return (
-    <button className="media-card" title="Open item" onClick={onClick}>
+    <button className={cls('media-card', dragging && 'is-dragging')} title="Open item" onClick={onClick} draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={(event) => draggable && event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop?.(); }}>
       {item.poster_url
         ? <img src={item.poster_url} alt={`${title} poster`} loading="lazy" />
         : <div className="poster-fallback"><Clapperboard /><span>{title}</span></div>}
@@ -542,14 +572,14 @@ function MediaCard({ item, onClick }) {
             {tags.map((tag) => <span className={cls('media-format-tag', mediaTagTone(tag, item.type === 'game'))} key={tag}>{tag}</span>)}
           </span>
         )}
-        {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
+        {tags.length > 0 && item.year && <span className="media-meta-dash">â€”</span>}
         {item.year && <span className="media-year">{item.year}</span>}
       </span>
     </button>
   );
 }
 
-function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelves }) {
+function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelves, canInterest, interested, onInterest, onDelete, onRestore }) {
   const [editing, setEditing] = useState(false);
   const [editingShelves, setEditingShelves] = useState(false);
   const [selectedShelves, setSelectedShelves] = useState([]);
@@ -570,7 +600,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
               : <div className="poster-fallback"><Clapperboard /><span>{title}</span></div>}
           </div>
           <div className="drawer-copy">
-            <span className="eyebrow">{item.type}{item.runtime ? ` · ${item.runtime} min` : ''}</span>
+            <span className="eyebrow">{item.type}{item.runtime ? ` Â· ${item.runtime} min` : ''}</span>
             <h1>{title}</h1>
             <div className="drawer-meta-tags">
               {tags.length > 0 && (
@@ -578,8 +608,9 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
                   {tags.map((tag) => <span className={cls('drawer-format-tag', mediaTagTone(tag, item.type === 'game'))} key={tag}>{tag}</span>)}
                 </span>
               )}
-              {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
+              {tags.length > 0 && item.year && <span className="media-meta-dash">â€”</span>}
               {item.year && <span className="drawer-year">{item.year}</span>}
+              {item.interests?.map((person) => <span className="interest-initial" title={person.display_name} key={person.username}>â€” {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
             </div>
             <p className="creator">{item.director || item.creator}</p>
             {canEdit && <div className="drawer-owner-actions">
@@ -589,7 +620,10 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
                 setShelfError('');
                 setEditingShelves(true);
               }}>Edit shelves</Button>
+              {item.deleted_at ? <Button onClick={onRestore}>Restore from Bin</Button> : <Button onClick={() => onDelete(false)}>Move to Bin</Button>}
+              <Button onClick={() => onDelete(true)}>Permanently delete</Button>
             </div>}
+            {canInterest && <Button className="priority-watch" onClick={() => onInterest(!interested)}>{interested ? 'Remove Priority Watch' : 'Priority Watch'}</Button>}
             <p className="drawer-description">{item.description || item.notes || 'No description has been added yet.'}</p>
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-lists public-shelf-list">
@@ -611,7 +645,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
           try { await onUpdateShelves(item.lists || [], selectedShelves); setEditingShelves(false); }
           catch { setShelfError('The shelf membership could not be saved. Existing shelves were left in place.'); }
           finally { setSavingShelves(false); }
-        }}>{savingShelves ? 'Saving…' : 'Save shelves'}</Button>
+        }}>{savingShelves ? 'Savingâ€¦' : 'Save shelves'}</Button>
       </section></div>}
       {editing && <EditMediaDialog item={item} onClose={() => setEditing(false)} onSave={async (changes) => {
         await onUpdate(changes);
@@ -632,7 +666,7 @@ function SearchModal({ data, query, setQuery, onClose, onOpen }) {
       <div className="search-modal">
         <div className="search-box">
           <Search />
-          <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search films, television, books and video games…" />
+          <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search films, television, books and video gamesâ€¦" />
           <button onClick={onClose}><X /></button>
         </div>
         <div className="search-results">
@@ -717,7 +751,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
               <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} required /></label>
               {registering && <p>Use a recognisable real name for this private group, and do not reuse an important password.</p>}
               {error && <p className="auth-error">{error}</p>}
-              <Button type="submit" icon={LogIn} disabled={submitting}>{submitting ? 'Working…' : registering ? 'Create account' : 'Sign in'}</Button>
+              <Button type="submit" icon={LogIn} disabled={submitting}>{submitting ? 'Workingâ€¦' : registering ? 'Create account' : 'Sign in'}</Button>
               <button className="auth-switch" type="button" onClick={() => { setRegistering(!registering); setError(''); }}>{registering ? 'I already have an account' : 'Create an account'}</button>
             </form>
           </>
@@ -727,6 +761,15 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
   );
 }
 
+
+function AddMediaDialog({ section, shelves, onClose, onSave }) {
+  const [title, setTitle] = useState(''); const [type, setType] = useState(section === 'screen' ? 'film' : section); const [year, setYear] = useState(''); const [shelfIds, setShelfIds] = useState([]); const [saving, setSaving] = useState(false); const [error, setError] = useState('');
+  return <div className="modal-layer editor-layer"><form className="media-edit-dialog" onSubmit={async (event) => { event.preventDefault(); if (!title.trim()) return; setSaving(true); setError(''); try { await onSave({ title: title.trim(), type, year: year ? Number(year) : null, platforms: [], genres: [] }, shelfIds); } catch { setError('The media item could not be saved. Check the fields and try again.'); setSaving(false); } }}>
+    <button className="close" type="button" onClick={onClose}><X /></button><span className="eyebrow">NEW MEDIA</span><h2>Add media</h2>
+    <div className="media-edit-grid"><label>Title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} required /></label><label>Type<select value={type} onChange={(event) => setType(event.target.value)}>{section === 'screen' ? <><option value="film">Film</option><option value="television">Television</option></> : <option value={section}>{section === 'book' ? 'Book' : 'Video game'}</option>}</select></label><label>Year<input type="number" min="1000" max="3000" value={year} onChange={(event) => setYear(event.target.value)} /></label><div className="full shelf-membership-options"><span>Shelves</span>{shelves.map((shelf) => <label key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} />{shelf.name}</label>)}</div></div>
+    {error && <p className="auth-error">{error}</p>}<Button type="submit" disabled={saving}>{saving ? 'Addingâ€¦' : 'Add media'}</Button>
+  </form></div>;
+}
 
 function EditMediaDialog({ item, onClose, onSave }) {
   const [form, setForm] = useState({
@@ -752,7 +795,7 @@ function EditMediaDialog({ item, onClose, onSave }) {
     const runtime = optionalNumber(form.runtime, { integer: true, min: 1 });
     const rating = optionalNumber(form.rating, { min: 0, max: 10 });
     if (year === undefined || runtime === undefined || rating === undefined || !form.title.trim()) {
-      setError('Enter a title, a whole year from 1000–3000, a positive whole runtime, and a rating from 0–10.');
+      setError('Enter a title, a whole year from 1000â€“3000, a positive whole runtime, and a rating from 0â€“10.');
       return;
     }
     setSaving(true);
@@ -783,13 +826,13 @@ function EditMediaDialog({ item, onClose, onSave }) {
         <label>Platforms (comma separated)<input value={form.platforms} onChange={set('platforms')} /></label>
         <label>Genres (comma separated)<input value={form.genres} onChange={set('genres')} /></label>
         <label>Runtime (minutes)<input type="number" value={form.runtime} onChange={set('runtime')} /></label>
-        <label>Rating (0–10)<input type="number" step="0.1" value={form.rating} onChange={set('rating')} /></label>
+        <label>Rating (0â€“10)<input type="number" step="0.1" value={form.rating} onChange={set('rating')} /></label>
         <label className="full">Poster URL<input type="url" value={form.poster_url} onChange={set('poster_url')} /></label>
         <label className="full">Description<textarea value={form.description} onChange={set('description')} rows="4" /></label>
         <label className="full">Notes<textarea value={form.notes} onChange={set('notes')} rows="3" /></label>
       </div>
       {error && <p className="auth-error">{error}</p>}
-      <Button type="submit" icon={Pencil} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>
+      <Button type="submit" icon={Pencil} disabled={saving}>{saving ? 'Savingâ€¦' : 'Save changes'}</Button>
     </form>
   </div>;
 }
@@ -801,3 +844,4 @@ function AdminUsers({ accessToken, onClose }) {
  const act=async(type,id)=>{setBusy(id);setError('');try{await (type==='approve'?approveProfile:rejectProfile)(accessToken,id);await load();}catch{setError('That user could not be updated.');}finally{setBusy('');}};
  return <div className="modal-layer"><section className="media-edit-dialog"><button className="close" onClick={onClose}><X/></button><span className="eyebrow">ADMIN</span><h2>User Management</h2>{error&&<p className="auth-error">{error}</p>}<div className="user-list">{users.map(u=><div className="user-row" key={u.id}><span><b>{u.display_name}</b><small>@{u.username}</small></span><span>{u.approved_at?'Approved':u.rejected_at?'Rejected':'Pending'}</span>{!u.approved_at&&!u.rejected_at&&<Button disabled={busy===u.id} onClick={()=>act('approve',u.id)}>Approve</Button>}{!u.approved_at&&!u.rejected_at&&<Button disabled={busy===u.id} onClick={()=>act('reject',u.id)}>Reject</Button>}</div>)}</div></section></div>;
 }
+

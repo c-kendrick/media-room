@@ -1,12 +1,12 @@
-# Kit’s Media Room — GitHub Pages Edition
+# Kitâ€™s Media Room â€” GitHub Pages Edition
 
-This is the **GitHub Pages version** of Kit’s Media Room.
+This is the **GitHub Pages version** of Kitâ€™s Media Room.
 
 It is a separate project from the editable **Local Media Room**:
 
 - **Local Media Room**: the editable app backed by `data/media.db`.
 - **GitHub Pages version**: the public, read-only site backed by `public/media-data.json`.
-- This folder is the local working copy of the GitHub Pages version, but it should still be called the **GitHub Pages version**, not “local”.
+- This folder is the local working copy of the GitHub Pages version, but it should still be called the **GitHub Pages version**, not â€œlocalâ€.
 
 No Second Brain notes, projects, university records, fitness data, database file, API keys, or server code are included in the public dataset.
 
@@ -29,9 +29,18 @@ The first Supabase pass is now included as a database-only migration. It does no
 - The migration includes multi-user data modelling, pending/approved/rejected registrations, admin and ownership RLS policies, and a future-safe interest-marker table.
 - Never put a Supabase service-role key in this repository or browser code.
 
-## Current limitation
+## Supabase application setup
 
-The GitHub Pages version is intentionally **read-only**. GitHub Pages cannot run the SQLite server. For now, make changes in the Local Media Room and export a fresh media snapshot into this project. Supabase will replace this export workflow later.
+Apply every file in `supabase/migrations` in timestamp order before using editing or registration. The site keeps a static public snapshot only as an outage/import fallback; when Supabase is available, approved public collections, shelf membership, edits, ordering and interest markers are read from it.
+
+For protected poster enrichment, deploy the included Edge Function and set its provider secret:
+
+```powershell
+supabase functions deploy enrich-poster
+supabase secrets set TMDB_API_KEY=your_tmdb_key
+```
+
+The browser never receives this key. The function requires the signed-in collection owner and supports searching TMDB candidates or saving an owner-selected poster URL.
 
 ## 1. Set up the GitHub Pages version on your PC
 
@@ -126,3 +135,4 @@ The production files are generated in `dist`.
 Never copy `media.db`, `second-brain.db`, `.env`, TMDB keys, SteamGridDB keys, or other secrets into this repository. The included `.gitignore` excludes common local build files, but always review the files before publishing.
 
 See `docs/DATA-WORKFLOW.md` for the data flow and `docs/GITHUB-PAGES-SETUP.md` for the later deployment process.
+
