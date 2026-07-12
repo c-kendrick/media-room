@@ -249,6 +249,8 @@
 .public-media-command{padding:12px!important;border:1px solid #e0d5c7!important;border-radius:8px;background:rgba(255,251,245,.7);box-shadow:0 8px 24px rgba(64,49,34,.04)}
 .media-tabs{margin:0 0 10px!important;border:0!important;border-radius:6px;background:#eee5d9!important;padding:3px;gap:3px}
 .media-tabs button{min-height:42px!important;border:0!important;border-radius:4px;padding:8px 12px!important;color:#776d62;transition:background .15s,color .15s,box-shadow .15s}
+.workspace main{transition:opacity .16s ease}
+.workspace main.collection-loading{opacity:.48;pointer-events:none}
 .media-tabs button.active{background:#fffaf3!important;color:#27231f;box-shadow:0 1px 4px rgba(50,38,27,.1)}
 .media-filters,.media-filters.has-type{gap:7px!important;margin:0!important}
 .media-search,.multi-select summary{border-radius:4px!important;border-color:#ddd2c4!important;background:#fffdf8!important}
