@@ -81,7 +81,7 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
     }), { fresh }),
     supabaseSelect(query('media_items', {
       collection_id: 'eq.' + collection.id,
-      select: 'id,legacy_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,runtime,external_ids,deleted_at,created_at,updated_at',
+      select: 'id,legacy_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,runtime,deleted_at,created_at,updated_at',
       order: 'created_at.asc',
     }), { fresh }),
   ]);
