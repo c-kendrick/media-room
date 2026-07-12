@@ -85,3 +85,15 @@ export async function signOut() {
     storeSession(null);
   }
 }
+
+export async function registerWithPassword({ email, password, username, displayName }) {
+  const result = await authRequest('signup', {
+    body: {
+      email,
+      password,
+      data: { username, display_name: displayName },
+    },
+  });
+  if (result.session) storeSession(result.session);
+  return result;
+}
