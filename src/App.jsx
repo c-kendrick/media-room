@@ -415,6 +415,7 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
   const [typeFilters, setTypeFilters] = useState([]);
   const [newShelf, setNewShelf] = useState('');
   const [addingMedia, setAddingMedia] = useState(false);
+  const [draggedShelfId, setDraggedShelfId] = useState(null);
 
   const shelves = mediaShelvesForSection(data, section);
   const items = active(data.media).filter((item) => mediaSection(item) === section);
@@ -512,7 +513,7 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
             data.media,
           );
           if (!shelfItems.length && queryLower) return null;
-          return <MediaShelf key={shelf.shelf_id} shelf={shelf} items={shelfItems} onOpen={openMedia} canEdit={canEdit} onReorder={async (ordered) => { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} />;
+          return <MediaShelf key={shelf.shelf_id} shelf={shelf} items={shelfItems} onOpen={openMedia} canEdit={canEdit} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={() => setDraggedShelfId(shelf.shelf_id)} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const ordered = shelves.map((row) => row.shelf_id); const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); try { await reorderShelves(accessToken, data.collectionId, section, ordered); await refresh({ fresh: true }); notify('Shelf order saved.'); } finally { setDraggedShelfId(null); } }} onReorder={async (ordered) => { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} />;
         })}
       </div>
 
@@ -522,7 +523,7 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
   );
 }
 
-function MediaShelf({ shelf, items, onOpen, canEdit, onReorder, onRename, onDelete }) {
+function MediaShelf({ shelf, items, onOpen, canEdit, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
   const trackRef = useRef(null);
   const [draggedId, setDraggedId] = useState(null);
   const pages = chunk(items, 14);
@@ -533,9 +534,10 @@ function MediaShelf({ shelf, items, onOpen, canEdit, onReorder, onRename, onDele
   };
 
   return (
-    <section className="media-shelf">
+    <section className={cls('media-shelf', shelfDragging && 'shelf-dragging')} onDragOver={(event) => canEdit && event.preventDefault()} onDrop={(event) => { event.preventDefault(); onShelfDrop?.(); }}>
       <div className="shelf-head">
         <div className="shelf-title">
+          {canEdit && <button className="shelf-drag-handle" aria-label={`Drag ${shelf.name} to reorder`} title="Drag to reorder shelf" draggable onDragStart={onShelfDragStart} onDragEnd={onShelfDragEnd}>⋮⋮</button>}
           <h2><Trophy size={21} />{shelf.name}<span>{items.length}</span></h2>
         </div>
         <div>
