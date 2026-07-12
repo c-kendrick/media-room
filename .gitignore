@@ -3,3 +3,8 @@ dist/
 .DS_Store
 *.log
 public/media-data.json.backup-*
+
+# Supabase local credentials (especially the service-role key)
+.env
+.env.*
+!.env.example
