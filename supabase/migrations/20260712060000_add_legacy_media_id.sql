@@ -4,6 +4,6 @@
 alter table public.media_items
   add column legacy_id text;
 
-create unique index media_items_collection_legacy_id_key
-  on public.media_items (collection_id, legacy_id)
-  where legacy_id is not null;
+alter table public.media_items
+  add constraint media_items_collection_legacy_id_key
+  unique (collection_id, legacy_id);
