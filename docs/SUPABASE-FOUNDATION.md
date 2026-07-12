@@ -7,7 +7,7 @@ This is the first Media Room Supabase pass. It creates the data model and databa
 - Multi-user profiles, one collection per user, dynamic shelves, media items, and per-shelf ordering.
 - Public read access for collections, shelves, media, and future interest markers.
 - Write access enforced with Supabase Row Level Security (RLS): only an approved collection owner or an admin can change a collection.
-- Pending registrations: a user created by Supabase Auth automatically receives an unapproved `profiles` row and can browse but cannot write.
+- Pending registrations: a user created by Supabase Auth automatically receives an unapproved `profiles` row and can browse but cannot write. Approval and rejection are recorded separately.
 - A private `profiles` table plus a restricted `public.public_profiles` view for future collection navigation.
 - A dormant `media_interest` table for the later “Priority watch” feature. No interface or application behaviour uses it yet.
 
@@ -47,7 +47,7 @@ Run these checks after setting up a test member and a test collection:
 - An approved user can modify only their own collection.
 - An approved user cannot modify another user’s collection, shelves, media, or ordering.
 - A regular user cannot update another profile or change approval/admin fields.
-- An admin can approve/reject users and moderate any collection.
+- An admin can approve/reject users and moderate any collection. A later server-side admin endpoint, never browser code, will delete Auth accounts.
 
 The policy helper functions are security-definer functions used only for RLS decisions. They are not an API for changing data.
 
