@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, signInWithPassword, signOut } from './auth.js';
-import { updateMediaItem } from './media-write.js';
+import { replaceMediaShelfMemberships, updateMediaItem } from './media-write.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -336,6 +336,11 @@ export default function App() {
             await refresh({ fresh: true });
             setToast('Media details saved.');
           }}
+          onUpdateShelves={async (currentShelfIds, selectedShelfIds) => {
+            await replaceMediaShelfMemberships(account.session.access_token, selectedMedia.database_id, currentShelfIds, selectedShelfIds);
+            await refresh({ fresh: true });
+            setToast('Shelf membership saved.');
+          }}
         />
       )}
 
@@ -540,8 +545,12 @@ function MediaCard({ item, onClick }) {
   );
 }
 
-function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate }) {
+function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelves }) {
   const [editing, setEditing] = useState(false);
+  const [editingShelves, setEditingShelves] = useState(false);
+  const [selectedShelves, setSelectedShelves] = useState([]);
+  const [savingShelves, setSavingShelves] = useState(false);
+  const [shelfError, setShelfError] = useState('');
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
   const memberShelves = shelves.filter((shelf) => item.lists?.includes(shelf.shelf_id));
@@ -569,7 +578,14 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate }) {
               {item.year && <span className="drawer-year">{item.year}</span>}
             </div>
             <p className="creator">{item.director || item.creator}</p>
-            {canEdit && <Button className="drawer-edit-button" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>}
+            {canEdit && <div className="drawer-owner-actions">
+              <Button className="drawer-edit-button" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>
+              <Button className="drawer-edit-button" onClick={() => {
+                setSelectedShelves(item.lists || []);
+                setShelfError('');
+                setEditingShelves(true);
+              }}>Edit shelves</Button>
+            </div>}
             <p className="drawer-description">{item.description || item.notes || 'No description has been added yet.'}</p>
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-lists public-shelf-list">
@@ -581,6 +597,18 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate }) {
           </div>
         </div>
       </aside>
+      {editingShelves && <div className="modal-layer editor-layer"><section className="media-edit-dialog shelf-membership-dialog">
+        <button className="close" onClick={() => setEditingShelves(false)} aria-label="Close shelf editor"><X /></button>
+        <span className="eyebrow">SHELF MEMBERSHIP</span><h2>Choose shelves</h2>
+        <div className="shelf-membership-options">{shelves.map((shelf) => <label key={shelf.shelf_id}><input type="checkbox" checked={selectedShelves.includes(shelf.shelf_id)} onChange={() => setSelectedShelves((current) => current.includes(shelf.shelf_id) ? current.filter((id) => id !== shelf.shelf_id) : [...current, shelf.shelf_id])} />{shelf.name}</label>)}</div>
+        {shelfError && <p className="auth-error">{shelfError}</p>}
+        <Button disabled={savingShelves} onClick={async () => {
+          setSavingShelves(true); setShelfError('');
+          try { await onUpdateShelves(item.lists || [], selectedShelves); setEditingShelves(false); }
+          catch { setShelfError('The shelf membership could not be saved. Existing shelves were left in place.'); }
+          finally { setSavingShelves(false); }
+        }}>{savingShelves ? 'Saving…' : 'Save shelves'}</Button>
+      </section></div>}
       {editing && <EditMediaDialog item={item} onClose={() => setEditing(false)} onSave={async (changes) => {
         await onUpdate(changes);
         setEditing(false);
