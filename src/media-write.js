@@ -18,21 +18,33 @@ export async function updateMediaItem(accessToken, databaseId, changes) {
   return updated[0];
 }
 
-export async function replaceMediaShelfMemberships(accessToken, databaseId, shelves, selectedShelfIds) {
+export async function replaceMediaShelfMemberships(accessToken, databaseId, currentShelfIds, selectedShelfIds) {
   const headers = { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' };
-  const currentShelfIds = shelves.map((shelf) => shelf.id);
-  if (currentShelfIds.length) {
-    await supabaseRequest('/rest/v1/shelf_media_items?media_item_id=eq.' + encodeURIComponent(databaseId) + '&shelf_id=in.(' + currentShelfIds.join(',') + ')', {
-      method: 'DELETE', fresh: true, headers,
+  const selected = new Set(selectedShelfIds);
+  const current = new Set(currentShelfIds);
+  const additions = selectedShelfIds.filter((shelfId) => !current.has(shelfId));
+  const removals = currentShelfIds.filter((shelfId) => !selected.has(shelfId));
+
+  // Add first: a failed request leaves existing memberships untouched.
+  if (additions.length) {
+    await supabaseRequest('/rest/v1/shelf_media_items', {
+      method: 'POST',
+      fresh: true,
+      body: additions.map((shelfId) => ({
+        shelf_id: shelfId,
+        media_item_id: databaseId,
+        position: 1000,
+      })),
+      headers: { ...headers, Prefer: 'return=minimal' },
     });
   }
-  const rows = selectedShelfIds.map((shelfId, index) => ({
-    shelf_id: shelfId, media_item_id: databaseId, position: (index + 1) * 1000,
-  }));
-  if (rows.length) {
-    await supabaseRequest('/rest/v1/shelf_media_items', {
-      method: 'POST', fresh: true, body: rows,
-      headers: { ...headers, Prefer: 'return=minimal' },
+
+  // Remove only memberships that were explicitly deselected.
+  for (const shelfId of removals) {
+    await supabaseRequest('/rest/v1/shelf_media_items?media_item_id=eq.' + encodeURIComponent(databaseId) + '&shelf_id=eq.' + encodeURIComponent(shelfId), {
+      method: 'DELETE',
+      fresh: true,
+      headers,
     });
   }
 }
