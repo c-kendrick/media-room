@@ -10,15 +10,19 @@ import {
   Command,
   Film,
   Gamepad2,
+  LogIn,
+  LogOut,
   Menu,
   RotateCw,
   Search,
   Shuffle,
   SlidersHorizontal,
   Trophy,
+  UserRound,
   X,
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
+import { loadAuthenticatedAccount, signInWithPassword, signOut } from './auth.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -187,6 +191,9 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMediaId, setSelectedMediaId] = useState(null);
+  const [account, setAccount] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [accountOpen, setAccountOpen] = useState(false);
 
   const refresh = async ({ fresh = false, notify = false } = {}) => {
     if (fresh) setRefreshing(true);
@@ -205,6 +212,18 @@ export default function App() {
 
   useEffect(() => {
     refresh();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadAuthenticatedAccount()
+      .then((nextAccount) => {
+        if (!cancelled) setAccount(nextAccount);
+      })
+      .finally(() => {
+        if (!cancelled) setAuthLoading(false);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -280,6 +299,11 @@ export default function App() {
           </button>
           <div className="top-actions">
             <span className="today"><CalendarDays size={14} />{new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}</span>
+            {authLoading ? <span className="account-state">Checking account…</span> : (
+              <Button className="account-button" icon={account ? UserRound : LogIn} onClick={() => setAccountOpen(true)}>
+                {account?.profile?.display_name || account?.profile?.username || 'Sign in'}
+              </Button>
+            )}
             <Button className="sync-button" icon={RotateCw} onClick={() => refresh({ fresh: true, notify: true })} disabled={refreshing}>
               {refreshing ? 'Refreshing' : 'Refresh'}
             </Button>
@@ -311,6 +335,23 @@ export default function App() {
           onOpen={(id) => {
             setSearchOpen(false);
             setSelectedMediaId(id);
+          }}
+        />
+      )}
+
+      {accountOpen && (
+        <AccountDialog
+          account={account}
+          onClose={() => setAccountOpen(false)}
+          onSignedIn={(nextAccount) => {
+            setAccount(nextAccount);
+            setAccountOpen(false);
+            setToast('Signed in securely.');
+          }}
+          onSignedOut={() => {
+            setAccount(null);
+            setAccountOpen(false);
+            setToast('Signed out.');
           }}
         />
       )}
@@ -555,6 +596,65 @@ function SearchModal({ data, query, setQuery, onClose, onOpen }) {
           {!normalizedQuery && <Empty>Start typing to search the collection.</Empty>}
         </div>
       </div>
+    </div>
+  );
+}
+
+
+function AccountDialog({ account, onClose, onSignedIn, onSignedOut }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      onSignedIn(await signInWithPassword(email.trim(), password));
+    } catch {
+      setError('We could not sign you in with those details.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const leave = async () => {
+    setSubmitting(true);
+    try {
+      await signOut();
+      onSignedOut();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="account-dialog" aria-label="Account">
+        <button className="close" onClick={onClose} aria-label="Close account"><X /></button>
+        {account ? (
+          <>
+            <span className="eyebrow">SIGNED IN</span>
+            <h2>{account.profile?.display_name || account.profile?.username || 'Media Room member'}</h2>
+            <p>{account.profile?.role === 'admin' ? 'Administrator account' : account.profile?.approved_at ? 'Approved member' : 'Pending approval'}</p>
+            <Button icon={LogOut} onClick={leave} disabled={submitting}>Sign out</Button>
+          </>
+        ) : (
+          <>
+            <span className="eyebrow">ACCOUNT</span>
+            <h2>Sign in</h2>
+            <p>Use your Media Room email and password.</p>
+            <form onSubmit={submit}>
+              <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
+              <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>
+              {error && <p className="auth-error">{error}</p>}
+              <Button type="submit" icon={LogIn} disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in'}</Button>
+            </form>
+          </>
+        )}
+      </section>
     </div>
   );
 }
