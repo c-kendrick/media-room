@@ -89,6 +89,11 @@ export function updateShelf(accessToken, shelfId, changes) {
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'return=representation' } });
 }
 
+export function updateCollection(accessToken, collectionId, changes) {
+  return supabaseRequest('/rest/v1/collections?id=eq.' + encodeURIComponent(collectionId), { method: 'PATCH', fresh: true, body: changes,
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'return=representation' } });
+}
+
 export function deleteShelf(accessToken, shelfId) {
   return supabaseRequest('/rest/v1/shelves?id=eq.' + encodeURIComponent(shelfId), { method: 'DELETE', fresh: true,
     headers: { Authorization: 'Bearer ' + accessToken } });
@@ -121,6 +126,11 @@ export async function reorderShelves(accessToken, collectionId, section, ordered
       });
     }
   }
+}
+
+export function reorderMainWatchlist(accessToken, orderedShelfIds) {
+  return supabaseRequest('/rest/v1/rpc/reorder_main_watchlist', { method: 'POST', fresh: true, body: { ordered_shelf_ids: orderedShelfIds },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
 export function setInterest(accessToken, userId, mediaItemId, enabled) {
