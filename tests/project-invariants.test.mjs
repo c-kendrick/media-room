@@ -258,19 +258,23 @@ test('owners can open a collection Bin and restore media or shelves', async () =
   assert.match(styles, /\.bin-row-actions/);
 });
 
-test('add item shares the complete media details and keeps all non-name fields optional', async () => {
+test('add and edit share contextual media details and keep all non-name fields optional', async () => {
   const app = await read('src/App.jsx');
   const styles = await read('src/public.css');
   assert.match(app, /function MediaDetailFields/);
   assert.match(app, /Only the name is required/);
   assert.match(app, />OPTIONAL</);
-  for (const label of ['Creator', 'Director', 'Format', 'Platforms', 'Genres', 'Runtime', 'Poster URL', 'Description', 'Notes']) assert.match(app, new RegExp(`>${label}`));
+  for (const label of ['Director', 'Format', 'Platforms', 'Genres', 'Runtime', 'Poster URL', 'Description', 'Notes']) assert.match(app, new RegExp(`>${label}`));
+  assert.match(app, /section === 'book' && <label>Author<input value=\{form\.creator\}/);
+  assert.match(app, /section === 'game' && <label>Developer and\/or Publisher<input value=\{form\.creator\}/);
+  assert.doesNotMatch(app, /<label>Creator<input/);
   assert.match(app, /Mark as Owned/);
   assert.match(app, /section === 'screen'[\s\S]*Mark Priority Watch/);
   assert.match(app, /if \(priorityWatch && currentUserId\) await setInterest/);
   assert.match(app, /<legend>Also add to<\/legend>/);
   assert.match(app, /section === 'game'[\s\S]*Platforms \(comma separated\)[\s\S]*: <label>Format/);
-  assert.match(app, /!compact && <label>Runtime/);
+  assert.match(app, /section === 'screen' && <label>Runtime \(minutes\)/);
+  assert.doesNotMatch(app, /!compact && <label>Runtime/);
   assert.match(app, /Name of film or show[\s\S]*Name of book[\s\S]*Name of video game/);
   assert.doesNotMatch(app, /Add the muted Owned tag|Add your priority stamp/);
   assert.match(styles, /\.optional-media-section/);

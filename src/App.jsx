@@ -1317,13 +1317,14 @@ function MediaDetailFields({ form, setForm, section, compact = false }) {
   return <div className="media-edit-grid optional-detail-grid">
     {section === 'screen' && <label>Type<select value={form.type} onChange={set('type')}><option value="film">Film</option><option value="television">Television</option></select></label>}
     <label>Year<input type="number" min="1000" max="3000" placeholder="YYYY" value={form.year} onChange={set('year')} /></label>
-    <label>Creator<input value={form.creator} onChange={set('creator')} placeholder={section === 'book' ? 'Author or creator' : section === 'game' ? 'Developer or creator' : 'Writer or creator'} /></label>
+    {section === 'book' && <label>Author<input value={form.creator} onChange={set('creator')} /></label>}
+    {section === 'game' && <label>Developer and/or Publisher<input value={form.creator} onChange={set('creator')} /></label>}
     {section === 'screen' && <label>Director<input value={form.director} onChange={set('director')} /></label>}
     {section === 'game'
       ? <label>Platforms (comma separated)<input value={form.platforms} onChange={set('platforms')} placeholder="PC, PlayStation 5…" /></label>
       : <label>Format<input value={form.format} onChange={set('format')} placeholder={section === 'book' ? 'Hardback, paperback…' : 'DVD, Blu-ray, 4K…'} /></label>}
     <label>Genres (comma separated)<input value={form.genres} onChange={set('genres')} placeholder="Drama, mystery…" /></label>
-    {!compact && <label>Runtime (minutes)<input type="number" min="1" value={form.runtime} onChange={set('runtime')} /></label>}
+    {section === 'screen' && <label>Runtime (minutes)<input type="number" min="1" value={form.runtime} onChange={set('runtime')} /></label>}
     <label className="full">Poster URL<input type="url" value={form.poster_url} onChange={set('poster_url')} placeholder="https://…" /></label>
     <label className="full">Description<textarea value={form.description} onChange={set('description')} rows={compact ? 2 : 4} /></label>
     <label className="full">Notes<textarea value={form.notes} onChange={set('notes')} rows={compact ? 2 : 3} /></label>
