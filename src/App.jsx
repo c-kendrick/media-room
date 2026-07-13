@@ -34,7 +34,7 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
-import { bulkImportMedia, createMediaItem, createShelf, deleteShelf, enrichImportedPosters, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
+import { bulkImportMedia, createMediaItem, createShelf, deleteShelf, enrichSectionPosters, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
 
 function cls(...values) {
@@ -613,6 +613,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
   const [newShelf, setNewShelf] = useState('');
   const [addingMedia, setAddingMedia] = useState(false);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [enrichingPosters, setEnrichingPosters] = useState(false);
   const [addToShelfIds, setAddToShelfIds] = useState([]);
   const [draggedShelfId, setDraggedShelfId] = useState(null);
   const [optimisticShelfIds, setOptimisticShelfIds] = useState([]);
@@ -714,6 +715,19 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
     }
   };
 
+  const enrichCurrentSection = async () => {
+    setEnrichingPosters(true);
+    try {
+      const result = await enrichSectionPosters(accessToken, data.collectionId, section);
+      await refresh({ fresh: true });
+      notify(`${result?.enriched || 0} posters added${result?.unmatched ? `; ${result.unmatched} left for review` : ''}${result?.warnings?.length ? ` (${result.warnings.join(', ')})` : ''}.`);
+    } catch {
+      notify('Poster enrichment could not run. Check the provider secrets and Edge Function deployment.');
+    } finally {
+      setEnrichingPosters(false);
+    }
+  };
+
   return (
     <div className="page media-page">
       <PageHero
@@ -767,9 +781,9 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
       </div>
 
       {!randomPool.length && <Empty>No media matches those filters.</Empty>}
-      {canEdit && <section className="collection-tools"><div><span className="eyebrow">COLLECTION TOOLS</span><p>Manage this section without cluttering the shelves.</p></div><form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="Name a new shelf" aria-label="New shelf name" /><Button type="submit" icon={Plus}>Add shelf</Button></form><div className="collection-tool-actions"><Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button><Button className="quiet-button" icon={Plus} onClick={() => setBulkImportOpen(true)}>Bulk Import {section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games'}</Button></div></section>}
+      {!data.mainWatchlist && (canEdit || isAdmin) && <section className="collection-tools"><div><span className="eyebrow">COLLECTION TOOLS</span><p>{canEdit ? 'Manage this section without cluttering the shelves.' : 'Administrative backup and artwork tools.'}</p></div>{canEdit && <form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="Name a new shelf" aria-label="New shelf name" /><Button type="submit" icon={Plus}>Add shelf</Button></form>}<div className="collection-tool-actions"><Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters} onClick={enrichCurrentSection}>{enrichingPosters ? 'Enriching posters…' : 'Enrich posters'}</Button><Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button>{canEdit && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportOpen(true)}>Bulk Import {section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games'}</Button>}</div></section>}
       {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={async (item, shelfIds) => { const created = await createMediaItem(accessToken, { ...item, collection_id: data.collectionId }); await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); setAddingMedia(false); setAddToShelfIds([]); await refresh({ fresh: true }); notify('Media added.'); }} />}
-      {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows, enrichPosters) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); let enrichmentNote = ''; if (enrichPosters && result?.imported) { try { const enriched = await enrichImportedPosters(accessToken, data.collectionId, rows.slice(0, 50)); enrichmentNote = `; ${enriched?.enriched || 0} posters added${enriched?.warnings?.length ? ` (${enriched.warnings.join(', ')})` : ''}`; } catch { enrichmentNote = '; items imported, but poster enrichment is not configured yet'; } } setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}${enrichmentNote}.`); }} />}
+      {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`); }} />}
     </div>
   );
 }
@@ -1101,9 +1115,7 @@ function BulkImportDialog({ section, shelves, onClose, onImport }) {
   const [shelfId, setShelfId] = useState(shelves[0]?.shelf_id || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [enrichPosters, setEnrichPosters] = useState(true);
   const sectionLabel = section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games';
-  const providerLabel = section === 'screen' ? 'TMDB' : section === 'book' ? 'Google Books / Open Library' : 'SteamGridDB';
   const example = section === 'screen' ? 'Film | Arrival | 2016\nTV | Severance | 2022' : section === 'book' ? 'The Left Hand of Darkness | 1969' : 'Disco Elysium | 2019';
   const parsed = text.split(/\r?\n/).map((line, index) => ({ line: line.trim(), number: index + 1 })).filter((row) => row.line).map((row) => {
     const parts = row.line.split('|').map((part) => part.trim());
@@ -1119,12 +1131,11 @@ function BulkImportDialog({ section, shelves, onClose, onImport }) {
   const invalidRows = parsed.filter((row) => !row.valid);
   const items = parsed.filter((row) => row.valid).map((row) => row.item);
 
-  return <div className="modal-layer editor-layer"><form className="media-edit-dialog bulk-import-dialog" onSubmit={async (event) => { event.preventDefault(); if (!shelfId || !items.length || invalidRows.length) return; setSaving(true); setError(''); try { await onImport(shelfId, items, enrichPosters); } catch { setError('Nothing was imported. Check the format, apply the latest Supabase migration, and try again.'); setSaving(false); } }}>
+  return <div className="modal-layer editor-layer"><form className="media-edit-dialog bulk-import-dialog" onSubmit={async (event) => { event.preventDefault(); if (!shelfId || !items.length || invalidRows.length) return; setSaving(true); setError(''); try { await onImport(shelfId, items); } catch { setError('Nothing was imported. Check the format, apply the latest Supabase migration, and try again.'); setSaving(false); } }}>
     <button className="close" type="button" onClick={onClose} aria-label="Close bulk import"><X /></button><span className="eyebrow">OWNER-ONLY IMPORT</span><h2>Bulk Import {sectionLabel}</h2><p className="dialog-intro">This batch can contain only {sectionLabel.toLowerCase()} entries and will be added to one shelf. Matching title-and-year duplicates are skipped.</p>
     <label className="bulk-import-destination">Destination shelf<select value={shelfId} onChange={(event) => setShelfId(event.target.value)}>{shelves.map((shelf) => <option key={shelf.shelf_id} value={shelf.shelf_id}>{shelf.name}</option>)}</select></label>
     <label className="bulk-import-input">One item per line<textarea autoFocus rows="10" value={text} onChange={(event) => setText(event.target.value)} placeholder={example} /></label>
     <p className="bulk-import-format">{section === 'screen' ? 'Format: Film or TV | Title | Year (year optional)' : 'Format: Title | Year (year optional)'}</p>
-    <label className="bulk-enrichment-option"><input type="checkbox" checked={enrichPosters} onChange={(event) => setEnrichPosters(event.target.checked)} /><span><strong>Add confident {providerLabel} posters</strong><small>Checks up to 50 items through the protected provider; ambiguous matches are left blank.</small></span></label>
     {invalidRows.length > 0 && <p className="auth-error">Check line{invalidRows.length === 1 ? '' : 's'} {invalidRows.map((row) => row.number).join(', ')}. This batch has not been imported.</p>}{error && <p className="auth-error">{error}</p>}
     <div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={saving || !items.length || invalidRows.length > 0 || !shelfId}>{saving ? 'Importing…' : `Bulk Import ${items.length || ''} ${sectionLabel}`}</Button></div>
   </form></div>;
