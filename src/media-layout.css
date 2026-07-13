@@ -372,6 +372,22 @@
   transition: opacity .12s ease;
 }
 
+.media-card-open,
+.media-card-open-meta {
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.media-card-open {
+  display: block;
+}
+
 .media-card:active {
   cursor: grabbing;
 }
@@ -393,7 +409,7 @@
 }
 
 .media-card img,
-.media-card > .poster-fallback {
+.media-card-open > .poster-fallback {
   display: block;
   width: var(--media-card-width);
   height: var(--media-poster-height);
@@ -405,7 +421,7 @@
 }
 
 .media-card:hover img,
-.media-card:hover > .poster-fallback {
+.media-card:hover .media-card-open > .poster-fallback {
   transform: translateY(-3px);
   box-shadow: 0 10px 20px rgba(60, 44, 28, .19);
 }
@@ -426,6 +442,86 @@
   -webkit-line-clamp: 2;
 }
 
+.star-rating {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  min-height: 20px;
+  margin-top: 4px;
+  color: #c8c0b4;
+  vertical-align: middle;
+  user-select: none;
+}
+
+.star-half {
+  position: relative;
+  display: inline-block;
+  width: 9px;
+  height: 20px;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  line-height: 20px;
+}
+
+.star-half::before {
+  content: "★";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  color: currentColor;
+  font-family: Arial, sans-serif;
+  font-size: 18px;
+  line-height: 20px;
+  text-align: left;
+}
+
+.star-half[data-side="right"]::before {
+  left: -9px;
+}
+
+.star-half.is-filled {
+  color: #d7a51b;
+}
+
+.star-rating.is-editable .star-half {
+  cursor: pointer;
+}
+
+.star-rating.is-editable .star-half:focus-visible {
+  outline: 1px solid #8b4d37;
+  outline-offset: 1px;
+}
+
+.star-rating.is-saving {
+  opacity: .58;
+}
+
+.drawer-copy > .star-rating {
+  min-height: 24px;
+  margin-top: 0;
+}
+
+.drawer-copy > .star-rating .star-half {
+  width: 11px;
+  height: 24px;
+  line-height: 24px;
+}
+
+.drawer-copy > .star-rating .star-half::before {
+  width: 22px;
+  font-size: 22px;
+  line-height: 24px;
+}
+
+.drawer-copy > .star-rating .star-half[data-side="right"]::before {
+  left: -11px;
+}
+
 /* Format/platform and year sit together with a restrained dash. */
 .media-card-meta,
 .drawer-meta-tags {
@@ -440,6 +536,10 @@
   font-family: Inter, sans-serif;
   font-size: 8px;
   line-height: 1.15;
+}
+
+.media-card-open-meta {
+  display: flex;
 }
 
 .media-format-list,

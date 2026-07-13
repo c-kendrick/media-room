@@ -1,8 +1,19 @@
 import { supabaseSelect } from './supabase.js';
 import { buildWatchDemand } from './watch-demand.js';
 
+const MEDIA_SELECT = 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,runtime,deleted_at,created_at,updated_at';
+const LEGACY_MEDIA_SELECT = MEDIA_SELECT.replace(',star_rating', '');
+
 function query(table, parameters) {
   return table + '?' + new URLSearchParams(parameters).toString();
+}
+
+async function selectMediaItems(parameters, options) {
+  try {
+    return await supabaseSelect(query('media_items', { ...parameters, select: MEDIA_SELECT }), options);
+  } catch {
+    return supabaseSelect(query('media_items', { ...parameters, select: LEGACY_MEDIA_SELECT }), options);
+  }
 }
 
 function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [], publicProfiles = []) {
@@ -55,6 +66,7 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
         platforms: item.platforms || [],
         genres: item.genres || [],
         rating: item.rating,
+        star_rating: item.star_rating ?? null,
         runtime: item.runtime,
         added_at: item.created_at,
         updated_at: item.updated_at,
@@ -106,11 +118,10 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
     }), { fresh }));
   const [shelves, mediaItems] = await Promise.all([
     shelvesPromise,
-    supabaseSelect(query('media_items', {
+    selectMediaItems({
       collection_id: 'eq.' + collection.id,
-      select: 'id,legacy_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,runtime,deleted_at,created_at,updated_at',
       order: 'created_at.asc',
-    }), { fresh }),
+    }, { fresh }),
   ]);
 
   const memberships = shelves.length
@@ -163,12 +174,11 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
     order: 'position.asc',
   }), { fresh }) : [];
   const mediaIds = memberships.map((membership) => membership.media_item_id);
-  const mediaItems = mediaIds.length ? await supabaseSelect(query('media_items', {
+  const mediaItems = mediaIds.length ? await selectMediaItems({
     id: 'in.(' + mediaIds.join(',') + ')',
     deleted_at: 'is.null',
-    select: 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,runtime,deleted_at,created_at,updated_at',
     order: 'created_at.asc',
-  }), { fresh }) : [];
+  }, { fresh }) : [];
   const shelfById = new Map(shelves.map((shelf) => [shelf.id, shelf]));
   const mediaById = new Map(mediaItems.map((item) => [item.id, item]));
   const mirroredMemberships = memberships.filter((membership) => {
