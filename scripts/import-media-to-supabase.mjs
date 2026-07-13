@@ -147,6 +147,7 @@ const mediaRows = snapshot.media
     platforms: item.platforms || [],
     genres: item.genres || [],
     rating: validRating(item.rating),
+    owned: Boolean(item.owned),
     runtime: validRuntime(item.runtime),
   }));
 

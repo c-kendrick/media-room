@@ -109,6 +109,11 @@ function mediaDisplayTags(item) {
   return unique(splitMediaValues(source).map((value) => displayMediaTag(value, isGame)));
 }
 
+function mediaCardDisplayTags(item) {
+  if (item.type === 'book') return item.creator?.trim() ? [item.creator.trim()] : [];
+  return mediaDisplayTags(item);
+}
+
 function mediaTagTone(value, isGame = false) {
   const tag = String(value || '').trim();
   if (/^4k$/i.test(tag)) return 'format-4k';
@@ -503,7 +508,7 @@ export default function App() {
           canReviewPoster={Boolean((canEditCollection || isAdmin) && !data.mainWatchlist)}
           onFindPosters={() => searchPosterCandidates(account.session.access_token, selectedMedia.database_id)}
           onChoosePoster={async (posterUrl) => { await choosePosterCandidate(account.session.access_token, selectedMedia.database_id, posterUrl); await refresh({ fresh: true }); setToast('Poster saved.'); }}
-          onUpdate={async (changes) => {
+          onUpdate={async (changes, messages = {}) => {
             const previousData = data;
             const applyMediaUpdate = (currentData, mediaChanges) => ({
               ...currentData,
@@ -520,11 +525,11 @@ export default function App() {
               setData((currentData) => currentData?.collectionId === data.collectionId ? confirmedData : currentData);
               cacheSnapshot(confirmedData, data.collectionId);
               snapshotCache.current.delete(MAIN_WATCHLIST_ID);
-              setToast('Media details saved.');
+              setToast(messages.success || 'Media details saved.');
             } catch (error) {
               setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
               cacheSnapshot(previousData, previousData.collectionId);
-              setToast('Media details could not be saved.');
+              setToast(messages.failure || 'Media details could not be saved.');
               throw error;
             }
           }}
@@ -981,7 +986,7 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
 }
 
 function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDragStart, onDragEnd, onDrop }) {
-  const tags = mediaDisplayTags(item);
+  const tags = mediaCardDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
   return (
     <article className={cls('media-card', dragging && 'is-dragging')} onClick={onClick} draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={(event) => draggable && event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop?.(); }}>
@@ -1001,6 +1006,7 @@ function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDrag
         {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
         {item.year && <span className="media-year">{item.year}</span>}
         {item.interests?.map((person) => <span className="card-interest" title={person.display_name || person.username} key={person.id || person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
+        {item.owned && <span className="media-owned-tag">Owned</span>}
       </button>
     </article>
   );
@@ -1011,11 +1017,13 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
   const [editingShelves, setEditingShelves] = useState(false);
   const [selectedShelves, setSelectedShelves] = useState([]);
   const [optimisticInterest, setOptimisticInterest] = useState(interested);
+  const [optimisticOwned, setOptimisticOwned] = useState(Boolean(item.owned));
   const [posterCandidates, setPosterCandidates] = useState(null);
   const [posterReviewBusy, setPosterReviewBusy] = useState(false);
   const [posterReviewError, setPosterReviewError] = useState('');
   useEscape(() => setEditingShelves(false), editingShelves);
   useEffect(() => { setOptimisticInterest(interested); }, [interested, item.database_id]);
+  useEffect(() => { setOptimisticOwned(Boolean(item.owned)); }, [item.owned, item.database_id]);
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
   const memberShelves = shelves.filter((shelf) => item.lists?.includes(shelf.shelf_id));
@@ -1045,7 +1053,10 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
               {item.interests?.map((person) => <span className="interest-initial" title={person.display_name || person.username} key={person.id || person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
             </div>
             <p className="creator">{item.director || item.creator}</p>
-            {canInterest && <button className={cls('priority-watch', optimisticInterest && 'active')} onClick={async () => { const previous = optimisticInterest; const next = !previous; setOptimisticInterest(next); try { await onInterest(next); } catch { setOptimisticInterest(previous); } }}><span>{optimisticInterest ? '✓' : '+'}</span>{optimisticInterest ? 'Priority Watch' : 'Mark Priority Watch'}</button>}
+            <div className="drawer-status-actions">
+              {canInterest && <button className={cls('priority-watch', optimisticInterest && 'active')} onClick={async () => { const previous = optimisticInterest; const next = !previous; setOptimisticInterest(next); try { await onInterest(next); } catch { setOptimisticInterest(previous); } }}><span>{optimisticInterest ? '✓' : '+'}</span>{optimisticInterest ? 'Priority Watch' : 'Mark Priority Watch'}</button>}
+              {canEdit && <button className={cls('owned-toggle', optimisticOwned && 'active')} onClick={async () => { const previous = optimisticOwned; const next = !previous; setOptimisticOwned(next); try { await onUpdate({ owned: next }, { success: next ? 'Marked as owned.' : 'Owned tag removed.', failure: 'Owned status could not be saved.' }); } catch { setOptimisticOwned(previous); } }}><span>{optimisticOwned ? <Check size={12} /> : '+'}</span>{optimisticOwned ? 'Owned' : 'Mark as owned'}</button>}
+            </div>
             {canEdit && <div className="drawer-owner-actions">
               <Button className="drawer-edit-button primary" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>
               <Button className="drawer-edit-button" onClick={() => {

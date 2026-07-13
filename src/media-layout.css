@@ -567,6 +567,15 @@
   white-space: nowrap;
 }
 
+.media-card-meta .media-owned-tag {
+  flex: 0 0 100%;
+  color: #81786c;
+  font-size: inherit;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .media-card-meta .media-format-tag,
 .drawer-meta-tags .drawer-format-tag {
   display: inline;
