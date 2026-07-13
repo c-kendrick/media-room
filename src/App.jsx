@@ -759,16 +759,21 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canReorderShelf, canCurateM
   const [draggedId, setDraggedId] = useState(null);
   const [displayItems, setDisplayItems] = useState(items);
   const [arranging, setArranging] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
   const serverOrderKey = items.map((item) => `${item.database_id}:${item.updated_at || ''}:${item.list_positions?.[shelf.shelf_id] ?? ''}:${(item.interests || []).map((person) => person.id || person.username).sort().join(',')}`).join('|');
   useEffect(() => { setDisplayItems(items); }, [serverOrderKey]);
   const rowBreak = Math.ceil(displayItems.length / 2);
   const displayRows = [displayItems.slice(0, rowBreak), displayItems.slice(rowBreak)];
   const pageCount = Math.ceil(Math.max(...displayRows.map((row) => row.length), 0) / 7);
   const displayPages = Array.from({ length: pageCount }, (_, pageIndex) => displayRows.map((row) => row.slice(pageIndex * 7, (pageIndex + 1) * 7)));
+  useEffect(() => { setCurrentPage((page) => Math.min(page, Math.max(pageCount - 1, 0))); }, [pageCount]);
   const scrollPage = (direction) => {
     const track = trackRef.current;
     if (!track) return;
-    track.scrollBy({ left: direction * Math.max(520, track.clientWidth - 24), behavior: 'smooth' });
+    const nextPage = Math.max(0, Math.min(currentPage + direction, Math.max(pageCount - 1, 0)));
+    setCurrentPage(nextPage);
+    const page = track.querySelector('.poster-page');
+    track.scrollTo({ left: nextPage * ((page?.offsetWidth || track.clientWidth) + 24), behavior: 'smooth' });
   };
 
   return (
@@ -776,22 +781,16 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canReorderShelf, canCurateM
       <div className="shelf-head">
         <div className="shelf-title">
           {canReorderShelf && <button className="shelf-drag-handle" aria-label={`Drag ${shelf.name} to reorder`} title="Drag to reorder shelf" draggable onDragStart={onShelfDragStart} onDragEnd={onShelfDragEnd}><GripVertical size={16} /></button>}
-          <span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2><Trophy size={21} />{shelf.name}<span>{items.length}</span></h2></span>
+          <span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2><Trophy size={21} />{shelf.name}<span>{items.length}</span></h2>{canCurateMain && <button className={cls('main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><span className="watchlist-action-icon"><ListOrdered size={16} /></span><span className="watchlist-action-copy"><small>MAIN WATCHLIST</small><strong>{shelf.showInMainWatchlist ? 'Included' : 'Include this shelf'}</strong></span>{shelf.showInMainWatchlist && <Check className="watchlist-action-check" size={15} />}</button>}</span>
         </div>
-        <div>
-          {canCurateMain && <button className={cls('main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><span className="watchlist-action-icon"><ListOrdered size={16} /></span><span className="watchlist-action-copy"><small>MAIN WATCHLIST</small><strong>{shelf.showInMainWatchlist ? 'Added' : 'Add this shelf'}</strong></span>{shelf.showInMainWatchlist && <Check className="watchlist-action-check" size={15} />}</button>}
-          {canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}
-          {canEdit && <Button className="shelf-add-button" icon={Plus} onClick={onAdd}>Add item</Button>}
-          {canEdit && items.length > 1 && <button className="arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /></button>}
-          {canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => onMoveShelf(-1)}><ArrowUp size={15} /></button>}
-          {canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => onMoveShelf(1)}><ArrowDown size={15} /></button>}
-          {canEdit && !shelf.required && <button aria-label={`Rename ${shelf.name}`} onClick={onRename}><Pencil size={15} /></button>}
-          {canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} onClick={onDelete}><X size={15} /></button>}
-          <button aria-label={`Scroll ${shelf.name} left`} onClick={() => scrollPage(-1)}><ChevronLeft /></button>
-          <button aria-label={`Scroll ${shelf.name} right`} onClick={() => scrollPage(1)}><ChevronRight /></button>
+        <div className="shelf-actions">
+          <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && <Button className="shelf-add-button" icon={Plus} onClick={onAdd}>Add item</Button>}{canEdit && items.length > 1 && <button className="arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /></button>}</span>
+          <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => onMoveShelf(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => onMoveShelf(1)}><ArrowDown size={15} /></button>}</span>
+          <span className="shelf-action-group shelf-edit-actions">{canEdit && !shelf.required && <button aria-label={`Rename ${shelf.name}`} title="Rename shelf" onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} title="Move shelf to Bin" onClick={onDelete}><X size={15} /></button>}</span>
+          <span className="shelf-action-group shelf-page-actions"><button aria-label={`Scroll ${shelf.name} left`} disabled={currentPage <= 0 || pageCount <= 1} onClick={() => scrollPage(-1)}><ChevronLeft /></button>{pageCount > 1 && <small>{currentPage + 1} / {pageCount}</small>}<button aria-label={`Scroll ${shelf.name} right`} disabled={currentPage >= pageCount - 1 || pageCount <= 1} onClick={() => scrollPage(1)}><ChevronRight /></button></span>
         </div>
       </div>
-      <div className="poster-track" ref={trackRef}>
+      <div className="poster-track" ref={trackRef} onScroll={(event) => { const page = event.currentTarget.querySelector('.poster-page'); const width = (page?.offsetWidth || event.currentTarget.clientWidth) + 24; if (width > 0) setCurrentPage(Math.max(0, Math.min(Math.round(event.currentTarget.scrollLeft / width), Math.max(pageCount - 1, 0)))); }}>
         {displayPages.map((pageRows, pageIndex) => <div className="poster-page" key={pageIndex}>
           {pageRows.flat().map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} draggable={canEdit} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const previous = [...displayItems]; const next = [...displayItems]; const from = next.findIndex((entry) => entry.database_id === draggedId); const to = next.findIndex((entry) => entry.database_id === item.database_id); next.splice(to, 0, next.splice(from, 1)[0]); setDisplayItems(next); setDraggedId(null); try { await onReorder(next.map((entry) => entry.database_id)); } catch { setDisplayItems(previous); } }} />)}
         </div>)}
