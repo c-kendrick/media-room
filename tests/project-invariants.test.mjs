@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { buildWatchDemand } from '../src/watch-demand.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -28,4 +29,31 @@ test('responsive media controls use shrink-safe grids', async () => {
   const styles = await read('src/public.css');
   assert.match(styles, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
   assert.match(styles, /\.public-media-command,\.media-filters,\.media-search,\.multi-select\{min-width:0/);
+});
+
+test('Main Watchlist demand counts each person once across shelves, copies, and stamps', () => {
+  const collections = [
+    { id: 'collection-a', owner_id: 'person-a', title: "Alex’s Collection" },
+    { id: 'collection-b', owner_id: 'person-b', title: "Blair’s Collection" },
+  ];
+  const media = [
+    { id: 'copy-a-1', collection_id: 'collection-a', type: 'movie', title: 'Same Film', year: 2024 },
+    { id: 'copy-a-2', collection_id: 'collection-a', type: 'movie', title: ' Same Film ', year: 2024 },
+    { id: 'copy-b', collection_id: 'collection-b', type: 'movie', title: 'same film', year: 2024 },
+  ];
+  const stamps = [
+    { media_item_id: 'copy-a-1', user_id: 'person-a' },
+    { media_item_id: 'copy-a-2', user_id: 'person-c' },
+    { media_item_id: 'copy-b', user_id: 'person-c' },
+  ];
+  const profiles = ['a', 'b', 'c'].map((suffix) => ({
+    id: `person-${suffix}`,
+    username: `person-${suffix}`,
+    display_name: `Person ${suffix.toUpperCase()}`,
+  }));
+
+  const demand = buildWatchDemand(media, collections, stamps, profiles);
+  for (const item of media) {
+    assert.deepEqual(demand.get(item.id).map((person) => person.id).sort(), ['person-a', 'person-b', 'person-c']);
+  }
 });

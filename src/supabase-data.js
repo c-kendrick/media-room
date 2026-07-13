@@ -1,4 +1,5 @@
 import { supabaseSelect } from './supabase.js';
+import { buildWatchDemand } from './watch-demand.js';
 
 function query(table, parameters) {
   return table + '?' + new URLSearchParams(parameters).toString();
@@ -127,7 +128,7 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
   const interests = mediaItems.length ? await supabaseSelect(query('media_interest', {
     select: 'media_item_id,user_id',
   }), { fresh }) : [];
-  const publicProfiles = interests.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh }) : [];
+  const publicProfiles = collections.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh }) : [];
   return mapSnapshot(collection, shelves, mediaItems, memberships, interests, publicProfiles);
 }
 
@@ -213,7 +214,11 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
     interests,
     publicProfiles,
   );
-  return { ...snapshot, mainWatchlist: true };
+  const demandByMediaId = buildWatchDemand(mirroredMediaItems, collections, interests, publicProfiles);
+  return { ...snapshot, mainWatchlist: true, media: snapshot.media.map((item) => {
+    const watchDemand = demandByMediaId.get(item.database_id) || [];
+    return { ...item, watchDemand, demandCount: watchDemand.length };
+  }) };
 }
 
 export const loadKitCollectionFromSupabase = (options) => loadCollectionFromSupabase(options);

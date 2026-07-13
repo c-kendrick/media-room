@@ -644,7 +644,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
       && matchesAny(typeFilters, [item.type])
       && matchesAny(formatFilters, mediaDisplayTags(item))
       && matchesAny(genreFilters, item.genres || [])
-      && (!data.mainWatchlist || !stampFilters.length || stampFilters.includes(String(item.interests?.length || 0)));
+      && (!data.mainWatchlist || !stampFilters.length || stampFilters.includes(String(Math.min(item.demandCount || 0, 4))));
   });
   const randomPool = contentFiltered.filter((item) => matchesAny(listFilters, item.lists || []));
   const visibleShelves = shelves.filter((shelf) => !listFilters.length || listFilters.includes(shelf.shelf_id));
@@ -757,7 +757,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
           <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}…`} /></label>
           <MultiSelect label="All lists" values={listFilters} options={shelves.map((shelf) => [shelf.shelf_id, data.mainWatchlist ? <span className="owned-list-option"><small>{shelf.ownerName}</small><b>{shelf.name}</b></span> : shelf.name])} onChange={setListFilters} />
           {section === 'screen' && !data.mainWatchlist && <MultiSelect label="Film & TV" values={typeFilters} options={sectionTypes} onChange={setTypeFilters} />}
-          {data.mainWatchlist && <MultiSelect label="Priority stamps" values={stampFilters} options={['1', '2', '3', '4'].map((count) => [count, `${count} ${count === '1' ? 'Stamp' : 'Stamps'}`])} onChange={setStampFilters} />}
+          {data.mainWatchlist && <MultiSelect label="People interested" values={stampFilters} options={['1', '2', '3', '4'].map((count) => [count, count === '4' ? '4+ People' : `${count} ${count === '1' ? 'Person' : 'People'}`])} onChange={setStampFilters} />}
           <MultiSelect label={section === 'game' ? 'All platforms' : 'All formats'} values={formatFilters} options={formats.map((value) => [value, value])} onChange={setFormatFilters} />
           <MultiSelect label="All genres" values={genreFilters} options={genres.map((value) => [value, value])} onChange={setGenreFilters} />
         </div>
@@ -891,6 +891,7 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
 function MediaCard({ item, onClick, draggable, dragging, onDragStart, onDragEnd, onDrop }) {
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
+  const displayedInterest = item.watchDemand || item.interests || [];
   return (
     <button className={cls('media-card', dragging && 'is-dragging')} title="Open item" onClick={onClick} draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={(event) => draggable && event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop?.(); }}>
       {item.poster_url
@@ -905,13 +906,14 @@ function MediaCard({ item, onClick, draggable, dragging, onDragStart, onDragEnd,
         )}
         {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
         {item.year && <span className="media-year">{item.year}</span>}
-        {item.interests?.map((person) => <span className="card-interest" title={person.display_name || person.username} key={person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
+        {displayedInterest.map((person) => <span className="card-interest" title={person.display_name || person.username} key={person.id || person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
       </span>
     </button>
   );
 }
 
 function MediaDrawer({ item, shelves, onClose, canEdit, canReviewPoster, onFindPosters, onChoosePoster, onUpdate, onUpdateShelves, canInterest, interested, onInterest, onDelete, onRestore }) {
+  const displayedInterest = item.watchDemand || item.interests || [];
   const [editing, setEditing] = useState(false);
   const [editingShelves, setEditingShelves] = useState(false);
   const [selectedShelves, setSelectedShelves] = useState([]);
@@ -948,7 +950,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, canReviewPoster, onFindP
               )}
               {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
               {item.year && <span className="drawer-year">{item.year}</span>}
-              {item.interests?.map((person) => <span className="interest-initial" title={person.display_name} key={person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
+              {displayedInterest.map((person) => <span className="interest-initial" title={person.display_name || person.username} key={person.id || person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
             </div>
             <p className="creator">{item.director || item.creator}</p>
             {canInterest && <button className={cls('priority-watch', optimisticInterest && 'active')} onClick={async () => { const previous = optimisticInterest; const next = !previous; setOptimisticInterest(next); try { await onInterest(next); } catch { setOptimisticInterest(previous); } }}><span>{optimisticInterest ? '✓' : '+'}</span>{optimisticInterest ? 'Priority Watch' : 'Mark Priority Watch'}</button>}
