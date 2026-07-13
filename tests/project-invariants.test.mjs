@@ -234,6 +234,12 @@ test('backup import execution is hardened and database errors reach the UI', asy
   }
 });
 
+test('backup import repairs older schemas missing provider metadata', async () => {
+  const migration = await read('supabase/migrations/20260713120000_ensure_backup_external_ids.sql');
+  assert.match(migration, /add column if not exists external_ids jsonb not null default '\{\}'::jsonb/);
+  assert.match(migration, /notify pgrst, 'reload schema'/);
+});
+
 test('owners can open a collection Bin and restore media or shelves', async () => {
   const app = await read('src/App.jsx');
   const styles = await read('src/public.css');
