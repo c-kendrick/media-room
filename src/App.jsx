@@ -38,6 +38,7 @@ import { bulkImportMedia, choosePosterCandidate, createMediaItem, createShelf, d
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
 import { applyShelfMemberships } from './shelf-membership.js';
+import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from './section-notes.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -66,7 +67,7 @@ function useEscape(onClose, active = true) {
 }
 
 function exportCollection(snapshot) {
-  const payload = { exported_at: new Date().toISOString(), format: 'media-room/v1', collection: { id: snapshot.collectionId, title: snapshot.collectionTitle, owner_id: snapshot.ownerId }, shelves: snapshot.mediaShelves, media: snapshot.media };
+  const payload = { exported_at: new Date().toISOString(), format: 'media-room/v1', collection: { id: snapshot.collectionId, title: snapshot.collectionTitle, owner_id: snapshot.ownerId, descriptions: snapshot.collectionDescriptions }, shelves: snapshot.mediaShelves, media: snapshot.media };
   const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
   const link = document.createElement('a');
   link.href = url; link.download = `${snapshot.collectionTitle.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase()}-backup.json`; link.click(); URL.revokeObjectURL(url);
@@ -468,14 +469,18 @@ export default function App() {
         {error && <div className="error-banner">The public collection could not refresh: {error}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (description) => {
+          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
             const previousData = data;
-            const optimisticData = { ...data, collectionDescription: description };
+            const optimisticData = {
+              ...data,
+              collectionDescription: section === 'screen' ? description : data.collectionDescription,
+              collectionDescriptions: { ...data.collectionDescriptions, [section]: description },
+            };
             setData(optimisticData);
             cacheSnapshot(optimisticData, data.collectionId);
             try {
-              await updateCollection(account.session.access_token, data.collectionId, { description });
-              snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+              await updateCollection(account.session.access_token, data.collectionId, { [SECTION_NOTE_COLUMNS[section]]: description });
+              if (section === 'screen') snapshotCache.current.delete(MAIN_WATCHLIST_ID);
               setToast('Collection introduction saved.');
             } catch (error) {
               setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
@@ -663,8 +668,7 @@ function StarRating({ value, editable = false, onChange, label = 'Star rating' }
   </span>;
 }
 
-function EditableDescription({ value, canEdit, onSave, title = 'Collection note' }) {
-  const fallback = 'A living collection of films, television, books and games.';
+function EditableDescription({ value, canEdit, onSave, fallback = '', title = 'Collection note' }) {
   const [editing, setEditing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [draft, setDraft] = useState(value || fallback);
@@ -743,6 +747,8 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
   const singularLabel = data.mainWatchlist ? 'item' : section === 'screen' ? 'film or TV show' : section === 'book' ? 'book' : 'video game';
   const canReorderShelves = canEdit || Boolean(data.mainWatchlist && isAdmin);
   const canCurateMain = Boolean(!data.mainWatchlist && section === 'screen' && (canEdit || isAdmin));
+  const sectionDescription = data.collectionDescriptions?.[section]
+    ?? (section === 'screen' ? data.collectionDescription : '');
 
   const switchSection = (next) => {
     setSection(next);
@@ -823,7 +829,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
         title={data.collectionTitle || 'The media room'}
         description={data.mainWatchlist
           ? 'Every selected shelf, mirrored live from its owner’s collection.'
-          : <EditableDescription value={data.collectionDescription} canEdit={canEdit} onSave={onDescriptionChange} title={`${data.collectionTitle || 'Collection'} note`} />}
+          : <EditableDescription value={sectionDescription} fallback={SECTION_NOTE_DEFAULTS[section]} canEdit={canEdit} onSave={(description) => onDescriptionChange(section, description)} title={`${data.collectionTitle || 'Collection'} ${sectionLabel} note`} />}
         icon={Clapperboard}
         stats={[
           [data.mainWatchlist ? items.length : items.filter((item) => ['watchlist', 'reading_list'].some((list) => item.lists?.includes(list))).length, 'to watch/read'],
@@ -865,7 +871,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
           );
           if (!shelfItems.length && queryLower) return null;
           const showOwnerIntro = data.mainWatchlist && ownerIntroShelfIds.has(shelf.shelf_id);
-          return <React.Fragment key={shelf.shelf_id}>{showOwnerIntro && <section className="main-owner-intro"><h2>{shelf.ownerName}</h2><EditableDescription value={shelf.ownerNote} canEdit={false} title={`${shelf.ownerName}’s note`} /></section>}<MediaShelf shelf={{ ...shelf, ownerName: data.mainWatchlist ? null : shelf.ownerName, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} onOpen={openMedia} canEdit={canEdit} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin)} onRemoveMirror={async () => { if (!window.confirm(`Remove ${shelf.name} from Main Watchlist? The original shelf will be left untouched.`)) return; try { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } catch { notify('That mirror could not be removed.'); } }} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < shelves.length - 1} onMoveShelf={async (direction) => { const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(shelf.shelf_id); const to = from + direction; if (to < 0 || to >= ordered.length) return; [ordered[from], ordered[to]] = [ordered[to], ordered[from]]; await saveShelfOrder(ordered, previous); }} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setDraggedShelfId(null); try { await saveShelfOrder(ordered, previous); } catch {} }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} /></React.Fragment>;
+          return <React.Fragment key={shelf.shelf_id}>{showOwnerIntro && <section className="main-owner-intro"><h2>{shelf.ownerName}</h2><EditableDescription value={shelf.ownerNote} fallback={SECTION_NOTE_DEFAULTS.screen} canEdit={false} title={`${shelf.ownerName}’s note`} /></section>}<MediaShelf shelf={{ ...shelf, ownerName: data.mainWatchlist ? null : shelf.ownerName, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} onOpen={openMedia} canEdit={canEdit} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin)} onRemoveMirror={async () => { if (!window.confirm(`Remove ${shelf.name} from Main Watchlist? The original shelf will be left untouched.`)) return; try { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } catch { notify('That mirror could not be removed.'); } }} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < shelves.length - 1} onMoveShelf={async (direction) => { const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(shelf.shelf_id); const to = from + direction; if (to < 0 || to >= ordered.length) return; [ordered[from], ordered[to]] = [ordered[to], ordered[from]]; await saveShelfOrder(ordered, previous); }} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setDraggedShelfId(null); try { await saveShelfOrder(ordered, previous); } catch {} }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} /></React.Fragment>;
         })}
       </div>
 
