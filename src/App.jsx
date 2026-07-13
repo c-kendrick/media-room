@@ -39,6 +39,7 @@ import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restore
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
 import { applyShelfMemberships } from './shelf-membership.js';
 import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from './section-notes.js';
+import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from './ownership-filter.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -699,6 +700,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
   const [genreFilters, setGenreFilters] = useState([]);
   const [typeFilters, setTypeFilters] = useState([]);
   const [ratingFilters, setRatingFilters] = useState([]);
+  const [ownershipFilters, setOwnershipFilters] = useState([]);
   const [stampFilters, setStampFilters] = useState([]);
   const [newShelf, setNewShelf] = useState('');
   const [addingMedia, setAddingMedia] = useState(false);
@@ -730,6 +732,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
     return (!queryLower || searchable.includes(queryLower))
       && matchesAny(typeFilters, [item.type])
       && matchesStarRatings(item.star_rating, ratingFilters)
+      && matchesOwnership(item.owned, ownershipFilters)
       && matchesAny(formatFilters, mediaDisplayTags(item))
       && matchesAny(genreFilters, item.genres || [])
       && (!data.mainWatchlist || !stampFilters.length || stampFilters.some((count) => (
@@ -763,6 +766,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
     setGenreFilters([]);
     setTypeFilters([]);
     setRatingFilters([]);
+    setOwnershipFilters([]);
     setStampFilters([]);
   };
 
@@ -782,6 +786,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
     setGenreFilters([]);
     setTypeFilters([]);
     setRatingFilters([]);
+    setOwnershipFilters([]);
     setStampFilters([]);
   };
 
@@ -855,13 +860,14 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
           {section === 'screen' && !data.mainWatchlist && <MultiSelect label="Film & TV" values={typeFilters} options={sectionTypes} onChange={setTypeFilters} />}
           {data.mainWatchlist && <MultiSelect label="Interest" values={stampFilters} options={['1', '2', '3', '4'].map((count) => [count, count === '1' ? '1 Stamp' : count === '4' ? '4+ People' : `${count} People`])} onChange={setStampFilters} />}
           <MultiSelect label="Rating" values={ratingFilters} options={STAR_RATING_STEPS.map((rating) => [String(rating), `${rating} ${rating === 1 ? 'star' : 'stars'}`])} onChange={setRatingFilters} />
+          <MultiSelect label="Ownership" values={ownershipFilters} options={OWNERSHIP_FILTER_OPTIONS} onChange={setOwnershipFilters} />
           <MultiSelect label={section === 'game' ? 'All platforms' : 'All formats'} values={formatFilters} options={formats.map((value) => [value, value])} onChange={setFormatFilters} />
           <MultiSelect label="All genres" values={genreFilters} options={genres.map((value) => [value, value])} onChange={setGenreFilters} />
         </div>
 
         <div className="media-action-row public-actions">
           <Button className="random-pick" icon={Shuffle} onClick={pickRandom}>{data.mainWatchlist ? 'Pick an item' : `Pick a ${singularLabel}`}</Button>
-          {(listFilters.length || ratingFilters.length || formatFilters.length || genreFilters.length || typeFilters.length || stampFilters.length || query) && (
+          {(listFilters.length || ratingFilters.length || ownershipFilters.length || formatFilters.length || genreFilters.length || typeFilters.length || stampFilters.length || query) && (
             <button className="clear-media-filters" type="button" onClick={clearFilters}><SlidersHorizontal size={14} />Clear filters</button>
           )}
         </div>
