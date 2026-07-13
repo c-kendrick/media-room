@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { buildWatchDemand } from '../src/watch-demand.js';
-import { normalizeStarRating, STAR_RATING_STEPS } from '../src/star-rating.js';
+import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from '../src/star-rating.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -82,4 +82,14 @@ test('the KM browser icon is included in the Vite document', async () => {
   const icon = await read('public/favicon.svg');
   assert.match(document, /%BASE_URL%favicon\.svg/);
   assert.match(icon, />KM<\/text>/);
+});
+
+test('rating filters match only explicitly selected half-star values', async () => {
+  const app = await read('src/App.jsx');
+  assert.equal(matchesStarRatings(3.5, ['3', '4']), false);
+  assert.equal(matchesStarRatings(4, ['3', '4']), true);
+  assert.equal(matchesStarRatings(null, ['3']), false);
+  assert.equal(matchesStarRatings(null, []), true);
+  assert.match(app, /MultiSelect label="Rating"[\s\S]*STAR_RATING_STEPS/);
+  assert.match(app, /label="Film & TV"[\s\S]*label="Rating"[\s\S]*All platforms/);
 });

@@ -37,13 +37,13 @@
 
 .media-filters {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) repeat(3, minmax(128px, auto));
+  grid-template-columns: minmax(280px, 1fr) repeat(4, minmax(128px, auto));
   gap: 7px;
   margin-bottom: 12px;
 }
 
 .media-filters.has-type {
-  grid-template-columns: minmax(280px, 1fr) repeat(4, minmax(128px, auto));
+  grid-template-columns: minmax(280px, 1fr) repeat(5, minmax(128px, auto));
 }
 
 .media-search {
