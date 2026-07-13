@@ -69,9 +69,13 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
 
 export async function loadPublicCollections({ fresh = false } = {}) {
   try {
-    return await supabaseSelect(query('collections', { select: 'id,owner_id,title,slug,description', order: 'title.asc' }), { fresh });
+    return await supabaseSelect(query('collections', { select: 'id,owner_id,title,slug,description,position', order: 'position.asc,title.asc' }), { fresh });
   } catch {
-    return supabaseSelect(query('collections', { select: 'id,owner_id,title,slug', order: 'title.asc' }), { fresh });
+    try {
+      return await supabaseSelect(query('collections', { select: 'id,owner_id,title,slug,description', order: 'title.asc' }), { fresh });
+    } catch {
+      return supabaseSelect(query('collections', { select: 'id,owner_id,title,slug', order: 'title.asc' }), { fresh });
+    }
   }
 }
 
