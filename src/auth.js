@@ -37,10 +37,13 @@ async function refreshSession(session) {
 }
 
 async function fetchProfile(accessToken) {
-  const profiles = await supabaseRequest('/rest/v1/profiles?select=id,username,display_name,role,approved_at&limit=1', {
-    fresh: true,
-    headers: { Authorization: 'Bearer ' + accessToken },
-  });
+  const options = { fresh: true, headers: { Authorization: 'Bearer ' + accessToken } };
+  let profiles;
+  try {
+    profiles = await supabaseRequest('/rest/v1/profiles?select=id,username,display_name,role,approved_at,deactivated_at&limit=1', options);
+  } catch {
+    profiles = await supabaseRequest('/rest/v1/profiles?select=id,username,display_name,role,approved_at&limit=1', options);
+  }
   return profiles?.[0] || null;
 }
 

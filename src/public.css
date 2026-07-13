@@ -118,7 +118,8 @@
 
 .auth-switch { border: 0; background: transparent; color: #6b4333; padding: 3px 0; text-align:left; text-decoration: underline; font: inherit; font-size:12px; cursor:pointer; }
 
-.user-list{display:grid;gap:8px}.user-row{display:flex;gap:10px;align-items:center;border-top:1px solid #d7cbbb;padding:10px 0}.user-row span:first-child{margin-right:auto;display:grid}.user-row small{color:#837a6f}
+.admin-users-dialog{width:min(780px,calc(100vw - 32px))!important}
+.user-list{display:grid;gap:0;border-top:1px solid #d7cbbb}.user-row{display:flex;gap:10px;align-items:center;border-bottom:1px solid #d7cbbb;padding:12px 0}.user-row>span:first-child{margin-right:auto;display:grid;min-width:0}.user-row small{color:#837a6f}.user-row.deactivated{opacity:.72}.user-status{min-width:76px;color:#776d63;font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}.user-row.deactivated .user-status{color:#924d43}
 
 /* Clean owner interface --------------------------------------------------- */
 .collection-nav-label{display:block;margin:15px 10px 5px;color:#9b9185;font-size:8px;letter-spacing:.16em;font-weight:800}
@@ -151,9 +152,16 @@
 .shelf-add-button{min-height:32px!important;padding:0 11px!important;border-radius:999px;background:#2f2b26!important;border-color:#2f2b26!important;color:#fff;box-shadow:none!important;font-size:10px!important}
 .shelf-add-button:hover{background:#4a433b!important}
 .delete-shelf{opacity:.55}
-.main-watchlist-toggle,.remove-main-mirror{width:auto!important;min-height:30px;padding:0 10px!important;display:inline-flex!important;gap:6px;align-items:center;border-radius:999px!important;font-size:9px!important;white-space:nowrap}
-.main-watchlist-toggle{background:#f3ece2!important;border:1px solid #d9cabb!important;color:#695e54!important}
-.main-watchlist-toggle.active{color:#fff!important;background:#7f302d!important;border-color:#7f302d!important}
+.main-watchlist-toggle,.remove-main-mirror{width:auto!important;min-height:30px;padding:0 10px!important;display:inline-flex!important;gap:7px;align-items:center;border-radius:6px!important;font-size:9px!important;white-space:nowrap}
+.main-watchlist-toggle{min-height:42px!important;padding:5px 11px 5px 7px!important;background:#fffaf2!important;border:1px solid #936b58!important;color:#4e3d34!important;box-shadow:0 2px 7px rgba(71,49,36,.12)!important}
+.main-watchlist-toggle:hover{background:#f5e7db!important;border-color:#714a39!important;transform:translateY(-1px)}
+.main-watchlist-toggle.active{color:#fff!important;background:#6f302d!important;border-color:#6f302d!important;box-shadow:0 2px 8px rgba(88,39,35,.22)!important}
+.watchlist-action-icon{width:29px;height:29px;border-radius:50%;background:#ead9cd;display:grid;place-items:center;color:#734b3b}
+.main-watchlist-toggle.active .watchlist-action-icon{background:rgba(255,255,255,.18);color:#fff}
+.watchlist-action-copy{display:grid;text-align:left;gap:1px;line-height:1.05}
+.watchlist-action-copy small{font-size:6px;font-weight:800;letter-spacing:.12em;opacity:.75}
+.watchlist-action-copy strong{font-size:10px;font-weight:800}
+.watchlist-action-check{margin-left:2px}
 .remove-main-mirror{background:transparent!important;border:1px solid #d8c9bb!important;color:#8d5147!important}
 .remove-main-mirror:hover{background:#f3dfda!important}
 
@@ -327,6 +335,11 @@
   .open-note-button{margin-top:5px}
   .collection-note-drawer{padding:52px 22px 30px}
   .main-owner-intro h2{font-size:24px}
-  .main-watchlist-toggle span,.remove-main-mirror span{display:none}
-  .main-watchlist-toggle,.remove-main-mirror{width:30px!important;padding:0!important;justify-content:center}
+  .watchlist-action-copy,.watchlist-action-check,.remove-main-mirror span{display:none}
+  .main-watchlist-toggle,.remove-main-mirror{width:38px!important;padding:0!important;justify-content:center}
+  .main-watchlist-toggle{min-height:38px!important}
+  .watchlist-action-icon{width:28px;height:28px}
+  .user-row{flex-wrap:wrap}
+  .user-row>span:first-child{flex:1 1 calc(100% - 90px)}
+  .user-status{margin-left:auto;text-align:right}
 }
