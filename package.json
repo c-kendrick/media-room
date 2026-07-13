@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --port 4175 --strictPort",
     "build": "vite build",
+    "test": "node --test tests/project-invariants.test.mjs",
     "preview": "vite preview --port 4176 --strictPort",
     "import-local": "node scripts/export-from-local-media.mjs",
     "inspect-data": "node scripts/inspect-public-data.mjs",
