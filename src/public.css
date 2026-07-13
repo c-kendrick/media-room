@@ -133,6 +133,7 @@
 .media-action-row.public-actions{margin-top:8px}
 .collection-tools{margin:48px 0 0;padding:18px 0 0;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr minmax(320px,auto) auto;align-items:center;gap:14px}
 .collection-tools p{margin:4px 0 0;color:#8a8176;font-size:10px}
+.collection-tool-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}
 .inline-create{display:flex;align-items:center;gap:7px}
 .inline-create input{height:38px;min-width:220px;border:1px solid var(--line);background:#fffaf2;padding:0 12px;outline:none}
 .inline-create input:focus{border-color:#a87963;box-shadow:0 0 0 3px rgba(168,121,99,.1)}
@@ -149,20 +150,20 @@
 .shelf-head>div:last-child>button:not(.button){width:30px!important;height:30px!important;background:transparent!important;border-color:transparent!important;color:#82786d}
 .shelf-head>div:last-child>button:not(.button):hover{background:#eee4d7!important;color:#2d2924}
 .shelf-head>div:last-child>button:disabled{opacity:.2!important;cursor:not-allowed!important;background:transparent!important}
-.shelf-control-button{width:auto!important;min-height:34px!important;height:34px!important;padding:0 11px!important;border:1px solid #cdbdac!important;border-radius:6px!important;background:#fffaf2!important;color:#51463e!important;box-shadow:none!important;display:inline-flex!important;align-items:center;justify-content:center;gap:7px;font-size:9px!important;font-weight:700;white-space:nowrap;cursor:pointer;transform:none!important}
+.shelf-control-button{width:auto!important;min-height:40px!important;height:40px!important;padding:0 13px!important;border:1px solid #cdbdac!important;border-radius:6px!important;background:#fffaf2!important;color:#51463e!important;box-shadow:none!important;display:inline-flex!important;align-items:center;justify-content:center;gap:7px;font-size:9px!important;font-weight:700;white-space:nowrap;cursor:pointer;transform:none!important}
 .shelf-control-button:hover{background:#f2e4d8!important;border-color:#936b58!important;color:#3f322b!important;transform:none!important}
 .shelf-add-button,.main-watchlist-toggle.active{background:#6f302d!important;border-color:#6f302d!important;color:#fff!important}
 .shelf-add-button:hover,.main-watchlist-toggle.active:hover{background:#83423c!important;border-color:#83423c!important;color:#fff!important;transform:none!important}
-.main-watchlist-toggle{height:42px!important;min-height:42px!important;text-align:left}
+.main-watchlist-toggle{height:40px!important;min-height:40px!important;padding:0 9px!important;text-align:left}
 .main-watchlist-copy{display:grid;gap:1px;line-height:1.02}
-.main-watchlist-copy small{font-size:7px;font-weight:600;letter-spacing:.02em}
+.main-watchlist-copy small{font-size:6px;font-weight:600;letter-spacing:.01em}
 .main-watchlist-copy strong{font-size:10px;font-weight:900}
 .delete-shelf{opacity:.55}
 .remove-main-mirror{width:auto!important;min-height:34px;padding:0 10px!important;display:inline-flex!important;gap:7px;align-items:center;border-radius:6px!important;font-size:9px!important;white-space:nowrap}
 .remove-main-mirror{background:transparent!important;border:1px solid #d8c9bb!important;color:#8d5147!important}
 .remove-main-mirror:hover{background:#f3dfda!important}
 .shelf-actions{display:flex!important;align-items:center!important;justify-content:flex-end;flex-wrap:wrap;gap:7px!important;margin-left:auto}
-.shelf-action-group{display:inline-flex;align-items:center;gap:3px;padding:3px;border:1px solid #e0d5c8;border-radius:7px;background:rgba(255,250,242,.72)}
+.shelf-action-group{height:40px;box-sizing:border-box;display:inline-flex;align-items:center;gap:3px;padding:3px;border:1px solid #e0d5c8;border-radius:7px;background:rgba(255,250,242,.72)}
 .shelf-action-group:empty{display:none}
 .shelf-action-group>button:not(.button):not(.shelf-control-button):not(.remove-main-mirror){width:32px;height:32px;border:0;border-radius:5px;background:transparent;color:#71675e;display:grid;place-items:center;cursor:pointer}
 .shelf-action-group>button:not(.button):not(.shelf-control-button):not(.remove-main-mirror):hover:not(:disabled){background:#e9dfd3;color:#28231f}
@@ -171,6 +172,11 @@
 .shelf-content-actions{border-color:transparent;background:transparent;padding:0}
 .shelf-order-actions,.shelf-edit-actions,.shelf-page-actions{border-color:#cdbdac;background:#fffaf2}
 .shelf-page-actions small{min-width:30px;color:#756b61;font-size:8px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums}
+.bulk-import-dialog{width:min(660px,calc(100vw - 32px))}
+.bulk-import-destination,.bulk-import-input{display:grid;gap:7px;margin-top:16px;color:#51473d;font-size:12px;font-weight:700}
+.bulk-import-destination select,.bulk-import-input textarea{width:100%;box-sizing:border-box;border:1px solid #bdb09e;background:#fffdf8;color:#332b25;padding:10px 11px;font:inherit}
+.bulk-import-input textarea{resize:vertical;line-height:1.55}
+.bulk-import-format{margin:7px 0 18px!important;color:#83766a!important;font-size:9px!important}
 
 .media-card[draggable="true"]{cursor:grab}
 .media-card[draggable="true"]:active{cursor:grabbing}
