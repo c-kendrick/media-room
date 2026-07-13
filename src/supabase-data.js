@@ -163,7 +163,18 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
     select: 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,runtime,deleted_at,created_at,updated_at',
     order: 'created_at.asc',
   }), { fresh }) : [];
-  const interests = mediaItems.length ? await supabaseSelect(query('media_interest', {
+  const shelfById = new Map(shelves.map((shelf) => [shelf.id, shelf]));
+  const mediaById = new Map(mediaItems.map((item) => [item.id, item]));
+  const mirroredMemberships = memberships.filter((membership) => {
+    const shelf = shelfById.get(membership.shelf_id);
+    const item = mediaById.get(membership.media_item_id);
+    if (!shelf || !item) return false;
+    if (shelf.section === 'screen') return item.type === 'film' || item.type === 'television';
+    return item.type === shelf.section;
+  });
+  const mirroredMediaIds = new Set(mirroredMemberships.map((membership) => membership.media_item_id));
+  const mirroredMediaItems = mediaItems.filter((item) => mirroredMediaIds.has(item.id));
+  const interests = mirroredMediaItems.length ? await supabaseSelect(query('media_interest', {
     select: 'media_item_id,user_id',
   }), { fresh }) : [];
   const publicProfiles = interests.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh }) : [];
@@ -176,8 +187,8 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
       const ownerName = collection?.title?.replace(/[’']s Collection$/i, '') || 'Member';
       return { ...shelf, section: 'screen', source_section: shelf.section, source_collection_id: shelf.collection_id, owner_name: ownerName, owner_note: collection?.description || '', position: shelf.main_watchlist_position ?? shelf.position };
     }),
-    mediaItems,
-    memberships,
+    mirroredMediaItems,
+    mirroredMemberships,
     interests,
     publicProfiles,
   );
