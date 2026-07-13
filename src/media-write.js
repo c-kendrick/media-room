@@ -144,6 +144,12 @@ export function bulkImportMedia(accessToken, collectionId, shelfId, section, ite
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
+export function enrichImportedPosters(accessToken, collectionId, items) {
+  return supabaseRequest('/functions/v1/enrich-poster', { method: 'POST', fresh: true,
+    body: { collection_id: collectionId, bulk_items: items },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+}
+
 export function setInterest(accessToken, userId, mediaItemId, enabled) {
   if (!accessToken || !userId || !mediaItemId) throw new Error('An approved signed-in account is required.');
   const path = '/rest/v1/media_interest?media_item_id=eq.' + encodeURIComponent(mediaItemId)
