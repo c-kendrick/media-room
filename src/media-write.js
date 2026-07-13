@@ -162,6 +162,12 @@ export function bulkImportMedia(accessToken, collectionId, shelfId, section, ite
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
+export function importCollectionBackup(accessToken, collectionId, backup) {
+  return supabaseRequest('/rest/v1/rpc/import_collection_backup', { method: 'POST', fresh: true,
+    body: { target_collection_id: collectionId, backup },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+}
+
 export function enrichSectionPosters(accessToken, collectionId, section) {
   return supabaseRequest('/functions/v1/enrich-poster', { method: 'POST', fresh: true,
     body: { collection_id: collectionId, enrich_section: section },

@@ -6,6 +6,7 @@ import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from '../s
 import { applyShelfMemberships } from '../src/shelf-membership.js';
 import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from '../src/section-notes.js';
 import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from '../src/ownership-filter.js';
+import { parseCollectionBackup, validateCollectionBackup } from '../src/backup-import.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -180,4 +181,34 @@ test('ownership filtering is available everywhere and matches Owned and Unowned 
   assert.match(app, /MultiSelect label="Ownership"[\s\S]*OWNERSHIP_FILTER_OPTIONS/);
   assert.doesNotMatch(app, /data\.mainWatchlist && <MultiSelect label="Ownership"/);
   assert.match(styles, /repeat\(6, minmax\(128px, auto\)\)/);
+});
+
+test('exported backups can be validated and imported through the owner-only merge workflow', async () => {
+  const backup = {
+    format: 'media-room/v1',
+    collection: { id: 'collection-a', title: 'A Collection', descriptions: { screen: 'Hello' } },
+    shelves: [{ shelf_id: 'shelf-a', section: 'screen', name: 'Watchlist' }],
+    media: [{ item_id: 'media-a', type: 'film', title: 'Arrival', lists: ['shelf-a'] }],
+  };
+  assert.deepEqual(validateCollectionBackup(backup), { backup, shelfCount: 1, mediaCount: 1 });
+  assert.deepEqual(parseCollectionBackup(JSON.stringify(backup)), { backup, shelfCount: 1, mediaCount: 1 });
+  assert.throws(() => parseCollectionBackup('{'), /valid JSON/);
+  assert.throws(() => validateCollectionBackup({ ...backup, format: 'unknown' }), /unsupported format/);
+
+  const app = await read('src/App.jsx');
+  const writes = await read('src/media-write.js');
+  const migration = await read('supabase/migrations/20260713100000_import_collection_backups.sql');
+  assert.match(app, /type="file"[\s\S]*Import backup/);
+  assert.match(app, /Matching records will be updated[\s\S]*remain untouched/);
+  assert.match(writes, /rpc\/import_collection_backup/);
+  assert.match(migration, /format' is distinct from 'media-room\/v1'/);
+  assert.match(migration, /c\.owner_id = auth\.uid\(\)/);
+  assert.match(migration, /on conflict \(collection_id, legacy_id\) do update/);
+  assert.doesNotMatch(migration, /delete from public\.(media_items|shelves)/);
+});
+
+test('poster enrichment is labelled Find posters', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /Finding posters…' : 'Find posters'/);
+  assert.doesNotMatch(app, />Enrich posters</);
 });
