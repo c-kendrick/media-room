@@ -26,6 +26,7 @@ import {
   Shuffle,
   SlidersHorizontal,
   Trash2,
+  Upload,
   ChevronsDown,
   ChevronsUp,
   UserRound,
@@ -34,12 +35,13 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
-import { bulkImportMedia, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionPosters, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
+import { bulkImportMedia, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionPosters, importCollectionBackup, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
 import { applyShelfMemberships } from './shelf-membership.js';
 import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from './section-notes.js';
 import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from './ownership-filter.js';
+import { BACKUP_IMPORT_LIMITS, parseCollectionBackup } from './backup-import.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -706,10 +708,12 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
   const [addingMedia, setAddingMedia] = useState(false);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [enrichingPosters, setEnrichingPosters] = useState(false);
+  const [importingBackup, setImportingBackup] = useState(false);
   const [addToShelfIds, setAddToShelfIds] = useState([]);
   const [draggedShelfId, setDraggedShelfId] = useState(null);
   const [optimisticShelfIds, setOptimisticShelfIds] = useState([]);
   const [optimisticMainShelfIds, setOptimisticMainShelfIds] = useState([]);
+  const backupInputRef = useRef(null);
 
   const sourceShelves = mediaShelvesForSection(data, section);
   useEffect(() => { setOptimisticShelfIds(sourceShelves.map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves, section]);
@@ -832,6 +836,30 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
     }
   };
 
+  const importBackupFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > BACKUP_IMPORT_LIMITS.bytes) {
+      notify('That backup is larger than the 25 MB import limit.');
+      return;
+    }
+
+    try {
+      const { backup, shelfCount, mediaCount } = parseCollectionBackup(await file.text());
+      if (!window.confirm(`Import ${mediaCount} media items and ${shelfCount} shelves into ${data.collectionTitle}? Matching records will be updated. Current records not included in the backup will remain untouched.`)) return;
+      setImportingBackup(true);
+      const result = await importCollectionBackup(accessToken, data.collectionId, backup);
+      await refresh({ fresh: true });
+      notify(`Backup imported: ${result?.media ?? mediaCount} media items and ${result?.shelves ?? shelfCount} shelves merged.`);
+    } catch (error) {
+      const validationMessage = error?.message && !/failed|request|HTTP|Supabase/i.test(error.message) ? error.message : null;
+      notify(validationMessage || 'Backup could not be imported. Apply the latest Supabase migration and try again.');
+    } finally {
+      setImportingBackup(false);
+    }
+  };
+
   return (
     <div className="page media-page">
       <PageHero
@@ -887,7 +915,16 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
       </div>
 
       {!randomPool.length && <Empty>No media matches those filters.</Empty>}
-      {!data.mainWatchlist && (canEdit || isAdmin) && <section className="collection-tools"><div><span className="eyebrow">COLLECTION TOOLS</span><p>{canEdit ? 'Manage this section without cluttering the shelves.' : 'Administrative backup and artwork tools.'}</p></div>{canEdit && <form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="Name a new shelf" aria-label="New shelf name" /><Button type="submit" icon={Plus}>Add shelf</Button></form>}<div className="collection-tool-actions"><Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters} onClick={enrichCurrentSection}>{enrichingPosters ? 'Enriching posters…' : 'Enrich posters'}</Button><Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button>{canEdit && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportOpen(true)}>Bulk Import {section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games'}</Button>}</div></section>}
+      {!data.mainWatchlist && (canEdit || isAdmin) && <section className="collection-tools">
+        <div><span className="eyebrow">COLLECTION TOOLS</span><p>{canEdit ? 'Manage this section without cluttering the shelves.' : 'Administrative backup and artwork tools.'}</p></div>
+        {canEdit && <form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="Name a new shelf" aria-label="New shelf name" /><Button type="submit" icon={Plus}>Add shelf</Button></form>}
+        <div className="collection-tool-actions">
+          <Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters} onClick={enrichCurrentSection}>{enrichingPosters ? 'Finding posters…' : 'Find posters'}</Button>
+          <Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button>
+          {canEdit && <><input ref={backupInputRef} hidden type="file" accept=".json,application/json" onChange={importBackupFile} /><Button className="quiet-button" icon={Upload} disabled={importingBackup} onClick={() => backupInputRef.current?.click()}>{importingBackup ? 'Importing backup…' : 'Import backup'}</Button></>}
+          {canEdit && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportOpen(true)}>Bulk Import {section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games'}</Button>}
+        </div>
+      </section>}
       {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={async (item, shelfIds) => { const created = await createMediaItem(accessToken, { ...item, collection_id: data.collectionId }); await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); setAddingMedia(false); setAddToShelfIds([]); await refresh({ fresh: true }); notify('Media added.'); }} />}
       {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`); }} />}
     </div>
