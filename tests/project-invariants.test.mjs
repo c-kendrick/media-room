@@ -110,8 +110,9 @@ test('shelf membership toggles directly in the drawer and updates all visible st
   assert.notEqual(updated, snapshot);
 
   const app = await read('src/App.jsx');
-  assert.match(app, /const toggleShelf = async[\s\S]*setOptimisticShelves\(nextShelves\)[\s\S]*onUpdateShelves\(previousShelves, nextShelves\)/);
+  assert.match(app, /const toggleShelf = \(shelfId\) =>[\s\S]*setOptimisticShelves\(nextShelves\)[\s\S]*onUpdateShelves\(previousShelves, nextShelves\)\.catch/);
   assert.match(app, /aria-pressed=\{optimisticShelves\.includes\(shelf\.shelf_id\)\}/);
+  assert.doesNotMatch(app, /disabled=\{shelfBusy\}/);
   assert.doesNotMatch(app, /Edit shelves|SHELF MEMBERSHIP|Save shelves/);
   assert.match(app, /const optimisticData = applyShelfMemberships[\s\S]*setData\(optimisticData\)[\s\S]*replaceMediaShelfMemberships/);
   assert.match(app, /Previous shelves restored/);
@@ -249,7 +250,10 @@ test('owners can open a collection Bin and restore media or shelves', async () =
   assert.match(app, /function CollectionBinDrawer/);
   assert.match(app, /onRestoreMedia[\s\S]*setMediaDeleted\(accessToken, item\.database_id, false\)/);
   assert.match(app, /onRestoreShelf[\s\S]*updateShelf\(accessToken, shelf\.shelf_id, \{ deleted_at: null \}\)/);
-  assert.doesNotMatch(app, /Delete forever|Delete permanently|permanentlyDeleteMedia|deleteShelf/);
+  assert.match(app, /CollectionBinDrawer[\s\S]*Delete forever/);
+  assert.match(app, /onDeleteMedia[\s\S]*permanentlyDeleteMedia/);
+  assert.match(app, /onDeleteShelf[\s\S]*deleteShelf/);
+  assert.doesNotMatch(app, /drawer-danger-zone[\s\S]{0,400}Delete permanently/);
   assert.match(styles, /\.collection-bin-drawer/);
   assert.match(styles, /\.bin-row-actions/);
 });
@@ -265,8 +269,14 @@ test('add item shares the complete media details and keeps all non-name fields o
   assert.match(app, /section === 'screen'[\s\S]*Mark Priority Watch/);
   assert.match(app, /if \(priorityWatch && currentUserId\) await setInterest/);
   assert.match(app, /<legend>Also add to<\/legend>/);
+  assert.match(app, /section === 'game'[\s\S]*Platforms \(comma separated\)[\s\S]*: <label>Format/);
+  assert.match(app, /!compact && <label>Runtime/);
+  assert.match(app, /Name of film or show[\s\S]*Name of book[\s\S]*Name of video game/);
+  assert.doesNotMatch(app, /Add the muted Owned tag|Add your priority stamp/);
   assert.match(styles, /\.optional-media-section/);
   assert.match(styles, /\.add-status-options/);
+  assert.match(styles, /\.editor-layer \{ z-index: 140; \}/);
+  assert.match(styles, /\.add-media-layer\{[^}]*align-items:flex-start[^}]*overflow-y:auto/);
 });
 
 test('shelf controls use consistent spacing and headline-style labels', async () => {
