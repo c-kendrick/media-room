@@ -57,3 +57,9 @@ test('Main Watchlist demand counts each person once across shelves, copies, and 
     assert.deepEqual(demand.get(item.id).map((person) => person.id).sort(), ['person-a', 'person-b', 'person-c']);
   }
 });
+
+test('the first Main Watchlist interest filter remains a genuine single-stamp filter', async () => {
+  const source = await read('src/App.jsx');
+  assert.match(source, /count === '1'[\s\S]*\(item\.interests\?\.length \|\| 0\) === 1/);
+  assert.match(source, /count === '1' \? '1 Stamp'/);
+});
