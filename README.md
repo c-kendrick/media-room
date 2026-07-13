@@ -40,7 +40,7 @@ supabase functions deploy enrich-poster
 supabase secrets set TMDB_API_KEY=your_tmdb_key
 ```
 
-The browser never receives this key. The function requires the signed-in collection owner and supports searching TMDB candidates or saving an owner-selected poster URL.
+The browser never receives this key. The function requires the signed-in collection owner and supports searching TMDB candidates, saving an owner-selected poster URL, and confidently enriching up to 50 Film & TV rows after a bulk import. Exact-title matches are applied automatically; ambiguous matches remain blank.
 
 ## 1. Set up the GitHub Pages version on your PC
 
