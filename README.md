@@ -42,7 +42,7 @@ supabase secrets set GOOGLE_BOOKS_API_KEY=your_google_books_key
 supabase secrets set STEAMGRIDDB_API_KEY=your_steamgriddb_key
 ```
 
-The browser never receives these keys. The function requires the signed-in collection owner and supports TMDB for Film & TV, Google Books with an Open Library fallback for books, and SteamGridDB for games. It can confidently enrich up to 50 rows after a bulk import. Exact matches are applied automatically; ambiguous matches remain blank.
+The browser never receives these keys. Poster enrichment is a separate collection tool from Bulk Import and can process up to 50 blank posters in the current section. Collection owners and administrators can run it; automatic enrichment never replaces existing artwork. It supports TMDB for Film & TV, Google Books with an Open Library fallback for books, and SteamGridDB for games. Exact matches are applied automatically; ambiguous matches remain blank.
 
 ## 1. Set up the GitHub Pages version on your PC
 
