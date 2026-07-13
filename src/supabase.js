@@ -1,7 +1,7 @@
 // The publishable key is intentionally safe to ship in a browser. Database
 // access is constrained by Supabase Row Level Security; never use a service key here.
-export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://sswmltwdflqqspsokyrb.supabase.co';
-export const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_AWgsHEgRQDkwpafAKcaNOg_MUfg5xd0';
+export const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || 'https://sswmltwdflqqspsokyrb.supabase.co';
+export const SUPABASE_PUBLISHABLE_KEY = import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_AWgsHEgRQDkwpafAKcaNOg_MUfg5xd0';
 
 function endpoint(path) {
   return new URL(path, SUPABASE_URL).toString();
@@ -18,11 +18,17 @@ export async function supabaseRequest(path, { fresh = false, headers = {}, metho
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
+  const text = await response.text();
   if (!response.ok) {
-    throw new Error('Supabase request failed (' + response.status + ').');
+    let payload = null;
+    try { payload = text ? JSON.parse(text) : null; } catch { /* Keep the HTTP fallback below. */ }
+    const details = [payload?.message, payload?.details, payload?.hint].filter(Boolean);
+    const error = new Error(details.length ? [...new Set(details)].join(' ') : 'Supabase request failed (' + response.status + ').');
+    error.status = response.status;
+    error.code = payload?.code || null;
+    throw error;
   }
 
-  const text = await response.text();
   return text ? JSON.parse(text) : null;
 }
 
