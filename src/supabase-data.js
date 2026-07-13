@@ -31,6 +31,8 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
       showInMainWatchlist: shelf.show_in_main_watchlist ?? (shelf.section === 'screen' && shelf.name.trim().toLowerCase() === 'watchlist'),
       mainWatchlistPosition: shelf.main_watchlist_position ?? shelf.position,
       ownerName: shelf.owner_name || null,
+      ownerNote: shelf.owner_note || '',
+      sourceCollectionId: shelf.source_collection_id || null,
       sourceSection: shelf.source_section || shelf.section,
     })),
     media: mediaItems.map((item) => {
@@ -66,7 +68,11 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
 }
 
 export async function loadPublicCollections({ fresh = false } = {}) {
-  return supabaseSelect(query('collections', { select: 'id,owner_id,title,slug', order: 'title.asc' }), { fresh });
+  try {
+    return await supabaseSelect(query('collections', { select: 'id,owner_id,title,slug,description', order: 'title.asc' }), { fresh });
+  } catch {
+    return supabaseSelect(query('collections', { select: 'id,owner_id,title,slug', order: 'title.asc' }), { fresh });
+  }
 }
 
 export async function loadCollectionFromSupabase({ collectionId, fresh = false } = {}) {
@@ -168,7 +174,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
     [...shelves].sort((a, b) => (Number(a.main_watchlist_position) || collectionOrder.get(a.collection_id)) - (Number(b.main_watchlist_position) || collectionOrder.get(b.collection_id))).map((shelf) => {
       const collection = collectionById.get(shelf.collection_id);
       const ownerName = collection?.title?.replace(/[’']s Collection$/i, '') || 'Member';
-      return { ...shelf, section: 'screen', source_section: shelf.section, owner_name: ownerName, position: shelf.main_watchlist_position ?? shelf.position };
+      return { ...shelf, section: 'screen', source_section: shelf.section, source_collection_id: shelf.collection_id, owner_name: ownerName, owner_note: collection?.description || '', position: shelf.main_watchlist_position ?? shelf.position };
     }),
     mediaItems,
     memberships,
