@@ -709,6 +709,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [enrichingPosters, setEnrichingPosters] = useState(false);
   const [importingBackup, setImportingBackup] = useState(false);
+  const [binOpen, setBinOpen] = useState(false);
   const [addToShelfIds, setAddToShelfIds] = useState([]);
   const [draggedShelfId, setDraggedShelfId] = useState(null);
   const [optimisticShelfIds, setOptimisticShelfIds] = useState([]);
@@ -721,6 +722,9 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
   const shelfIndex = new Map(optimisticShelfIds.map((id, index) => [id, index]));
   const shelves = [...sourceShelves].sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
   const items = active(data.media).filter((item) => data.mainWatchlist || mediaSection(item) === section);
+  const deletedMedia = (data.media || []).filter((item) => item.deleted_at);
+  const deletedShelves = (data.mediaShelves || []).filter((shelf) => shelf.deleted_at);
+  const binCount = deletedMedia.length + deletedShelves.length;
   const formats = unique(items.flatMap(mediaDisplayTags)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const genres = unique(items.flatMap((item) => item.genres || [])).sort((a, b) => a.localeCompare(b));
   const sectionTypes = section === 'screen'
@@ -850,11 +854,11 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
       if (!window.confirm(`Import ${mediaCount} media items and ${shelfCount} shelves into ${data.collectionTitle}? Matching records will be updated. Current records not included in the backup will remain untouched.`)) return;
       setImportingBackup(true);
       const result = await importCollectionBackup(accessToken, data.collectionId, backup);
+      if (result?.ok === false) throw new Error(result.error || 'The backup could not be imported.');
       await refresh({ fresh: true });
       notify(`Backup imported: ${result?.media ?? mediaCount} media items and ${result?.shelves ?? shelfCount} shelves merged.`);
     } catch (error) {
-      const validationMessage = error?.message && !/failed|request|HTTP|Supabase/i.test(error.message) ? error.message : null;
-      notify(validationMessage || 'Backup could not be imported. Apply the latest Supabase migration and try again.');
+      notify(error?.message ? `Backup import failed: ${error.message}` : 'Backup import failed for an unknown reason.');
     } finally {
       setImportingBackup(false);
     }
@@ -922,10 +926,12 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
           <Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters} onClick={enrichCurrentSection}>{enrichingPosters ? 'Finding posters…' : 'Find posters'}</Button>
           <Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button>
           {canEdit && <><input ref={backupInputRef} hidden type="file" accept=".json,application/json" onChange={importBackupFile} /><Button className="quiet-button" icon={Upload} disabled={importingBackup} onClick={() => backupInputRef.current?.click()}>{importingBackup ? 'Importing backup…' : 'Import backup'}</Button></>}
+          {canEdit && <Button className="quiet-button bin-button" icon={Trash2} onClick={() => setBinOpen(true)}>Bin{binCount ? ` (${binCount})` : ''}</Button>}
           {canEdit && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportOpen(true)}>Bulk Import {section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games'}</Button>}
         </div>
       </section>}
       {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={async (item, shelfIds) => { const created = await createMediaItem(accessToken, { ...item, collection_id: data.collectionId }); await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); setAddingMedia(false); setAddToShelfIds([]); await refresh({ fresh: true }); notify('Media added.'); }} />}
+      {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={async (item) => { if (!window.confirm(`Permanently delete ${item.title}? This cannot be undone.`)) return; await permanentlyDeleteMedia(accessToken, item.database_id); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); }} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={async (shelf) => { if (!window.confirm(`Permanently delete the shelf ${shelf.name}? Its media items will remain in the collection.`)) return; await deleteShelf(accessToken, shelf.shelf_id); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); }} />}
       {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`); }} />}
     </div>
   );
@@ -1026,6 +1032,35 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
     </section>)}</div>
     <div className="dialog-actions"><button className="text-button" onClick={onClose}>Cancel</button><Button disabled={saving} onClick={async () => { setSaving(true); try { await onSave(ordered); } finally { setSaving(false); } }}>{saving ? 'Saving…' : 'Save order'}</Button></div>
   </section></div>;
+}
+
+function CollectionBinDrawer({ media, shelves, onClose, onError, onOpenMedia, onRestoreMedia, onDeleteMedia, onRestoreShelf, onDeleteShelf }) {
+  const [busyId, setBusyId] = useState(null);
+  useEscape(onClose);
+  const run = async (id, action) => {
+    setBusyId(id);
+    try { await action(); } catch (error) { onError(error?.message ? `Bin update failed: ${error.message}` : 'That Bin item could not be updated.'); } finally { setBusyId(null); }
+  };
+  const sectionName = (section) => section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games';
+
+  return createPortal(<div className="drawer-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <aside className="collection-bin-drawer">
+      <button className="close" onClick={onClose} aria-label="Close Bin"><X /></button>
+      <span className="eyebrow">COLLECTION BIN</span>
+      <h2>Recently removed</h2>
+      <p className="bin-intro">Restore anything you want to keep. Permanent deletion cannot be undone.</p>
+      {!media.length && !shelves.length && <div className="bin-empty"><Trash2 size={20} /><span>The Bin is empty.</span></div>}
+      {media.length > 0 && <section className="bin-group"><header><span>MEDIA</span><small>{media.length}</small></header><div className="bin-list">
+        {media.map((item) => <article className="bin-row-card" key={item.database_id}>
+          <button className="bin-item-main" onClick={() => onOpenMedia(item.item_id)}>{item.poster_url ? <img src={item.poster_url} alt="" /> : <span className="bin-poster-fallback"><Clapperboard size={14} /></span>}<span><strong>{cleanImportedMediaTitle(item.title)}</strong><small>{sectionName(mediaSection(item))}{item.year ? ` · ${item.year}` : ''}</small></span></button>
+          <div className="bin-row-actions"><button disabled={busyId === item.database_id} onClick={() => run(item.database_id, () => onRestoreMedia(item))}><RotateCw size={13} />Restore</button><button className="permanent" disabled={busyId === item.database_id} onClick={() => run(item.database_id, () => onDeleteMedia(item))}><Trash2 size={13} />Delete forever</button></div>
+        </article>)}
+      </div></section>}
+      {shelves.length > 0 && <section className="bin-group"><header><span>SHELVES</span><small>{shelves.length}</small></header><div className="bin-list">
+        {shelves.map((shelf) => <article className="bin-row-card shelf" key={shelf.shelf_id}><div className="bin-item-main"><span className="bin-shelf-mark"><ListOrdered size={15} /></span><span><strong>{shelf.name}</strong><small>{sectionName(shelf.section)}</small></span></div><div className="bin-row-actions"><button disabled={busyId === shelf.shelf_id} onClick={() => run(shelf.shelf_id, () => onRestoreShelf(shelf))}><RotateCw size={13} />Restore</button><button className="permanent" disabled={busyId === shelf.shelf_id} onClick={() => run(shelf.shelf_id, () => onDeleteShelf(shelf))}><Trash2 size={13} />Delete forever</button></div></article>)}
+      </div></section>}
+    </aside>
+  </div>, document.body);
 }
 
 function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDragStart, onDragEnd, onDrop }) {

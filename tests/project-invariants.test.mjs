@@ -7,6 +7,7 @@ import { applyShelfMemberships } from '../src/shelf-membership.js';
 import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from '../src/section-notes.js';
 import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from '../src/ownership-filter.js';
 import { parseCollectionBackup, validateCollectionBackup } from '../src/backup-import.js';
+import { supabaseRequest } from '../src/supabase.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -211,4 +212,36 @@ test('poster enrichment is labelled Find posters', async () => {
   const app = await read('src/App.jsx');
   assert.match(app, /Finding posters…' : 'Find posters'/);
   assert.doesNotMatch(app, />Enrich posters</);
+});
+
+test('backup import execution is hardened and database errors reach the UI', async () => {
+  const app = await read('src/App.jsx');
+  const migration = await read('supabase/migrations/20260713110000_fix_backup_import_execution.sql');
+  assert.match(migration, /insert into public\.shelves as current_shelf/);
+  assert.match(migration, /current_shelf\.is_required or excluded\.is_required/);
+  assert.match(migration, /insert into public\.media_items as current_media/);
+  assert.match(migration, /exception when others[\s\S]*'error', sqlerrm/);
+  assert.match(migration, /notify pgrst, 'reload schema'/);
+  assert.match(app, /result\?\.ok === false/);
+  assert.match(app, /Backup import failed: \$\{error\.message\}/);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ message: 'Database rejected the import.', details: 'Specific reason.' }), { status: 400 });
+  try {
+    await assert.rejects(() => supabaseRequest('/rest/v1/rpc/test'), /Database rejected the import\. Specific reason\./);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('owners can open a collection Bin and restore media or shelves', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /Bin\{binCount \? ` \(\$\{binCount\}\)` : ''\}/);
+  assert.match(app, /function CollectionBinDrawer/);
+  assert.match(app, /onRestoreMedia[\s\S]*setMediaDeleted\(accessToken, item\.database_id, false\)/);
+  assert.match(app, /onRestoreShelf[\s\S]*updateShelf\(accessToken, shelf\.shelf_id, \{ deleted_at: null \}\)/);
+  assert.match(app, /Delete forever/);
+  assert.match(styles, /\.collection-bin-drawer/);
+  assert.match(styles, /\.bin-row-actions/);
 });
