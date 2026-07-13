@@ -34,7 +34,7 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
-import { createMediaItem, createShelf, deleteShelf, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
+import { bulkImportMedia, createMediaItem, createShelf, deleteShelf, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
 
 function cls(...values) {
@@ -612,6 +612,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
   const [stampFilters, setStampFilters] = useState([]);
   const [newShelf, setNewShelf] = useState('');
   const [addingMedia, setAddingMedia] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [addToShelfIds, setAddToShelfIds] = useState([]);
   const [draggedShelfId, setDraggedShelfId] = useState(null);
   const [optimisticShelfIds, setOptimisticShelfIds] = useState([]);
@@ -766,8 +767,9 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
       </div>
 
       {!randomPool.length && <Empty>No media matches those filters.</Empty>}
-      {canEdit && <section className="collection-tools"><div><span className="eyebrow">COLLECTION TOOLS</span><p>Manage this section without cluttering the shelves.</p></div><form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="Name a new shelf" aria-label="New shelf name" /><Button type="submit" icon={Plus}>Add shelf</Button></form><Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button></section>}
+      {canEdit && <section className="collection-tools"><div><span className="eyebrow">COLLECTION TOOLS</span><p>Manage this section without cluttering the shelves.</p></div><form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="Name a new shelf" aria-label="New shelf name" /><Button type="submit" icon={Plus}>Add shelf</Button></form><div className="collection-tool-actions"><Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button><Button className="quiet-button" icon={Plus} onClick={() => setBulkImportOpen(true)}>Import {section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games'}</Button></div></section>}
       {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={async (item, shelfIds) => { const created = await createMediaItem(accessToken, { ...item, collection_id: data.collectionId }); await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); setAddingMedia(false); setAddToShelfIds([]); await refresh({ fresh: true }); notify('Media added.'); }} />}
+      {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`); }} />}
     </div>
   );
 }
@@ -802,7 +804,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canReorderShelf, canCurateM
           <span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2></span>
         </div>
         <div className="shelf-actions">
-          <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && items.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span>{shelf.showInMainWatchlist && <Check size={14} />}</button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add item</Button>}</span>
+          <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && items.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add item</Button>}</span>
           <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => onMoveShelf(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => onMoveShelf(1)}><ArrowDown size={15} /></button>}</span>
           <span className="shelf-action-group shelf-edit-actions">{canEdit && !shelf.required && <button aria-label={`Rename ${shelf.name}`} title="Rename shelf" onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} title="Move shelf to Bin" onClick={onDelete}><X size={15} /></button>}</span>
           <span className="shelf-action-group shelf-page-actions"><button aria-label={`Scroll ${shelf.name} left`} disabled={currentPage <= 0 || pageCount <= 1} onClick={() => scrollPage(-1)}><ChevronLeft /></button>{pageCount > 1 && <small>{currentPage + 1} / {pageCount}</small>}<button aria-label={`Scroll ${shelf.name} right`} disabled={currentPage >= pageCount - 1 || pageCount <= 1} onClick={() => scrollPage(1)}><ChevronRight /></button></span>
@@ -1090,6 +1092,38 @@ function AddMediaDialog({ section, shelves, initialShelfIds = [], onClose, onSav
     <button className="close" type="button" onClick={onClose} aria-label="Close add item"><X /></button><span className="eyebrow">ADD TO {destination?.name?.toUpperCase() || 'COLLECTION'}</span><h2>Add an item</h2><p className="dialog-intro">Start with the essentials. You can add artwork, notes and full details after saving.</p>
     <div className="media-edit-grid"><label className="full">Title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title" required /></label><label>Type<select value={type} onChange={(event) => setType(event.target.value)}>{section === 'screen' ? <><option value="film">Film</option><option value="television">Television</option></> : <option value={section}>{section === 'book' ? 'Book' : 'Video game'}</option>}</select></label><label>Year <span className="optional">optional</span><input type="number" min="1000" max="3000" placeholder="YYYY" value={year} onChange={(event) => setYear(event.target.value)} /></label><fieldset className="full shelf-picker"><legend>Also add to</legend>{shelves.map((shelf) => <label className={shelfIds.includes(shelf.shelf_id) ? 'selected' : ''} key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} /><span>{shelf.name}</span></label>)}</fieldset></div>
     {error && <p className="auth-error">{error}</p>}<div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={saving}>{saving ? 'Adding…' : 'Add item'}</Button></div>
+  </form></div>;
+}
+
+function BulkImportDialog({ section, shelves, onClose, onImport }) {
+  useEscape(onClose);
+  const [text, setText] = useState('');
+  const [shelfId, setShelfId] = useState(shelves[0]?.shelf_id || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const sectionLabel = section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games';
+  const example = section === 'screen' ? 'Film | Arrival | 2016\nTV | Severance | 2022' : section === 'book' ? 'The Left Hand of Darkness | 1969' : 'Disco Elysium | 2019';
+  const parsed = text.split(/\r?\n/).map((line, index) => ({ line: line.trim(), number: index + 1 })).filter((row) => row.line).map((row) => {
+    const parts = row.line.split('|').map((part) => part.trim());
+    const typeToken = section === 'screen' ? String(parts.shift() || '').toLowerCase() : section;
+    const type = typeToken === 'tv' ? 'television' : typeToken;
+    const title = parts.shift() || '';
+    const yearText = parts.shift() || '';
+    const year = yearText ? Number(yearText) : null;
+    const validType = section === 'screen' ? type === 'film' || type === 'television' : type === section;
+    const validYear = year === null || (Number.isInteger(year) && year >= 1000 && year <= 3000);
+    return { ...row, item: { type, title, year }, valid: validType && Boolean(title) && validYear && parts.length === 0 };
+  });
+  const invalidRows = parsed.filter((row) => !row.valid);
+  const items = parsed.filter((row) => row.valid).map((row) => row.item);
+
+  return <div className="modal-layer editor-layer"><form className="media-edit-dialog bulk-import-dialog" onSubmit={async (event) => { event.preventDefault(); if (!shelfId || !items.length || invalidRows.length) return; setSaving(true); setError(''); try { await onImport(shelfId, items); } catch { setError('Nothing was imported. Check the format, apply the latest Supabase migration, and try again.'); setSaving(false); } }}>
+    <button className="close" type="button" onClick={onClose} aria-label="Close bulk import"><X /></button><span className="eyebrow">OWNER-ONLY IMPORT</span><h2>Import {sectionLabel}</h2><p className="dialog-intro">This batch can contain only {sectionLabel.toLowerCase()} entries and will be added to one shelf. Matching title-and-year duplicates are skipped.</p>
+    <label className="bulk-import-destination">Destination shelf<select value={shelfId} onChange={(event) => setShelfId(event.target.value)}>{shelves.map((shelf) => <option key={shelf.shelf_id} value={shelf.shelf_id}>{shelf.name}</option>)}</select></label>
+    <label className="bulk-import-input">One item per line<textarea autoFocus rows="10" value={text} onChange={(event) => setText(event.target.value)} placeholder={example} /></label>
+    <p className="bulk-import-format">{section === 'screen' ? 'Format: Film or TV | Title | Year (year optional)' : 'Format: Title | Year (year optional)'}</p>
+    {invalidRows.length > 0 && <p className="auth-error">Check line{invalidRows.length === 1 ? '' : 's'} {invalidRows.map((row) => row.number).join(', ')}. This batch has not been imported.</p>}{error && <p className="auth-error">{error}</p>}
+    <div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={saving || !items.length || invalidRows.length > 0 || !shelfId}>{saving ? 'Importing…' : `Import ${items.length || ''} ${sectionLabel}`}</Button></div>
   </form></div>;
 }
 
