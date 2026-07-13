@@ -133,6 +133,11 @@ export function reorderMainWatchlist(accessToken, orderedShelfIds) {
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
+export function reorderCollections(accessToken, orderedCollectionIds) {
+  return supabaseRequest('/rest/v1/rpc/reorder_collections', { method: 'POST', fresh: true, body: { ordered_collection_ids: orderedCollectionIds },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+}
+
 export function setInterest(accessToken, userId, mediaItemId, enabled) {
   if (!accessToken || !userId || !mediaItemId) throw new Error('An approved signed-in account is required.');
   const path = '/rest/v1/media_interest?media_item_id=eq.' + encodeURIComponent(mediaItemId)
