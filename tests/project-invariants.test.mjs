@@ -5,6 +5,7 @@ import { buildWatchDemand } from '../src/watch-demand.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from '../src/star-rating.js';
 import { applyShelfMemberships } from '../src/shelf-membership.js';
 import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from '../src/section-notes.js';
+import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from '../src/ownership-filter.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -160,4 +161,23 @@ test('book cards show the author while drawer and filters retain format', async 
   assert.match(app, /function MediaCard[\s\S]*mediaCardDisplayTags\(item\)/);
   assert.match(app, /function MediaDrawer[\s\S]*mediaDisplayTags\(item\)/);
   assert.match(app, /const formats = unique\(items\.flatMap\(mediaDisplayTags\)\)/);
+});
+
+test('ownership filtering is available everywhere and matches Owned and Unowned explicitly', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/media-layout.css');
+
+  assert.deepEqual(OWNERSHIP_FILTER_OPTIONS, [['owned', 'Owned'], ['unowned', 'Unowned']]);
+  assert.equal(matchesOwnership(true, []), true);
+  assert.equal(matchesOwnership(false, []), true);
+  assert.equal(matchesOwnership(true, ['owned']), true);
+  assert.equal(matchesOwnership(false, ['owned']), false);
+  assert.equal(matchesOwnership(false, ['unowned']), true);
+  assert.equal(matchesOwnership(true, ['unowned']), false);
+  assert.equal(matchesOwnership(true, ['owned', 'unowned']), true);
+  assert.equal(matchesOwnership(false, ['owned', 'unowned']), true);
+  assert.match(app, /matchesOwnership\(item\.owned, ownershipFilters\)/);
+  assert.match(app, /MultiSelect label="Ownership"[\s\S]*OWNERSHIP_FILTER_OPTIONS/);
+  assert.doesNotMatch(app, /data\.mainWatchlist && <MultiSelect label="Ownership"/);
+  assert.match(styles, /repeat\(6, minmax\(128px, auto\)\)/);
 });
