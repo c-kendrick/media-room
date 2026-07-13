@@ -1,5 +1,6 @@
 import { supabaseSelect } from './supabase.js';
 import { buildWatchDemand } from './watch-demand.js';
+import { SECTION_NOTE_DEFAULTS } from './section-notes.js';
 
 const MEDIA_SELECT = 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,runtime,deleted_at,created_at,updated_at';
 const LEGACY_MEDIA_SELECT = MEDIA_SELECT.replace(',star_rating', '');
@@ -32,7 +33,12 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
     collectionId: collection.id,
     ownerId: collection.owner_id,
     collectionTitle: collection.title,
-    collectionDescription: collection.description || '',
+    collectionDescription: collection.description || SECTION_NOTE_DEFAULTS.screen,
+    collectionDescriptions: {
+      screen: collection.description || SECTION_NOTE_DEFAULTS.screen,
+      book: collection.book_description || SECTION_NOTE_DEFAULTS.book,
+      game: collection.game_description || SECTION_NOTE_DEFAULTS.game,
+    },
     mediaShelves: shelves.map((shelf) => ({
       shelf_id: shelf.id,
       name: shelf.name,
@@ -99,9 +105,13 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
   };
   let collections;
   try {
-    collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,description,updated_at' }), { fresh });
+    collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,description,book_description,game_description,updated_at' }), { fresh });
   } catch {
-    collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,updated_at' }), { fresh });
+    try {
+      collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,description,updated_at' }), { fresh });
+    } catch {
+      collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,updated_at' }), { fresh });
+    }
   }
 
   const collection = collections[0];
@@ -217,7 +227,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
     groupedShelves.map((shelf) => {
       const collection = collectionById.get(shelf.collection_id);
       const ownerName = collection?.title?.replace(/[’']s Collection$/i, '') || 'Member';
-      return { ...shelf, section: 'screen', source_section: shelf.section, source_collection_id: shelf.collection_id, owner_name: ownerName, owner_note: collection?.description || '', position: shelf.main_watchlist_position ?? shelf.position };
+      return { ...shelf, section: 'screen', source_section: shelf.section, source_collection_id: shelf.collection_id, owner_name: ownerName, owner_note: collection?.description || SECTION_NOTE_DEFAULTS.screen, position: shelf.main_watchlist_position ?? shelf.position };
     }),
     mirroredMediaItems,
     mirroredMemberships,

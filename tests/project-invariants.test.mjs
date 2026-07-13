@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { buildWatchDemand } from '../src/watch-demand.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from '../src/star-rating.js';
 import { applyShelfMemberships } from '../src/shelf-membership.js';
+import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from '../src/section-notes.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -109,4 +110,31 @@ test('shelf membership closes immediately and updates all visible state optimist
   assert.match(app, /setEditingShelves\(false\);[\s\S]*onUpdateShelves\(previousShelves, nextShelves\)/);
   assert.match(app, /const optimisticData = applyShelfMemberships[\s\S]*setData\(optimisticData\)[\s\S]*replaceMediaShelfMemberships/);
   assert.match(app, /Previous shelves restored/);
+});
+
+test('collection notes are section-specific while Main Watchlist mirrors Film & TV only', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/supabase-data.js');
+  const migration = await read('supabase/migrations/20260713080000_section_specific_collection_notes.sql');
+
+  assert.deepEqual(SECTION_NOTE_COLUMNS, {
+    screen: 'description',
+    book: 'book_description',
+    game: 'game_description',
+  });
+  assert.equal(SECTION_NOTE_DEFAULTS.book, 'Books! (You can edit this)');
+  assert.equal(SECTION_NOTE_DEFAULTS.game, 'Video Games goes brrr. (You can edit this)');
+  assert.match(SECTION_NOTE_DEFAULTS.screen, /It will also be put in the Main Watchlist/);
+  assert.match(app, /onDescriptionChange\(section, description\)/);
+  assert.match(app, /SECTION_NOTE_COLUMNS\[section\]/);
+  assert.match(data, /owner_note: collection\?\.description \|\| SECTION_NOTE_DEFAULTS\.screen/);
+  assert.match(migration, /add column if not exists book_description/);
+  assert.match(migration, /add column if not exists game_description/);
+});
+
+test('opening Main Watchlist always starts on All Watchlists', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /<MediaView key=\{data\.collectionId\}/);
+  assert.match(app, /useState\('screen'\)/);
+  assert.match(app, /data\.mainWatchlist \? 'All Watchlists'/);
 });
