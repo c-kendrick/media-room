@@ -138,8 +138,8 @@
 .inline-create input:focus{border-color:#a87963;box-shadow:0 0 0 3px rgba(168,121,99,.1)}
 .quiet-button{background:transparent!important;border-color:transparent!important;box-shadow:none!important;color:#746a60}
 
-.shelf-head{min-height:42px}
-.shelf-title{gap:6px}
+.shelf-head{min-height:42px;align-items:flex-start!important;gap:18px}
+.shelf-title{gap:6px;align-items:flex-start!important}
 .shelf-heading-copy{display:grid;gap:1px;min-width:0}
 .shelf-heading-copy>small{color:#9a6e5c;font-size:8px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
 .shelf-heading-copy h2{margin:0}
@@ -153,7 +153,7 @@
 .shelf-add-button:hover{background:#4a433b!important}
 .delete-shelf{opacity:.55}
 .main-watchlist-toggle,.remove-main-mirror{width:auto!important;min-height:30px;padding:0 10px!important;display:inline-flex!important;gap:7px;align-items:center;border-radius:6px!important;font-size:9px!important;white-space:nowrap}
-.main-watchlist-toggle{min-height:42px!important;padding:5px 11px 5px 7px!important;background:#fffaf2!important;border:1px solid #936b58!important;color:#4e3d34!important;box-shadow:0 2px 7px rgba(71,49,36,.12)!important}
+.main-watchlist-toggle{justify-self:start;margin-top:7px;min-height:38px!important;padding:4px 11px 4px 6px!important;background:#fffaf2!important;border:1px solid #936b58!important;color:#4e3d34!important;box-shadow:0 2px 7px rgba(71,49,36,.12)!important}
 .main-watchlist-toggle:hover{background:#f5e7db!important;border-color:#714a39!important;transform:translateY(-1px)}
 .main-watchlist-toggle.active{color:#fff!important;background:#6f302d!important;border-color:#6f302d!important;box-shadow:0 2px 8px rgba(88,39,35,.22)!important}
 .watchlist-action-icon{width:29px;height:29px;border-radius:50%;background:#ead9cd;display:grid;place-items:center;color:#734b3b}
@@ -164,6 +164,18 @@
 .watchlist-action-check{margin-left:2px}
 .remove-main-mirror{background:transparent!important;border:1px solid #d8c9bb!important;color:#8d5147!important}
 .remove-main-mirror:hover{background:#f3dfda!important}
+.shelf-actions{display:flex!important;align-items:center!important;justify-content:flex-end;flex-wrap:wrap;gap:7px!important;margin-left:auto}
+.shelf-action-group{display:inline-flex;align-items:center;gap:3px;padding:3px;border:1px solid #e0d5c8;border-radius:7px;background:rgba(255,250,242,.72)}
+.shelf-action-group:empty{display:none}
+.shelf-action-group>button:not(.button){width:32px;height:32px;border:0;border-radius:5px;background:transparent;color:#71675e;display:grid;place-items:center;cursor:pointer}
+.shelf-action-group>button:not(.button):hover:not(:disabled){background:#e9dfd3;color:#28231f}
+.shelf-action-group>button:disabled{opacity:.28;cursor:not-allowed}
+.shelf-action-group button:focus-visible,.main-watchlist-toggle:focus-visible{outline:2px solid #8a5543;outline-offset:2px}
+.shelf-content-actions{border-color:transparent;background:transparent;padding:0}
+.shelf-order-actions{background:#f4ece2}
+.shelf-edit-actions{background:transparent}
+.shelf-page-actions{background:#eee4d7}
+.shelf-page-actions small{min-width:30px;color:#756b61;font-size:8px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums}
 
 .media-card[draggable="true"]{cursor:grab}
 .media-card[draggable="true"]:active{cursor:grabbing}
@@ -315,6 +327,8 @@
   .media-tabs button{min-height:36px!important}
   .media-filters,.media-filters.has-type{grid-template-columns:1fr 1fr!important}
   .media-search{grid-column:1/-1!important}
+  .shelf-head{flex-wrap:wrap}
+  .shelf-actions{width:100%;justify-content:flex-start;margin-left:0;padding-left:34px}
 }
 
 @media(max-width:1050px){
@@ -335,10 +349,9 @@
   .open-note-button{margin-top:5px}
   .collection-note-drawer{padding:52px 22px 30px}
   .main-owner-intro h2{font-size:24px}
-  .watchlist-action-copy,.watchlist-action-check,.remove-main-mirror span{display:none}
-  .main-watchlist-toggle,.remove-main-mirror{width:38px!important;padding:0!important;justify-content:center}
-  .main-watchlist-toggle{min-height:38px!important}
-  .watchlist-action-icon{width:28px;height:28px}
+  .remove-main-mirror span{display:none}
+  .remove-main-mirror{width:38px!important;padding:0!important;justify-content:center}
+  .shelf-actions{padding-left:0}
   .user-row{flex-wrap:wrap}
   .user-row>span:first-child{flex:1 1 calc(100% - 90px)}
   .user-status{margin-left:auto;text-align:right}
