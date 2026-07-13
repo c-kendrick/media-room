@@ -36,7 +36,7 @@ import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
 import { createMediaItem, createShelf, deleteShelf, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderMainWatchlist, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
-import { approveProfile, listProfiles, rejectProfile } from './admin.js';
+import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -308,7 +308,7 @@ export default function App() {
 
   useEffect(() => {
     if (authLoading || !collections.length || landingApplied || userSelectedCollection.current) return;
-    const landingCollection = account?.profile?.approved_at
+    const landingCollection = account?.profile?.approved_at && !account.profile.deactivated_at
       ? collections.find((collection) => collection.owner_id === account.profile.id)
       : collections.find((collection) => collection.slug === 'kits-collection');
     setLandingApplied(true);
@@ -365,6 +365,7 @@ export default function App() {
   const selectedMedia = data.media.find((item) => item.item_id === selectedMediaId);
   const canEditCollection = Boolean(
     account?.profile?.approved_at
+    && !account.profile.deactivated_at
     && data.ownerId
     && account.profile.id === data.ownerId,
   );
@@ -480,7 +481,7 @@ export default function App() {
             await refresh({ fresh: true });
             setToast('Shelf membership saved.');
           }}
-          canInterest={Boolean(account?.profile?.approved_at && ['film', 'television'].includes(selectedMedia.type))}
+          canInterest={Boolean(account?.profile?.approved_at && !account.profile.deactivated_at && ['film', 'television'].includes(selectedMedia.type))}
           interested={Boolean(selectedMedia.interests?.some((person) => person?.username === account?.profile?.username))}
           onInterest={async (enabled) => {
             const previousData = data;
@@ -543,7 +544,17 @@ export default function App() {
         />
       )}
 
-      {adminOpen && <AdminUsers accessToken={account?.session?.access_token} onClose={() => setAdminOpen(false)} />}
+      {adminOpen && <AdminUsers accessToken={account?.session?.access_token} onClose={() => setAdminOpen(false)} onUsersChanged={async () => {
+        const nextCollections = await loadPublicCollections({ fresh: true });
+        setCollections(nextCollections);
+        snapshotCache.current.clear();
+        if (data.collectionId === MAIN_WATCHLIST_ID) {
+          await refresh({ fresh: true, targetCollectionId: MAIN_WATCHLIST_ID });
+        } else if (!nextCollections.some((collection) => collection.id === data.collectionId)) {
+          const kit = nextCollections.find((collection) => collection.slug === 'kits-collection');
+          if (kit) selectCollection(kit.id, { userInitiated: false });
+        }
+      }} />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
     </div>
   );
@@ -710,7 +721,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
           <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}…`} /></label>
           <MultiSelect label="All lists" values={listFilters} options={shelves.map((shelf) => [shelf.shelf_id, data.mainWatchlist ? <span className="owned-list-option"><small>{shelf.ownerName}</small><b>{shelf.name}</b></span> : shelf.name])} onChange={setListFilters} />
           {section === 'screen' && !data.mainWatchlist && <MultiSelect label="Film & TV" values={typeFilters} options={sectionTypes} onChange={setTypeFilters} />}
-          {data.mainWatchlist && <MultiSelect label="Priority stamps" values={stampFilters} options={['0', '1', '2', '3'].map((count) => [count, `${count} ${count === '1' ? 'Stamp' : 'Stamps'}`])} onChange={setStampFilters} />}
+          {data.mainWatchlist && <MultiSelect label="Priority stamps" values={stampFilters} options={['1', '2', '3', '4'].map((count) => [count, `${count} ${count === '1' ? 'Stamp' : 'Stamps'}`])} onChange={setStampFilters} />}
           <MultiSelect label={section === 'game' ? 'All platforms' : 'All formats'} values={formatFilters} options={formats.map((value) => [value, value])} onChange={setFormatFilters} />
           <MultiSelect label="All genres" values={genreFilters} options={genres.map((value) => [value, value])} onChange={setGenreFilters} />
         </div>
@@ -768,7 +779,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canReorderShelf, canCurateM
           <span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2><Trophy size={21} />{shelf.name}<span>{items.length}</span></h2></span>
         </div>
         <div>
-          {canCurateMain && <button className={cls('main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><ListOrdered size={15} /><span>{shelf.showInMainWatchlist ? 'In Main Watchlist' : 'Add to Main'}</span></button>}
+          {canCurateMain && <button className={cls('main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><span className="watchlist-action-icon"><ListOrdered size={16} /></span><span className="watchlist-action-copy"><small>MAIN WATCHLIST</small><strong>{shelf.showInMainWatchlist ? 'Added' : 'Add this shelf'}</strong></span>{shelf.showInMainWatchlist && <Check className="watchlist-action-check" size={15} />}</button>}
           {canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}
           {canEdit && <Button className="shelf-add-button" icon={Plus} onClick={onAdd}>Add item</Button>}
           {canEdit && items.length > 1 && <button className="arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /></button>}
@@ -1029,7 +1040,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
           <>
             <span className="eyebrow">SIGNED IN</span>
             <h2>{account.profile?.display_name || account.profile?.username || 'Media Room member'}</h2>
-            <p>{account.profile?.role === 'admin' ? 'Administrator account' : account.profile?.approved_at ? 'Approved member' : 'Pending approval'}</p>
+            <p>{account.profile?.role === 'admin' ? 'Administrator account' : account.profile?.deactivated_at ? 'Account deactivated — your library is safely stored.' : account.profile?.approved_at ? 'Approved member' : 'Pending approval'}</p>
             {account.profile?.role === 'admin' && <Button onClick={onManageUsers}>User management</Button>}<Button icon={LogOut} onClick={leave} disabled={submitting}>Sign out</Button>
           </>
         ) : (
@@ -1132,11 +1143,23 @@ function EditMediaDialog({ item, onClose, onSave }) {
   </div>;
 }
 
-function AdminUsers({ accessToken, onClose }) {
- useEscape(onClose);
- const [users,setUsers]=useState([]); const [error,setError]=useState(''); const [busy,setBusy]=useState('');
- const load=()=>listProfiles(accessToken).then(setUsers).catch(()=>setError('Could not load users.'));
- useEffect(()=>{load();},[]);
- const act=async(type,id)=>{setBusy(id);setError('');try{await (type==='approve'?approveProfile:rejectProfile)(accessToken,id);await load();}catch{setError('That user could not be updated.');}finally{setBusy('');}};
- return <div className="modal-layer"><section className="media-edit-dialog"><button className="close" onClick={onClose}><X/></button><span className="eyebrow">ADMIN</span><h2>User Management</h2>{error&&<p className="auth-error">{error}</p>}<div className="user-list">{users.map(u=><div className="user-row" key={u.id}><span><b>{u.display_name}</b><small>@{u.username}</small></span><span>{u.approved_at?'Approved':u.rejected_at?'Rejected':'Pending'}</span>{!u.approved_at&&!u.rejected_at&&<Button disabled={busy===u.id} onClick={()=>act('approve',u.id)}>Approve</Button>}{!u.approved_at&&!u.rejected_at&&<Button disabled={busy===u.id} onClick={()=>act('reject',u.id)}>Reject</Button>}</div>)}</div></section></div>;
+function AdminUsers({ accessToken, onClose, onUsersChanged }) {
+  useEscape(onClose);
+  const [users, setUsers] = useState([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const load = () => listProfiles(accessToken).then(setUsers).catch(() => setError('Could not load users.'));
+  useEffect(() => { load(); }, []);
+  const actions = { approve: approveProfile, reject: rejectProfile, deactivate: deactivateProfile, restore: restoreProfile };
+  const act = async (type, user) => {
+    if (type === 'deactivate' && !window.confirm(`Deactivate ${user.display_name}? Their library will disappear publicly but all data will be retained.`)) return;
+    setBusy(user.id); setError('');
+    try { await actions[type](accessToken, user.id); await load(); await onUsersChanged?.(); }
+    catch { setError('That user could not be updated.'); }
+    finally { setBusy(''); }
+  };
+  return <div className="modal-layer"><section className="media-edit-dialog admin-users-dialog"><button className="close" onClick={onClose}><X /></button><span className="eyebrow">ADMIN</span><h2>User Management</h2><p className="dialog-intro">Approve new members or temporarily hide a member and their library without deleting anything.</p>{error && <p className="auth-error">{error}</p>}<div className="user-list">{users.map((user) => {
+    const status = user.deactivated_at ? 'Deactivated' : user.approved_at ? 'Approved' : user.rejected_at ? 'Rejected' : 'Pending';
+    return <div className={cls('user-row', user.deactivated_at && 'deactivated')} key={user.id}><span><b>{user.display_name}</b><small>@{user.username}</small></span><span className="user-status">{status}</span>{!user.approved_at && !user.rejected_at && <><Button disabled={busy === user.id} onClick={() => act('approve', user)}>Approve</Button><Button disabled={busy === user.id} onClick={() => act('reject', user)}>Reject</Button></>}{user.approved_at && user.role !== 'admin' && !user.deactivated_at && <Button className="quiet-button" disabled={busy === user.id} onClick={() => act('deactivate', user)}>Deactivate</Button>}{user.deactivated_at && <Button disabled={busy === user.id} onClick={() => act('restore', user)}>Restore library</Button>}</div>;
+  })}</div></section></div>;
 }
