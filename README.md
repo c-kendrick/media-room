@@ -1,12 +1,6 @@
 # Kit’s Media Room — GitHub Pages Edition
 
-This is the **GitHub Pages version** of Kit’s Media Room.
-
-It is a separate project from the editable **Local Media Room**:
-
-- **Local Media Room**: the editable app backed by `data/media.db`.
-- **GitHub Pages version**: the public, read-only site backed by `public/media-data.json`.
-- This folder is the local working copy of the GitHub Pages version, but it should still be called the **GitHub Pages version**, not “local”.
+This is the GitHub Pages frontend for Kit’s Media Room. Supabase now provides authentication, multi-user collections, editing, shelf membership, Main Watchlist mirrors, priority stamps, reversible account deactivation, bulk import and protected poster enrichment. `public/media-data.json` remains an outage/import fallback for Kit’s original collection.
 
 No Second Brain notes, projects, university records, fitness data, database file, API keys, or server code are included in the public dataset.
 
@@ -21,12 +15,12 @@ No Second Brain notes, projects, university records, fitness data, database file
 - GitHub Pages-compatible Vite build
 - Included GitHub Actions deployment workflow
 
-## Supabase foundation
-
-The first Supabase pass is now included as a database-only migration. It does not change the current static site or add login/editing screens.
+## Supabase application
 
 - Run [the Supabase foundation setup](docs/SUPABASE-FOUNDATION.md) when you are ready to create the Supabase project.
-- The migration includes multi-user data modelling, pending/approved/rejected registrations, admin and ownership RLS policies, and a future-safe interest-marker table.
+- Apply every migration in `supabase/migrations` in timestamp order.
+- Deploy `supabase/functions/enrich-poster` after provider changes.
+- Keep provider keys in Supabase Edge Function secrets, never Vite or GitHub.
 - Never put a Supabase service-role key in this repository or browser code.
 
 ## Supabase application setup
