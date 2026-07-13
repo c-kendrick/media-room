@@ -177,11 +177,6 @@
 .bulk-import-destination select,.bulk-import-input textarea{width:100%;box-sizing:border-box;border:1px solid #bdb09e;background:#fffdf8;color:#332b25;padding:10px 11px;font:inherit}
 .bulk-import-input textarea{resize:vertical;line-height:1.55}
 .bulk-import-format{margin:7px 0 18px!important;color:#83766a!important;font-size:9px!important}
-.bulk-enrichment-option{margin:0 0 18px;padding:11px;border:1px solid #d8cbbb;border-radius:6px;background:#fffaf2;display:flex;align-items:flex-start;gap:9px;color:#51473d;cursor:pointer}
-.bulk-enrichment-option input{margin-top:2px}
-.bulk-enrichment-option span{display:grid;gap:2px}
-.bulk-enrichment-option strong{font-size:10px}
-.bulk-enrichment-option small{color:#81756a;font-size:8px;line-height:1.4}
 
 .media-card[draggable="true"]{cursor:grab}
 .media-card[draggable="true"]:active{cursor:grabbing}
