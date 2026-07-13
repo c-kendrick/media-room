@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { buildWatchDemand } from '../src/watch-demand.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from '../src/star-rating.js';
+import { applyShelfMemberships } from '../src/shelf-membership.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -92,4 +93,20 @@ test('rating filters match only explicitly selected half-star values', async () 
   assert.equal(matchesStarRatings(null, []), true);
   assert.match(app, /MultiSelect label="Rating"[\s\S]*STAR_RATING_STEPS/);
   assert.match(app, /label="Film & TV"[\s\S]*label="Rating"[\s\S]*All platforms/);
+});
+
+test('shelf membership closes immediately and updates all visible state optimistically', async () => {
+  const snapshot = {
+    collectionId: 'collection-a',
+    media: [{ database_id: 'media-a', lists: ['shelf-a'], list_positions: { 'shelf-a': 4 } }],
+  };
+  const updated = applyShelfMemberships(snapshot, 'media-a', ['shelf-a', 'shelf-b']);
+  assert.deepEqual(updated.media[0].lists, ['shelf-a', 'shelf-b']);
+  assert.deepEqual(updated.media[0].list_positions, { 'shelf-a': 4, 'shelf-b': 1000 });
+  assert.notEqual(updated, snapshot);
+
+  const app = await read('src/App.jsx');
+  assert.match(app, /setEditingShelves\(false\);[\s\S]*onUpdateShelves\(previousShelves, nextShelves\)/);
+  assert.match(app, /const optimisticData = applyShelfMemberships[\s\S]*setData\(optimisticData\)[\s\S]*replaceMediaShelfMemberships/);
+  assert.match(app, /Previous shelves restored/);
 });

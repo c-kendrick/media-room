@@ -37,6 +37,7 @@ import { loadPublicCollections } from './supabase-data.js';
 import { bulkImportMedia, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionPosters, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
+import { applyShelfMemberships } from './shelf-membership.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -523,9 +524,21 @@ export default function App() {
             }
           }}
           onUpdateShelves={async (currentShelfIds, selectedShelfIds) => {
-            await replaceMediaShelfMemberships(account.session.access_token, selectedMedia.database_id, currentShelfIds, selectedShelfIds);
-            await refresh({ fresh: true });
-            setToast('Shelf membership saved.');
+            const previousData = data;
+            const optimisticData = applyShelfMemberships(data, selectedMedia.database_id, selectedShelfIds);
+            setData(optimisticData);
+            cacheSnapshot(optimisticData, data.collectionId);
+            snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+            try {
+              await replaceMediaShelfMemberships(account.session.access_token, selectedMedia.database_id, currentShelfIds, selectedShelfIds);
+              setToast('Shelf membership saved.');
+              await refresh({ fresh: true });
+            } catch (error) {
+              setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
+              cacheSnapshot(previousData, previousData.collectionId);
+              setToast('Shelf membership could not be saved. Previous shelves restored.');
+              throw error;
+            }
           }}
           canInterest={Boolean(account?.profile?.approved_at && !account.profile.deactivated_at && ['film', 'television'].includes(selectedMedia.type))}
           interested={Boolean(selectedMedia.interests?.some((person) => person?.username === account?.profile?.username))}
@@ -991,8 +1004,6 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
   const [editing, setEditing] = useState(false);
   const [editingShelves, setEditingShelves] = useState(false);
   const [selectedShelves, setSelectedShelves] = useState([]);
-  const [savingShelves, setSavingShelves] = useState(false);
-  const [shelfError, setShelfError] = useState('');
   const [optimisticInterest, setOptimisticInterest] = useState(interested);
   const [posterCandidates, setPosterCandidates] = useState(null);
   const [posterReviewBusy, setPosterReviewBusy] = useState(false);
@@ -1033,7 +1044,6 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
               <Button className="drawer-edit-button primary" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>
               <Button className="drawer-edit-button" onClick={() => {
                 setSelectedShelves(item.lists || []);
-                setShelfError('');
                 setEditingShelves(true);
               }}>Edit shelves</Button>
             </div>}
@@ -1057,13 +1067,12 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
         <button className="close" onClick={() => setEditingShelves(false)} aria-label="Close shelf editor"><X /></button>
         <span className="eyebrow">SHELF MEMBERSHIP</span><h2>Choose shelves</h2>
         <div className="shelf-membership-options">{shelves.map((shelf) => <label key={shelf.shelf_id}><input type="checkbox" checked={selectedShelves.includes(shelf.shelf_id)} onChange={() => setSelectedShelves((current) => current.includes(shelf.shelf_id) ? current.filter((id) => id !== shelf.shelf_id) : [...current, shelf.shelf_id])} />{shelf.name}</label>)}</div>
-        {shelfError && <p className="auth-error">{shelfError}</p>}
-        <Button disabled={savingShelves} onClick={async () => {
-          setSavingShelves(true); setShelfError('');
-          try { await onUpdateShelves(item.lists || [], selectedShelves); setEditingShelves(false); }
-          catch { setShelfError('The shelf membership could not be saved. Existing shelves were left in place.'); }
-          finally { setSavingShelves(false); }
-        }}>{savingShelves ? 'Saving…' : 'Save shelves'}</Button>
+        <Button onClick={() => {
+          const previousShelves = item.lists || [];
+          const nextShelves = [...selectedShelves];
+          setEditingShelves(false);
+          onUpdateShelves(previousShelves, nextShelves).catch(() => {});
+        }}>Save shelves</Button>
       </section></div>}
       {editing && <EditMediaDialog item={item} onClose={() => setEditing(false)} onSave={async (changes) => {
         await onUpdate(changes);
