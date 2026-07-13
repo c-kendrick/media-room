@@ -33,14 +33,16 @@ The first Supabase pass is now included as a database-only migration. It does no
 
 Apply every file in `supabase/migrations` in timestamp order before using editing or registration. The site keeps a static public snapshot only as an outage/import fallback; when Supabase is available, approved public collections, shelf membership, edits, ordering and interest markers are read from it.
 
-For protected poster enrichment, deploy the included Edge Function and set its provider secret:
+For protected poster enrichment, deploy the included Edge Function and set the provider secrets you use:
 
 ```powershell
 supabase functions deploy enrich-poster
 supabase secrets set TMDB_API_KEY=your_tmdb_key
+supabase secrets set GOOGLE_BOOKS_API_KEY=your_google_books_key
+supabase secrets set STEAMGRIDDB_API_KEY=your_steamgriddb_key
 ```
 
-The browser never receives this key. The function requires the signed-in collection owner and supports searching TMDB candidates, saving an owner-selected poster URL, and confidently enriching up to 50 Film & TV rows after a bulk import. Exact-title matches are applied automatically; ambiguous matches remain blank.
+The browser never receives these keys. The function requires the signed-in collection owner and supports TMDB for Film & TV, Google Books with an Open Library fallback for books, and SteamGridDB for games. It can confidently enrich up to 50 rows after a bulk import. Exact matches are applied automatically; ambiguous matches remain blank.
 
 ## 1. Set up the GitHub Pages version on your PC
 
