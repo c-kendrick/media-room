@@ -18,6 +18,24 @@ export async function updateMediaItem(accessToken, databaseId, changes) {
   return updated[0];
 }
 
+export async function setMediaStarRating(accessToken, databaseId, starRating) {
+  if (!accessToken || !databaseId) throw new Error('You must be signed in to rate this item.');
+
+  const updated = await supabaseRequest('/rest/v1/media_items?id=eq.' + encodeURIComponent(databaseId), {
+    method: 'PATCH',
+    fresh: true,
+    body: { star_rating: starRating },
+    headers: {
+      Authorization: 'Bearer ' + accessToken,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+  });
+
+  if (!updated?.[0]) throw new Error('The star rating was not updated.');
+  return updated[0];
+}
+
 export async function replaceMediaShelfMemberships(accessToken, databaseId, currentShelfIds, selectedShelfIds) {
   const headers = { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' };
   const selected = new Set(selectedShelfIds);

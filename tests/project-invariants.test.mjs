@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { buildWatchDemand } from '../src/watch-demand.js';
+import { normalizeStarRating, STAR_RATING_STEPS } from '../src/star-rating.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -62,4 +63,23 @@ test('the first Main Watchlist interest filter remains a genuine single-stamp fi
   const source = await read('src/App.jsx');
   assert.match(source, /count === '1'[\s\S]*\(item\.interests\?\.length \|\| 0\) === 1/);
   assert.match(source, /count === '1' \? '1 Stamp'/);
+});
+
+test('star ratings use owner-only half-star values from 0.5 through 5', async () => {
+  const migration = await read('supabase/migrations/20260713070000_owner_star_ratings.sql');
+  const app = await read('src/App.jsx');
+  assert.deepEqual(STAR_RATING_STEPS, [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5]);
+  assert.equal(normalizeStarRating(4.5), 4.5);
+  assert.equal(normalizeStarRating(4.4), null);
+  assert.equal(normalizeStarRating(0), null);
+  assert.match(migration, /c\.owner_id = auth\.uid\(\)/);
+  assert.match(migration, /before update of star_rating/);
+  assert.doesNotMatch(app, /Rating \(0–10\)/);
+});
+
+test('the KM browser icon is included in the Vite document', async () => {
+  const document = await read('index.html');
+  const icon = await read('public/favicon.svg');
+  assert.match(document, /%BASE_URL%favicon\.svg/);
+  assert.match(icon, />KM<\/text>/);
 });
