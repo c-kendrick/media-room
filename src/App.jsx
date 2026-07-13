@@ -34,7 +34,7 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
-import { createMediaItem, createShelf, deleteShelf, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderMainWatchlist, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
+import { createMediaItem, createShelf, deleteShelf, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
 
 function cls(...values) {
@@ -222,6 +222,7 @@ export default function App() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [collections, setCollections] = useState([]);
+  const [draggedCollectionId, setDraggedCollectionId] = useState(null);
   const [collectionsLoading, setCollectionsLoading] = useState(true);
   const [collectionId, setCollectionId] = useState(null);
   const [collectionLoading, setCollectionLoading] = useState(false);
@@ -370,6 +371,24 @@ export default function App() {
   );
   const isAdmin = account?.profile?.role === 'admin';
   const generatedAt = data.generatedAt ? new Date(data.generatedAt) : null;
+  const dropCollection = async (targetCollectionId) => {
+    if (!isAdmin || !draggedCollectionId || draggedCollectionId === targetCollectionId) return;
+    const previous = [...collections];
+    const ordered = [...collections];
+    const from = ordered.findIndex((collection) => collection.id === draggedCollectionId);
+    const to = ordered.findIndex((collection) => collection.id === targetCollectionId);
+    if (from < 0 || to < 0) return;
+    ordered.splice(to, 0, ordered.splice(from, 1)[0]);
+    setCollections(ordered);
+    setDraggedCollectionId(null);
+    try {
+      await reorderCollections(account.session.access_token, ordered.map((collection) => collection.id));
+      setToast('Collection order saved.');
+    } catch {
+      setCollections(previous);
+      setToast('Collection order could not be saved.');
+    }
+  };
 
   return (
     <div className="app-shell media-only-shell public-media-shell">
@@ -384,7 +403,7 @@ export default function App() {
             <ListOrdered size={17} />Main Watchlist
           </button>}
           <small className="collection-nav-label">COLLECTIONS</small>
-          {data?.storage === 'supabase' && collections.map((collection) => <button key={collection.id} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)}>
+          {data?.storage === 'supabase' && collections.map((collection) => <button key={collection.id} draggable={isAdmin} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)} onDragStart={(event) => { if (!isAdmin) return; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', collection.id); setDraggedCollectionId(collection.id); }} onDragEnd={() => setDraggedCollectionId(null)} onDragOver={(event) => { if (isAdmin && draggedCollectionId) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); dropCollection(collection.id); }}>
             <UserRound size={17} />{collection.title}
           </button>)}
         </nav>
