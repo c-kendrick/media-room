@@ -34,7 +34,7 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
-import { createMediaItem, createShelf, deleteShelf, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateMediaItem, updateShelf } from './media-write.js';
+import { createMediaItem, createShelf, deleteShelf, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderMainWatchlist, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, listProfiles, rejectProfile } from './admin.js';
 
 function cls(...values) {
@@ -160,7 +160,7 @@ function PageHero({ eyebrow, title, description, icon: Icon, stats }) {
       <div className="hero-copy">
         <span className="eyebrow">{eyebrow}</span>
         <h1>{title}</h1>
-        {description && <p>{description}</p>}
+        {description && (typeof description === 'string' ? <p>{description}</p> : description)}
       </div>
       <div className="hero-side">
         {stats?.map(([value, label]) => (
@@ -367,6 +367,7 @@ export default function App() {
     && data.ownerId
     && account.profile.id === data.ownerId,
   );
+  const isAdmin = account?.profile?.role === 'admin';
   const generatedAt = data.generatedAt ? new Date(data.generatedAt) : null;
 
   return (
@@ -378,9 +379,6 @@ export default function App() {
           <span><strong>Kit’s Media<br />Room</strong><small>A LIVING LIBRARY</small></span>
         </button>
         <nav>
-          <button onClick={() => { setMobileNav(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-            <Clapperboard size={17} />Media
-          </button>
           {data?.storage === 'supabase' && <button className={data.mainWatchlist ? 'active' : ''} onClick={() => selectCollection(MAIN_WATCHLIST_ID)}>
             <ListOrdered size={17} />Main Watchlist
           </button>}
@@ -425,7 +423,21 @@ export default function App() {
         {error && <div className="error-banner">The public collection could not refresh: {error}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} accessToken={account?.session?.access_token} refresh={refresh} onExport={() => exportCollection(data)} />
+          <MediaView data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} onExport={() => exportCollection(data)} onDescriptionChange={async (description) => {
+            const previousData = data;
+            const optimisticData = { ...data, collectionDescription: description };
+            setData(optimisticData);
+            cacheSnapshot(optimisticData, data.collectionId);
+            try {
+              await updateCollection(account.session.access_token, data.collectionId, { description });
+              setToast('Collection introduction saved.');
+            } catch (error) {
+              setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
+              cacheSnapshot(previousData, previousData.collectionId);
+              setToast('Collection introduction could not be saved.');
+              throw error;
+            }
+          }} />
         </main>
         <footer>Published from Kit’s Local Media Room.</footer>
       </div>
@@ -433,7 +445,7 @@ export default function App() {
       {selectedMedia && (
         <MediaDrawer
           item={selectedMedia}
-          shelves={mediaShelvesForSection(data, mediaSection(selectedMedia))}
+          shelves={data.mainWatchlist ? data.mediaShelves : mediaShelvesForSection(data, mediaSection(selectedMedia))}
           onClose={() => setSelectedMediaId(null)}
           canEdit={canEditCollection}
           onUpdate={async (changes) => {
@@ -535,7 +547,23 @@ export default function App() {
   );
 }
 
-function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onExport }) {
+function EditableDescription({ value, canEdit, onSave }) {
+  const fallback = 'A living collection of films, television, books and games.';
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value || fallback);
+  useEffect(() => { if (!editing) setDraft(value || fallback); }, [value, editing]);
+  if (!canEdit || !editing) {
+    return <p className={cls(canEdit && 'editable-description')} tabIndex={canEdit ? 0 : undefined} title={canEdit ? 'Click to edit this introduction' : undefined} onClick={() => canEdit && setEditing(true)} onKeyDown={(event) => { if (canEdit && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); setEditing(true); } }}>{value || fallback}</p>;
+  }
+  const save = async () => {
+    const next = draft.trim();
+    if (next === (value || fallback)) { setEditing(false); return; }
+    try { await onSave(next); setEditing(false); } catch { /* Keep the text available for another attempt. */ }
+  };
+  return <textarea className="editable-description-input" aria-label="Collection introduction" autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value || fallback); setEditing(false); } if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') event.currentTarget.blur(); }} />;
+}
+
+function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, refresh, onExport, onDescriptionChange }) {
   const [section, setSection] = useState('screen');
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -547,12 +575,14 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
   const [addToShelfIds, setAddToShelfIds] = useState([]);
   const [draggedShelfId, setDraggedShelfId] = useState(null);
   const [optimisticShelfIds, setOptimisticShelfIds] = useState([]);
+  const [optimisticMainShelfIds, setOptimisticMainShelfIds] = useState([]);
 
   const sourceShelves = mediaShelvesForSection(data, section);
   useEffect(() => { setOptimisticShelfIds(sourceShelves.map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves, section]);
+  useEffect(() => { setOptimisticMainShelfIds(data.mediaShelves.filter((shelf) => shelf.showInMainWatchlist).map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves]);
   const shelfIndex = new Map(optimisticShelfIds.map((id, index) => [id, index]));
   const shelves = [...sourceShelves].sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
-  const items = active(data.media).filter((item) => mediaSection(item) === section);
+  const items = active(data.media).filter((item) => data.mainWatchlist || mediaSection(item) === section);
   const formats = unique(items.flatMap(mediaDisplayTags)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const genres = unique(items.flatMap((item) => item.genres || [])).sort((a, b) => a.localeCompare(b));
   const sectionTypes = section === 'screen'
@@ -573,8 +603,10 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
   const randomPool = contentFiltered.filter((item) => matchesAny(listFilters, item.lists || []));
   const visibleShelves = shelves.filter((shelf) => !listFilters.length || listFilters.includes(shelf.shelf_id));
 
-  const sectionLabel = section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games';
-  const singularLabel = section === 'screen' ? 'film or TV show' : section === 'book' ? 'book' : 'video game';
+  const sectionLabel = data.mainWatchlist ? 'Main Watchlist' : section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games';
+  const singularLabel = data.mainWatchlist ? 'item' : section === 'screen' ? 'film or TV show' : section === 'book' ? 'book' : 'video game';
+  const canReorderShelves = canEdit || Boolean(data.mainWatchlist && isAdmin);
+  const canCurateMain = Boolean(!data.mainWatchlist && (canEdit || isAdmin));
 
   const switchSection = (next) => {
     setSection(next);
@@ -605,13 +637,29 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
   const saveShelfOrder = async (ordered, previous) => {
     setOptimisticShelfIds(ordered);
     try {
-      await reorderShelves(accessToken, data.collectionId, section, ordered);
+      if (data.mainWatchlist) await reorderMainWatchlist(accessToken, ordered);
+      else await reorderShelves(accessToken, data.collectionId, section, ordered);
       await refresh({ fresh: true });
-      notify('Shelf order saved.');
+      notify(data.mainWatchlist ? 'Main Watchlist order saved.' : 'Shelf order saved.');
     } catch {
       setOptimisticShelfIds(previous);
       notify('Shelf order could not be saved.');
       throw new Error('Shelf order could not be saved.');
+    }
+  };
+
+  const toggleMainWatchlistShelf = async (shelf) => {
+    const enabled = !shelf.showInMainWatchlist;
+    const previousIds = optimisticMainShelfIds;
+    setOptimisticMainShelfIds((ids) => enabled ? [...ids, shelf.shelf_id] : ids.filter((id) => id !== shelf.shelf_id));
+    try {
+      await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: enabled });
+      await refresh({ fresh: true });
+      notify(enabled ? `${shelf.name} added to Main Watchlist.` : `${shelf.name} removed from Main Watchlist.`);
+    } catch (error) {
+      setOptimisticMainShelfIds(previousIds);
+      notify('Main Watchlist selection could not be updated. Apply the latest Supabase migration and try again.');
+      throw error;
     }
   };
 
@@ -620,25 +668,27 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
       <PageHero
         eyebrow={data.mainWatchlist ? 'EVERYONE’S NEXT WATCH' : 'SCREEN, SHELF & STORY'}
         title={data.collectionTitle || 'The media room'}
-        description={data.mainWatchlist ? 'Every approved member’s Watchlist, gathered live from their own collection.' : 'A living collection of films, television, books and games.'}
+        description={data.mainWatchlist
+          ? 'Every selected shelf, mirrored live from its owner’s collection.'
+          : <EditableDescription value={data.collectionDescription} canEdit={canEdit} onSave={onDescriptionChange} />}
         icon={Clapperboard}
         stats={[
           [data.mainWatchlist ? items.length : items.filter((item) => ['watchlist', 'reading_list'].some((list) => item.lists?.includes(list))).length, 'to watch/read'],
-          [items.filter((item) => ['collection', 'library', 'top_shelf', 'xbox', 'rpg', 'action_adventure', 'building_puzzle', 'strategy', 'vr'].some((list) => item.lists?.includes(list))).length, 'owned'],
+          [data.mainWatchlist ? shelves.length : items.filter((item) => ['collection', 'library', 'top_shelf', 'xbox', 'rpg', 'action_adventure', 'building_puzzle', 'strategy', 'vr'].some((list) => item.lists?.includes(list))).length, data.mainWatchlist ? 'mirrored shelves' : 'owned'],
         ]}
       />
 
       <div className="media-command public-media-command">
         <div className={cls('media-tabs', data.mainWatchlist && 'single')}>
-          <button className={section === 'screen' ? 'active' : ''} onClick={() => switchSection('screen')}><Film />Film & TV</button>
+          <button className={section === 'screen' ? 'active' : ''} onClick={() => switchSection('screen')}>{data.mainWatchlist ? <ListOrdered /> : <Film />}{data.mainWatchlist ? 'All Watchlists' : 'Film & TV'}</button>
           {!data.mainWatchlist && <button className={section === 'book' ? 'active' : ''} onClick={() => switchSection('book')}><BookOpen />Books</button>}
           {!data.mainWatchlist && <button className={section === 'game' ? 'active' : ''} onClick={() => switchSection('game')}><Gamepad2 />Video Games</button>}
         </div>
 
-        <div className={cls('media-filters', section === 'screen' && 'has-type')}>
+        <div className={cls('media-filters', section === 'screen' && !data.mainWatchlist && 'has-type')}>
           <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}…`} /></label>
           <MultiSelect label="All lists" values={listFilters} options={shelves.map((shelf) => [shelf.shelf_id, shelf.name])} onChange={setListFilters} />
-          {section === 'screen' && <MultiSelect label="Film & TV" values={typeFilters} options={sectionTypes} onChange={setTypeFilters} />}
+          {section === 'screen' && !data.mainWatchlist && <MultiSelect label="Film & TV" values={typeFilters} options={sectionTypes} onChange={setTypeFilters} />}
           <MultiSelect label={section === 'game' ? 'All platforms' : 'All formats'} values={formatFilters} options={formats.map((value) => [value, value])} onChange={setFormatFilters} />
           <MultiSelect label="All genres" values={genreFilters} options={genres.map((value) => [value, value])} onChange={setGenreFilters} />
         </div>
@@ -659,7 +709,7 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
             data.media,
           );
           if (!shelfItems.length && queryLower) return null;
-          return <MediaShelf key={shelf.shelf_id} shelf={shelf} items={shelfItems} onOpen={openMedia} canEdit={canEdit} canMoveUp={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < shelves.length - 1} onMoveShelf={async (direction) => { const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(shelf.shelf_id); const to = from + direction; if (to < 0 || to >= ordered.length) return; [ordered[from], ordered[to]] = [ordered[to], ordered[from]]; await saveShelfOrder(ordered, previous); }} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setDraggedShelfId(null); try { await saveShelfOrder(ordered, previous); } catch {} }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} />;
+          return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} onOpen={openMedia} canEdit={canEdit} canReorderShelf={canReorderShelves} canCurateMain={canCurateMain} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < shelves.length - 1} onMoveShelf={async (direction) => { const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(shelf.shelf_id); const to = from + direction; if (to < 0 || to >= ordered.length) return; [ordered[from], ordered[to]] = [ordered[to], ordered[from]]; await saveShelfOrder(ordered, previous); }} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setDraggedShelfId(null); try { await saveShelfOrder(ordered, previous); } catch {} }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} />;
         })}
       </div>
 
@@ -670,7 +720,7 @@ function MediaView({ data, notify, openMedia, canEdit, accessToken, refresh, onE
   );
 }
 
-function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onMoveShelf, onAdd, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
+function MediaShelf({ shelf, items, onOpen, canEdit, canReorderShelf, canCurateMain, onToggleMain, canMoveUp, canMoveDown, onMoveShelf, onAdd, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
   const trackRef = useRef(null);
   const [draggedId, setDraggedId] = useState(null);
   const [displayItems, setDisplayItems] = useState(items);
@@ -688,17 +738,18 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canMoveUp, canMoveDown, onM
   };
 
   return (
-    <section className={cls('media-shelf', shelfDragging && 'shelf-dragging')} onDragOver={(event) => canEdit && event.preventDefault()} onDrop={(event) => { event.preventDefault(); onShelfDrop?.(); }}>
+    <section className={cls('media-shelf', shelfDragging && 'shelf-dragging')} onDragOver={(event) => canReorderShelf && event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (canReorderShelf) onShelfDrop?.(); }}>
       <div className="shelf-head">
         <div className="shelf-title">
-          {canEdit && <button className="shelf-drag-handle" aria-label={`Drag ${shelf.name} to reorder`} title="Drag to reorder shelf" draggable onDragStart={onShelfDragStart} onDragEnd={onShelfDragEnd}><GripVertical size={16} /></button>}
-          <h2><Trophy size={21} />{shelf.name}<span>{items.length}</span></h2>
+          {canReorderShelf && <button className="shelf-drag-handle" aria-label={`Drag ${shelf.name} to reorder`} title="Drag to reorder shelf" draggable onDragStart={onShelfDragStart} onDragEnd={onShelfDragEnd}><GripVertical size={16} /></button>}
+          <span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2><Trophy size={21} />{shelf.name}<span>{items.length}</span></h2></span>
         </div>
         <div>
+          {canCurateMain && <button className={cls('main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Shown in Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><ListOrdered size={15} /></button>}
           {canEdit && <Button className="shelf-add-button" icon={Plus} onClick={onAdd}>Add item</Button>}
           {canEdit && items.length > 1 && <button className="arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /></button>}
-          {canEdit && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => onMoveShelf(-1)}><ArrowUp size={15} /></button>}
-          {canEdit && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => onMoveShelf(1)}><ArrowDown size={15} /></button>}
+          {canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => onMoveShelf(-1)}><ArrowUp size={15} /></button>}
+          {canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => onMoveShelf(1)}><ArrowDown size={15} /></button>}
           {canEdit && !shelf.required && <button aria-label={`Rename ${shelf.name}`} onClick={onRename}><Pencil size={15} /></button>}
           {canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} onClick={onDelete}><X size={15} /></button>}
           <button aria-label={`Scroll ${shelf.name} left`} onClick={() => scrollPage(-1)}><ChevronLeft /></button>
