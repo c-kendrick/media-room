@@ -150,6 +150,16 @@ export function enrichSectionPosters(accessToken, collectionId, section) {
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
+export function searchPosterCandidates(accessToken, mediaItemId) {
+  return supabaseRequest('/functions/v1/enrich-poster', { method: 'POST', fresh: true,
+    body: { media_item_id: mediaItemId }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+}
+
+export function choosePosterCandidate(accessToken, mediaItemId, posterUrl) {
+  return supabaseRequest('/functions/v1/enrich-poster', { method: 'POST', fresh: true,
+    body: { media_item_id: mediaItemId, choose_url: posterUrl }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+}
+
 export function setInterest(accessToken, userId, mediaItemId, enabled) {
   if (!accessToken || !userId || !mediaItemId) throw new Error('An approved signed-in account is required.');
   const path = '/rest/v1/media_interest?media_item_id=eq.' + encodeURIComponent(mediaItemId)

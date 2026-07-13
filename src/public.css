@@ -312,6 +312,19 @@
 .random-pick{min-height:32px!important;border:0!important;border-left:0!important;border-radius:999px;background:transparent!important;color:#705c51;padding:0 10px!important;box-shadow:none!important}
 .random-pick:hover{background:#eee4d8!important}
 .clear-media-filters{margin-left:auto!important}
+.public-media-command,.media-filters,.media-search,.multi-select{min-width:0;max-width:100%;box-sizing:border-box}
+.media-search input{min-width:0;width:100%}
+.multi-select summary{min-width:0;box-sizing:border-box}
+.provider-credits{max-width:760px;line-height:1.5}
+.provider-credits a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+.poster-review-panel{margin:16px 0;padding:14px;border:1px solid #d9cbbb;border-radius:7px;background:#fffaf2}
+.poster-review-panel>p{margin:5px 0 11px;color:#74685d;font-size:10px;line-height:1.5}
+.poster-candidate-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.poster-candidate-grid button{min-width:0;padding:6px;border:1px solid #d5c7b7;border-radius:5px;background:#fffdf8;color:#3b332d;text-align:left;cursor:pointer}
+.poster-candidate-grid button:hover{border-color:#8f6250;background:#f5e9de}
+.poster-candidate-grid img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;margin-bottom:5px}
+.poster-candidate-grid span,.poster-candidate-grid small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.poster-candidate-grid span{font-size:8px;font-weight:700}.poster-candidate-grid small{margin-top:2px;color:#8a796c;font-size:7px}
 
 .media-edit-dialog>.close,.account-dialog>.close{position:absolute!important;top:18px!important;right:18px!important;left:auto!important;width:32px!important;height:32px!important;border:0!important;border-radius:50%;background:transparent!important;color:#746a60;display:grid;place-items:center;cursor:pointer;z-index:2}
 .media-edit-dialog>.close:hover,.account-dialog>.close:hover{background:#ebe1d5!important;color:#25211e}
@@ -337,6 +350,13 @@
   .top-actions{flex:0 0 auto;min-width:0}
   .account-button{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
+
+@media(max-width:1200px) and (min-width:761px){
+  .media-filters,.media-filters.has-type{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .media-search{grid-column:1/-1!important}
+}
+
+@media(max-width:620px){.poster-candidate-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 @media(max-width:880px){
   .sync-button{width:36px;padding:0!important;font-size:0}

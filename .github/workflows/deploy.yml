@@ -33,6 +33,9 @@ jobs:
       - name: Build static site
         run: npm run build
 
+      - name: Run project invariant checks
+        run: npm test
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
