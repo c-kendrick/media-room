@@ -35,7 +35,7 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
-import { bulkImportMedia, choosePosterCandidate, createMediaItem, createShelf, enrichSectionPosters, importCollectionBackup, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
+import { bulkImportMedia, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionPosters, importCollectionBackup, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
 import { applyShelfMemberships } from './shelf-membership.js';
@@ -931,7 +931,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
         </div>
       </section>}
       {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={async (item, shelfIds, priorityWatch) => { const created = await createMediaItem(accessToken, { ...item, collection_id: data.collectionId }); await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setInterest(accessToken, currentUserId, created[0].id, true); setAddingMedia(false); setAddToShelfIds([]); await refresh({ fresh: true }); notify('Media added.'); }} />}
-      {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} />}
+      {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={async (item) => { if (!window.confirm(`Permanently delete ${item.title}? This cannot be undone.`)) return; await permanentlyDeleteMedia(accessToken, item.database_id); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); }} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={async (shelf) => { if (!window.confirm(`Permanently delete the shelf ${shelf.name}? Its media items will remain in the collection.`)) return; await deleteShelf(accessToken, shelf.shelf_id); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); }} />}
       {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`); }} />}
     </div>
   );
@@ -1034,7 +1034,7 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
   </section></div>;
 }
 
-function CollectionBinDrawer({ media, shelves, onClose, onError, onOpenMedia, onRestoreMedia, onRestoreShelf }) {
+function CollectionBinDrawer({ media, shelves, onClose, onError, onOpenMedia, onRestoreMedia, onDeleteMedia, onRestoreShelf, onDeleteShelf }) {
   const [busyId, setBusyId] = useState(null);
   useEscape(onClose);
   const run = async (id, action) => {
@@ -1048,16 +1048,16 @@ function CollectionBinDrawer({ media, shelves, onClose, onError, onOpenMedia, on
       <button className="close" onClick={onClose} aria-label="Close Bin"><X /></button>
       <span className="eyebrow">COLLECTION BIN</span>
       <h2>Recently removed</h2>
-      <p className="bin-intro">Removed items stay safely in the Bin until you choose to restore them.</p>
+      <p className="bin-intro">Restore anything you want to keep, or permanently delete it here when you are certain.</p>
       {!media.length && !shelves.length && <div className="bin-empty"><Trash2 size={20} /><span>The Bin is empty.</span></div>}
       {media.length > 0 && <section className="bin-group"><header><span>MEDIA</span><small>{media.length}</small></header><div className="bin-list">
         {media.map((item) => <article className="bin-row-card" key={item.database_id}>
           <button className="bin-item-main" onClick={() => onOpenMedia(item.item_id)}>{item.poster_url ? <img src={item.poster_url} alt="" /> : <span className="bin-poster-fallback"><Clapperboard size={14} /></span>}<span><strong>{cleanImportedMediaTitle(item.title)}</strong><small>{sectionName(mediaSection(item))}{item.year ? ` · ${item.year}` : ''}</small></span></button>
-          <div className="bin-row-actions"><button disabled={busyId === item.database_id} onClick={() => run(item.database_id, () => onRestoreMedia(item))}><RotateCw size={13} />Restore</button></div>
+          <div className="bin-row-actions"><button disabled={busyId === item.database_id} onClick={() => run(item.database_id, () => onRestoreMedia(item))}><RotateCw size={13} />Restore</button><button className="permanent" disabled={busyId === item.database_id} onClick={() => run(item.database_id, () => onDeleteMedia(item))}><Trash2 size={13} />Delete forever</button></div>
         </article>)}
       </div></section>}
       {shelves.length > 0 && <section className="bin-group"><header><span>SHELVES</span><small>{shelves.length}</small></header><div className="bin-list">
-        {shelves.map((shelf) => <article className="bin-row-card shelf" key={shelf.shelf_id}><div className="bin-item-main"><span className="bin-shelf-mark"><ListOrdered size={15} /></span><span><strong>{shelf.name}</strong><small>{sectionName(shelf.section)}</small></span></div><div className="bin-row-actions"><button disabled={busyId === shelf.shelf_id} onClick={() => run(shelf.shelf_id, () => onRestoreShelf(shelf))}><RotateCw size={13} />Restore</button></div></article>)}
+        {shelves.map((shelf) => <article className="bin-row-card shelf" key={shelf.shelf_id}><div className="bin-item-main"><span className="bin-shelf-mark"><ListOrdered size={15} /></span><span><strong>{shelf.name}</strong><small>{sectionName(shelf.section)}</small></span></div><div className="bin-row-actions"><button disabled={busyId === shelf.shelf_id} onClick={() => run(shelf.shelf_id, () => onRestoreShelf(shelf))}><RotateCw size={13} />Restore</button><button className="permanent" disabled={busyId === shelf.shelf_id} onClick={() => run(shelf.shelf_id, () => onDeleteShelf(shelf))}><Trash2 size={13} />Delete forever</button></div></article>)}
       </div></section>}
     </aside>
   </div>, document.body);
@@ -1093,7 +1093,7 @@ function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDrag
 function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onUpdate, onUpdateShelves, canInterest, interested, onInterest, onDelete, onRestore }) {
   const [editing, setEditing] = useState(false);
   const [optimisticShelves, setOptimisticShelves] = useState(item.lists || []);
-  const [shelfBusy, setShelfBusy] = useState(false);
+  const optimisticShelvesRef = useRef(item.lists || []);
   const [optimisticInterest, setOptimisticInterest] = useState(interested);
   const [optimisticOwned, setOptimisticOwned] = useState(Boolean(item.owned));
   const [posterCandidates, setPosterCandidates] = useState(null);
@@ -1101,20 +1101,22 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
   const [posterReviewError, setPosterReviewError] = useState('');
   useEffect(() => { setOptimisticInterest(interested); }, [interested, item.database_id]);
   useEffect(() => { setOptimisticOwned(Boolean(item.owned)); }, [item.owned, item.database_id]);
-  useEffect(() => { if (!shelfBusy) setOptimisticShelves(item.lists || []); }, [item.lists, item.database_id, shelfBusy]);
+  useEffect(() => { optimisticShelvesRef.current = item.lists || []; setOptimisticShelves(item.lists || []); }, [item.lists, item.database_id]);
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
-  const toggleShelf = async (shelfId) => {
-    if (shelfBusy) return;
-    const previousShelves = [...optimisticShelves];
+  const toggleShelf = (shelfId) => {
+    const previousShelves = [...optimisticShelvesRef.current];
     const nextShelves = previousShelves.includes(shelfId)
       ? previousShelves.filter((id) => id !== shelfId)
       : [...previousShelves, shelfId];
+    optimisticShelvesRef.current = nextShelves;
     setOptimisticShelves(nextShelves);
-    setShelfBusy(true);
-    try { await onUpdateShelves(previousShelves, nextShelves); }
-    catch { setOptimisticShelves(previousShelves); }
-    finally { setShelfBusy(false); }
+    onUpdateShelves(previousShelves, nextShelves).catch(() => {
+      if (optimisticShelvesRef.current === nextShelves) {
+        optimisticShelvesRef.current = previousShelves;
+        setOptimisticShelves(previousShelves);
+      }
+    });
   };
 
   return (
@@ -1156,7 +1158,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
               <span className="eyebrow">SHELVES</span>
               {(canEdit ? shelves : shelves.filter((shelf) => optimisticShelves.includes(shelf.shelf_id))).length
                 ? (canEdit ? shelves : shelves.filter((shelf) => optimisticShelves.includes(shelf.shelf_id))).map((shelf) => canEdit
-                  ? <button type="button" disabled={shelfBusy} className={cls('public-shelf-chip', optimisticShelves.includes(shelf.shelf_id) && 'active')} aria-pressed={optimisticShelves.includes(shelf.shelf_id)} onClick={() => toggleShelf(shelf.shelf_id)} key={shelf.shelf_id}>{optimisticShelves.includes(shelf.shelf_id) ? <Check size={13} /> : <Plus size={13} />}{shelf.name}</button>
+                  ? <button type="button" className={cls('public-shelf-chip', optimisticShelves.includes(shelf.shelf_id) && 'active')} aria-pressed={optimisticShelves.includes(shelf.shelf_id)} onClick={() => toggleShelf(shelf.shelf_id)} key={shelf.shelf_id}>{optimisticShelves.includes(shelf.shelf_id) ? <Check size={13} /> : <Plus size={13} />}{shelf.name}</button>
                   : <span className="public-shelf-chip active" key={shelf.shelf_id}><Check size={13} />{shelf.name}</span>)
                 : <small>No public shelf membership.</small>}
             </div>
@@ -1310,20 +1312,21 @@ function mediaFormPayload(form) {
   };
 }
 
-function MediaDetailFields({ form, setForm, section }) {
+function MediaDetailFields({ form, setForm, section, compact = false }) {
   const set = (name) => (event) => setForm((current) => ({ ...current, [name]: event.target.value }));
   return <div className="media-edit-grid optional-detail-grid">
-    <label>Type<select value={form.type} onChange={set('type')}>{section === 'screen' ? <><option value="film">Film</option><option value="television">Television</option></> : <option value={section}>{section === 'book' ? 'Book' : 'Video game'}</option>}</select></label>
+    {section === 'screen' && <label>Type<select value={form.type} onChange={set('type')}><option value="film">Film</option><option value="television">Television</option></select></label>}
     <label>Year<input type="number" min="1000" max="3000" placeholder="YYYY" value={form.year} onChange={set('year')} /></label>
-    <label>Creator<input value={form.creator} onChange={set('creator')} placeholder="Author, writer or creator" /></label>
-    <label>Director<input value={form.director} onChange={set('director')} /></label>
-    <label>Format<input value={form.format} onChange={set('format')} placeholder="DVD, hardback…" /></label>
-    <label>Platforms (comma separated)<input value={form.platforms} onChange={set('platforms')} placeholder="PC, PlayStation 5…" /></label>
+    <label>Creator<input value={form.creator} onChange={set('creator')} placeholder={section === 'book' ? 'Author or creator' : section === 'game' ? 'Developer or creator' : 'Writer or creator'} /></label>
+    {section === 'screen' && <label>Director<input value={form.director} onChange={set('director')} /></label>}
+    {section === 'game'
+      ? <label>Platforms (comma separated)<input value={form.platforms} onChange={set('platforms')} placeholder="PC, PlayStation 5…" /></label>
+      : <label>Format<input value={form.format} onChange={set('format')} placeholder={section === 'book' ? 'Hardback, paperback…' : 'DVD, Blu-ray, 4K…'} /></label>}
     <label>Genres (comma separated)<input value={form.genres} onChange={set('genres')} placeholder="Drama, mystery…" /></label>
-    <label>Runtime (minutes)<input type="number" min="1" value={form.runtime} onChange={set('runtime')} /></label>
+    {!compact && <label>Runtime (minutes)<input type="number" min="1" value={form.runtime} onChange={set('runtime')} /></label>}
     <label className="full">Poster URL<input type="url" value={form.poster_url} onChange={set('poster_url')} placeholder="https://…" /></label>
-    <label className="full">Description<textarea value={form.description} onChange={set('description')} rows="4" /></label>
-    <label className="full">Notes<textarea value={form.notes} onChange={set('notes')} rows="3" /></label>
+    <label className="full">Description<textarea value={form.description} onChange={set('description')} rows={compact ? 2 : 4} /></label>
+    <label className="full">Notes<textarea value={form.notes} onChange={set('notes')} rows={compact ? 2 : 3} /></label>
   </div>;
 }
 
@@ -1335,6 +1338,7 @@ function AddMediaDialog({ section, shelves, initialShelfIds = [], onClose, onSav
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const destination = shelves.find((shelf) => shelfIds.includes(shelf.shelf_id));
+  const namePlaceholder = section === 'screen' ? 'Name of film or show' : section === 'book' ? 'Name of book' : 'Name of video game';
   const submit = async (event) => {
     event.preventDefault();
     const item = mediaFormPayload(form);
@@ -1343,16 +1347,16 @@ function AddMediaDialog({ section, shelves, initialShelfIds = [], onClose, onSav
     try { await onSave(item, shelfIds, priorityWatch); }
     catch { setError('The media item could not be saved. Check the fields and try again.'); setSaving(false); }
   };
-  return <div className="modal-layer editor-layer"><form className="media-edit-dialog add-media-dialog" onSubmit={submit}>
+  return <div className="modal-layer editor-layer add-media-layer"><form className="media-edit-dialog add-media-dialog" onSubmit={submit}>
     <button className="close" type="button" onClick={onClose} aria-label="Close add item"><X /></button>
     <span className="eyebrow">ADD TO {destination?.name?.toUpperCase() || 'COLLECTION'}</span><h2>Add an Item</h2><p className="dialog-intro">Only the name is required. Add as much or as little detail as you like.</p>
-    <label className="required-media-title">Name <span>Required</span><input autoFocus value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} placeholder="Name of the film, show, book or game" required /></label>
+    <label className="required-media-title">Name <span>Required</span><input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} placeholder={namePlaceholder} required /></label>
     <section className="optional-media-section">
       <header><span className="eyebrow">OPTIONAL</span><p>Everything below can be left blank.</p></header>
-      <MediaDetailFields form={form} setForm={setForm} section={section} />
+      <MediaDetailFields form={form} setForm={setForm} section={section} compact />
       <div className="add-status-options">
-        <button type="button" className={cls('add-status-option owned', form.owned && 'active')} aria-pressed={form.owned} onClick={() => setForm((current) => ({ ...current, owned: !current.owned }))}><span>{form.owned ? <Check size={13} /> : <Plus size={13} />}</span><strong>{form.owned ? 'Owned' : 'Mark as Owned'}</strong><small>Add the muted Owned tag</small></button>
-        {section === 'screen' && <button type="button" className={cls('add-status-option priority', priorityWatch && 'active')} aria-pressed={priorityWatch} onClick={() => setPriorityWatch((current) => !current)}><span>{priorityWatch ? <Check size={13} /> : <Plus size={13} />}</span><strong>{priorityWatch ? 'Priority Watch' : 'Mark Priority Watch'}</strong><small>Add your priority stamp</small></button>}
+        <button type="button" className={cls('add-status-option owned', form.owned && 'active')} aria-pressed={form.owned} onClick={() => setForm((current) => ({ ...current, owned: !current.owned }))}><span>{form.owned ? <Check size={12} /> : <Plus size={12} />}</span><strong>{form.owned ? 'Owned' : 'Mark as Owned'}</strong></button>
+        {section === 'screen' && <button type="button" className={cls('add-status-option priority', priorityWatch && 'active')} aria-pressed={priorityWatch} onClick={() => setPriorityWatch((current) => !current)}><span>{priorityWatch ? <Check size={12} /> : <Plus size={12} />}</span><strong>{priorityWatch ? 'Priority Watch' : 'Mark Priority Watch'}</strong></button>}
       </div>
       <fieldset className="shelf-picker"><legend>Also add to</legend>{shelves.map((shelf) => <label className={shelfIds.includes(shelf.shelf_id) ? 'selected' : ''} key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} /><span>{shelf.name}</span></label>)}</fieldset>
     </section>
