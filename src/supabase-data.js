@@ -180,9 +180,25 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
   const publicProfiles = interests.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh }) : [];
   const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
   const collectionOrder = new Map(collections.map((collection, index) => [collection.id, index]));
+  const mainPosition = (shelf) => {
+    const position = Number(shelf.main_watchlist_position ?? shelf.position);
+    return Number.isFinite(position) ? position : Number.MAX_SAFE_INTEGER;
+  };
+  const collectionMainPosition = new Map();
+  for (const shelf of shelves) {
+    const current = collectionMainPosition.get(shelf.collection_id) ?? Number.MAX_SAFE_INTEGER;
+    collectionMainPosition.set(shelf.collection_id, Math.min(current, mainPosition(shelf)));
+  }
+  const groupedShelves = [...shelves].sort((a, b) => {
+    const collectionDifference = (collectionMainPosition.get(a.collection_id) ?? Number.MAX_SAFE_INTEGER)
+      - (collectionMainPosition.get(b.collection_id) ?? Number.MAX_SAFE_INTEGER);
+    if (collectionDifference) return collectionDifference;
+    if (a.collection_id !== b.collection_id) return (collectionOrder.get(a.collection_id) ?? 0) - (collectionOrder.get(b.collection_id) ?? 0);
+    return mainPosition(a) - mainPosition(b) || Number(a.position || 0) - Number(b.position || 0) || a.name.localeCompare(b.name);
+  });
   const snapshot = mapSnapshot(
     { id: 'main-watchlist', owner_id: null, title: 'Main Watchlist', description: 'Every selected shelf, mirrored live from its owner’s collection.', updated_at: new Date().toISOString() },
-    [...shelves].sort((a, b) => (Number(a.main_watchlist_position) || collectionOrder.get(a.collection_id)) - (Number(b.main_watchlist_position) || collectionOrder.get(b.collection_id))).map((shelf) => {
+    groupedShelves.map((shelf) => {
       const collection = collectionById.get(shelf.collection_id);
       const ownerName = collection?.title?.replace(/[’']s Collection$/i, '') || 'Member';
       return { ...shelf, section: 'screen', source_section: shelf.section, source_collection_id: shelf.collection_id, owner_name: ownerName, owner_note: collection?.description || '', position: shelf.main_watchlist_position ?? shelf.position };
