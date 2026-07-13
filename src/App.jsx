@@ -34,7 +34,7 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
-import { bulkImportMedia, createMediaItem, createShelf, deleteShelf, enrichSectionPosters, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
+import { bulkImportMedia, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionPosters, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchPosterCandidates, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
 
 function cls(...values) {
@@ -460,7 +460,7 @@ export default function App() {
             }
           }} />
         </main>
-        <footer>Published from Kit’s Local Media Room.</footer>
+        <footer><span>Published from Kit’s Local Media Room.</span><span className="provider-credits">Poster data from <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>, <a href="https://books.google.com/" target="_blank" rel="noreferrer">Google Books</a>, <a href="https://openlibrary.org/" target="_blank" rel="noreferrer">Open Library</a> and <a href="https://www.steamgriddb.com/" target="_blank" rel="noreferrer">SteamGridDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</span></footer>
       </div>
 
       {selectedMedia && (
@@ -469,6 +469,9 @@ export default function App() {
           shelves={data.mainWatchlist ? data.mediaShelves : mediaShelvesForSection(data, mediaSection(selectedMedia))}
           onClose={() => setSelectedMediaId(null)}
           canEdit={canEditCollection}
+          canReviewPoster={Boolean((canEditCollection || isAdmin) && !data.mainWatchlist)}
+          onFindPosters={() => searchPosterCandidates(account.session.access_token, selectedMedia.database_id)}
+          onChoosePoster={async (posterUrl) => { await choosePosterCandidate(account.session.access_token, selectedMedia.database_id, posterUrl); await refresh({ fresh: true }); setToast('Poster saved.'); }}
           onUpdate={async (changes) => {
             const previousData = data;
             const applyMediaUpdate = (currentData, mediaChanges) => ({
@@ -908,13 +911,16 @@ function MediaCard({ item, onClick, draggable, dragging, onDragStart, onDragEnd,
   );
 }
 
-function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelves, canInterest, interested, onInterest, onDelete, onRestore }) {
+function MediaDrawer({ item, shelves, onClose, canEdit, canReviewPoster, onFindPosters, onChoosePoster, onUpdate, onUpdateShelves, canInterest, interested, onInterest, onDelete, onRestore }) {
   const [editing, setEditing] = useState(false);
   const [editingShelves, setEditingShelves] = useState(false);
   const [selectedShelves, setSelectedShelves] = useState([]);
   const [savingShelves, setSavingShelves] = useState(false);
   const [shelfError, setShelfError] = useState('');
   const [optimisticInterest, setOptimisticInterest] = useState(interested);
+  const [posterCandidates, setPosterCandidates] = useState(null);
+  const [posterReviewBusy, setPosterReviewBusy] = useState(false);
+  const [posterReviewError, setPosterReviewError] = useState('');
   useEscape(() => setEditingShelves(false), editingShelves);
   useEffect(() => { setOptimisticInterest(interested); }, [interested, item.database_id]);
   const tags = mediaDisplayTags(item);
@@ -954,6 +960,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onUpdate, onUpdateShelve
                 setEditingShelves(true);
               }}>Edit shelves</Button>
             </div>}
+            {!item.poster_url && canReviewPoster && <section className="poster-review-panel"><span className="eyebrow">POSTER REVIEW</span><p>{posterCandidates === null ? 'This item has no poster. Search the configured provider for reviewable options.' : posterCandidates.length ? 'Choose the correct artwork. Existing posters are never replaced automatically.' : 'No confident provider options were found. You can still add a poster URL through Edit details.'}</p>{posterCandidates === null && <Button disabled={posterReviewBusy} icon={Search} onClick={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); setPosterCandidates(result?.candidates || []); } catch { setPosterReviewError('Provider candidates could not be loaded.'); } finally { setPosterReviewBusy(false); } }}>{posterReviewBusy ? 'Searching…' : 'Review poster options'}</Button>}{posterCandidates?.length > 0 && <div className="poster-candidate-grid">{posterCandidates.map((candidate) => <button key={`${candidate.provider}-${candidate.id}`} disabled={posterReviewBusy} onClick={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { await onChoosePoster(candidate.poster_url); } catch { setPosterReviewError('That poster could not be saved.'); setPosterReviewBusy(false); } }}><img src={candidate.poster_url} alt="" /><span>{candidate.title}{candidate.year ? ` (${candidate.year})` : ''}</span><small>{candidate.provider}</small></button>)}</div>}{posterReviewError && <p className="auth-error">{posterReviewError}</p>}</section>}
             <p className="drawer-description">{item.description || item.notes || 'No description has been added yet.'}</p>
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-lists public-shelf-list">
