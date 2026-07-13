@@ -36,7 +36,7 @@ import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, sig
 import { loadPublicCollections } from './supabase-data.js';
 import { bulkImportMedia, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionPosters, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
-import { normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
+import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -676,6 +676,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
   const [formatFilters, setFormatFilters] = useState([]);
   const [genreFilters, setGenreFilters] = useState([]);
   const [typeFilters, setTypeFilters] = useState([]);
+  const [ratingFilters, setRatingFilters] = useState([]);
   const [stampFilters, setStampFilters] = useState([]);
   const [newShelf, setNewShelf] = useState('');
   const [addingMedia, setAddingMedia] = useState(false);
@@ -706,6 +707,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
     const searchable = `${item.title} ${item.creator || ''} ${item.director || ''}`.toLowerCase();
     return (!queryLower || searchable.includes(queryLower))
       && matchesAny(typeFilters, [item.type])
+      && matchesStarRatings(item.star_rating, ratingFilters)
       && matchesAny(formatFilters, mediaDisplayTags(item))
       && matchesAny(genreFilters, item.genres || [])
       && (!data.mainWatchlist || !stampFilters.length || stampFilters.some((count) => (
@@ -736,6 +738,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
     setFormatFilters([]);
     setGenreFilters([]);
     setTypeFilters([]);
+    setRatingFilters([]);
     setStampFilters([]);
   };
 
@@ -754,6 +757,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
     setFormatFilters([]);
     setGenreFilters([]);
     setTypeFilters([]);
+    setRatingFilters([]);
     setStampFilters([]);
   };
 
@@ -826,13 +830,14 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
           <MultiSelect label="All lists" values={listFilters} options={shelves.map((shelf) => [shelf.shelf_id, data.mainWatchlist ? <span className="owned-list-option"><small>{shelf.ownerName}</small><b>{shelf.name}</b></span> : shelf.name])} onChange={setListFilters} />
           {section === 'screen' && !data.mainWatchlist && <MultiSelect label="Film & TV" values={typeFilters} options={sectionTypes} onChange={setTypeFilters} />}
           {data.mainWatchlist && <MultiSelect label="Interest" values={stampFilters} options={['1', '2', '3', '4'].map((count) => [count, count === '1' ? '1 Stamp' : count === '4' ? '4+ People' : `${count} People`])} onChange={setStampFilters} />}
+          <MultiSelect label="Rating" values={ratingFilters} options={STAR_RATING_STEPS.map((rating) => [String(rating), `${rating} ${rating === 1 ? 'star' : 'stars'}`])} onChange={setRatingFilters} />
           <MultiSelect label={section === 'game' ? 'All platforms' : 'All formats'} values={formatFilters} options={formats.map((value) => [value, value])} onChange={setFormatFilters} />
           <MultiSelect label="All genres" values={genreFilters} options={genres.map((value) => [value, value])} onChange={setGenreFilters} />
         </div>
 
         <div className="media-action-row public-actions">
           <Button className="random-pick" icon={Shuffle} onClick={pickRandom}>{data.mainWatchlist ? 'Pick an item' : `Pick a ${singularLabel}`}</Button>
-          {(listFilters.length || formatFilters.length || genreFilters.length || typeFilters.length || stampFilters.length || query) && (
+          {(listFilters.length || ratingFilters.length || formatFilters.length || genreFilters.length || typeFilters.length || stampFilters.length || query) && (
             <button className="clear-media-filters" type="button" onClick={clearFilters}><SlidersHorizontal size={14} />Clear filters</button>
           )}
         </div>

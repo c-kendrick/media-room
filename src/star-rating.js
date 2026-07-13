@@ -6,3 +6,9 @@ export function normalizeStarRating(value) {
   if (!Number.isFinite(number) || number < 0.5 || number > 5 || !Number.isInteger(number * 2)) return null;
   return number;
 }
+
+export function matchesStarRatings(value, selectedRatings) {
+  if (!selectedRatings.length) return true;
+  const rating = normalizeStarRating(value);
+  return rating !== null && selectedRatings.includes(String(rating));
+}
