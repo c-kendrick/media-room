@@ -138,3 +138,26 @@ test('opening Main Watchlist always starts on All Watchlists', async () => {
   assert.match(app, /useState\('screen'\)/);
   assert.match(app, /data\.mainWatchlist \? 'All Watchlists'/);
 });
+
+test('owned status is owner-controlled, optimistic, and displayed as a muted card tag', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/supabase-data.js');
+  const styles = await read('src/media-layout.css');
+  const migration = await read('supabase/migrations/20260713090000_owned_media.sql');
+
+  assert.match(data, /star_rating,owned,runtime/);
+  assert.match(data, /owned: item\.owned \?\? false/);
+  assert.match(app, /setOptimisticOwned\(next\)[\s\S]*onUpdate\(\{ owned: next \}/);
+  assert.match(app, /item\.owned && <span className="media-owned-tag">Owned<\/span>/);
+  assert.match(styles, /\.media-card-meta \.media-owned-tag[\s\S]*color: #81786c/);
+  assert.match(migration, /c\.owner_id = auth\.uid\(\)/);
+  assert.match(migration, /before update of owned/);
+});
+
+test('book cards show the author while drawer and filters retain format', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /function mediaCardDisplayTags\(item\)[\s\S]*item\.type === 'book'[\s\S]*item\.creator\?\.trim\(\)/);
+  assert.match(app, /function MediaCard[\s\S]*mediaCardDisplayTags\(item\)/);
+  assert.match(app, /function MediaDrawer[\s\S]*mediaDisplayTags\(item\)/);
+  assert.match(app, /const formats = unique\(items\.flatMap\(mediaDisplayTags\)\)/);
+});

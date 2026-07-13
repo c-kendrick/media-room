@@ -2,8 +2,9 @@ import { supabaseSelect } from './supabase.js';
 import { buildWatchDemand } from './watch-demand.js';
 import { SECTION_NOTE_DEFAULTS } from './section-notes.js';
 
-const MEDIA_SELECT = 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,runtime,deleted_at,created_at,updated_at';
-const LEGACY_MEDIA_SELECT = MEDIA_SELECT.replace(',star_rating', '');
+const MEDIA_SELECT = 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,owned,runtime,deleted_at,created_at,updated_at';
+const PRE_OWNED_MEDIA_SELECT = MEDIA_SELECT.replace(',owned', '');
+const LEGACY_MEDIA_SELECT = PRE_OWNED_MEDIA_SELECT.replace(',star_rating', '');
 
 function query(table, parameters) {
   return table + '?' + new URLSearchParams(parameters).toString();
@@ -13,7 +14,11 @@ async function selectMediaItems(parameters, options) {
   try {
     return await supabaseSelect(query('media_items', { ...parameters, select: MEDIA_SELECT }), options);
   } catch {
-    return supabaseSelect(query('media_items', { ...parameters, select: LEGACY_MEDIA_SELECT }), options);
+    try {
+      return await supabaseSelect(query('media_items', { ...parameters, select: PRE_OWNED_MEDIA_SELECT }), options);
+    } catch {
+      return supabaseSelect(query('media_items', { ...parameters, select: LEGACY_MEDIA_SELECT }), options);
+    }
   }
 }
 
@@ -73,6 +78,7 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
         genres: item.genres || [],
         rating: item.rating,
         star_rating: item.star_rating ?? null,
+        owned: item.owned ?? false,
         runtime: item.runtime,
         added_at: item.created_at,
         updated_at: item.updated_at,
