@@ -92,15 +92,17 @@ Deno.serve(async (request) => {
     const { data: { user } } = await client.auth.getUser();
     if (!user) return json({ error: 'Session expired.' }, 401);
     const body = await request.json();
+    const { data: profile } = await client.from('profiles').select('role').eq('id', user.id).single();
+    const isAdmin = profile?.role === 'admin';
 
-    if (Array.isArray(body.bulk_items)) {
-      if (!body.collection_id || body.bulk_items.length > 50) return json({ error: 'Poster enrichment is limited to 50 imported items at once.' }, 400);
+    if (body.enrich_section) {
+      if (!body.collection_id || !['screen', 'book', 'game'].includes(body.enrich_section)) return json({ error: 'Choose a valid collection section.' }, 400);
       const { data: collection } = await client.from('collections').select('id,owner_id').eq('id', body.collection_id).single();
-      if (!collection || collection.owner_id !== user.id) return json({ error: 'Only the collection owner can enrich imported posters.' }, 403);
+      if (!collection || (collection.owner_id !== user.id && !isAdmin)) return json({ error: 'Only the collection owner or an administrator can enrich posters.' }, 403);
       const { data: collectionItems, error: itemsError } = await client.from('media_items').select('id,collection_id,type,title,year,poster_url').eq('collection_id', collection.id).is('deleted_at', null);
       if (itemsError) return json({ error: itemsError.message }, 400);
-      const requested = new Set(body.bulk_items.map((item: { title?: string; year?: number | null }) => `${normalized(item.title)}:${item.year ?? ''}`));
-      const targets = (collectionItems || []).filter((item: MediaItem) => !item.poster_url && requested.has(`${normalized(item.title)}:${item.year ?? ''}`)).slice(0, 50);
+      const sectionTypes = body.enrich_section === 'screen' ? ['film', 'television'] : [body.enrich_section];
+      const targets = (collectionItems || []).filter((item: MediaItem) => !item.poster_url && sectionTypes.includes(item.type)).slice(0, 50);
       const warnings = new Set<string>();
       if (targets.some((item: MediaItem) => ['film', 'television'].includes(item.type)) && !Deno.env.get('TMDB_API_KEY')) warnings.add('TMDB key missing');
       if (targets.some((item: MediaItem) => item.type === 'game') && !Deno.env.get('STEAMGRIDDB_API_KEY')) warnings.add('SteamGridDB key missing');
@@ -123,7 +125,7 @@ Deno.serve(async (request) => {
     const { data: item, error } = await client.from('media_items').select('id,collection_id,type,title,year').eq('id', media_item_id).single();
     if (error || !item) return json({ error: 'Media item was not found.' }, 404);
     const { data: collection } = await client.from('collections').select('owner_id').eq('id', item.collection_id).single();
-    if (!collection || collection.owner_id !== user.id) return json({ error: 'Only the collection owner can enrich this poster.' }, 403);
+    if (!collection || (collection.owner_id !== user.id && !isAdmin)) return json({ error: 'Only the collection owner or an administrator can enrich this poster.' }, 403);
     if (choose_url) {
       const { error: updateError } = await client.from('media_items').update({ poster_url: choose_url }).eq('id', item.id);
       return updateError ? json({ error: updateError.message }, 400) : json({ poster_url: choose_url, source: 'chosen' });
