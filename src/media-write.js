@@ -138,6 +138,12 @@ export function reorderCollections(accessToken, orderedCollectionIds) {
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
+export function bulkImportMedia(accessToken, collectionId, shelfId, section, items) {
+  return supabaseRequest('/rest/v1/rpc/bulk_import_media', { method: 'POST', fresh: true,
+    body: { target_collection_id: collectionId, target_shelf_id: shelfId, target_section: section, import_items: items },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+}
+
 export function setInterest(accessToken, userId, mediaItemId, enabled) {
   if (!accessToken || !userId || !mediaItemId) throw new Error('An approved signed-in account is required.');
   const path = '/rest/v1/media_interest?media_item_id=eq.' + encodeURIComponent(mediaItemId)
