@@ -153,6 +153,10 @@
 .shelf-control-button:hover{background:#f2e4d8!important;border-color:#936b58!important;color:#3f322b!important;transform:none!important}
 .shelf-add-button,.main-watchlist-toggle.active{background:#6f302d!important;border-color:#6f302d!important;color:#fff!important}
 .shelf-add-button:hover,.main-watchlist-toggle.active:hover{background:#83423c!important;border-color:#83423c!important;color:#fff!important;transform:none!important}
+.main-watchlist-toggle{height:42px!important;min-height:42px!important;text-align:left}
+.main-watchlist-copy{display:grid;gap:1px;line-height:1.02}
+.main-watchlist-copy small{font-size:7px;font-weight:600;letter-spacing:.02em}
+.main-watchlist-copy strong{font-size:10px;font-weight:900}
 .delete-shelf{opacity:.55}
 .remove-main-mirror{width:auto!important;min-height:34px;padding:0 10px!important;display:inline-flex!important;gap:7px;align-items:center;border-radius:6px!important;font-size:9px!important;white-space:nowrap}
 .remove-main-mirror{background:transparent!important;border:1px solid #d8c9bb!important;color:#8d5147!important}
@@ -165,9 +169,7 @@
 .shelf-action-group>button:disabled{opacity:.28;cursor:not-allowed}
 .shelf-action-group button:focus-visible,.main-watchlist-toggle:focus-visible{outline:2px solid #8a5543;outline-offset:2px}
 .shelf-content-actions{border-color:transparent;background:transparent;padding:0}
-.shelf-order-actions{background:#f4ece2}
-.shelf-edit-actions{background:transparent}
-.shelf-page-actions{background:#eee4d7}
+.shelf-order-actions,.shelf-edit-actions,.shelf-page-actions{border-color:#cdbdac;background:#fffaf2}
 .shelf-page-actions small{min-width:30px;color:#756b61;font-size:8px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums}
 
 .media-card[draggable="true"]{cursor:grab}

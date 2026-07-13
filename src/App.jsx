@@ -34,7 +34,7 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
-import { createMediaItem, createShelf, deleteShelf, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderMainWatchlist, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
+import { createMediaItem, createShelf, deleteShelf, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, setInterest, setMediaDeleted, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
 
 function cls(...values) {
@@ -222,6 +222,7 @@ export default function App() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [collections, setCollections] = useState([]);
+  const [draggedCollectionId, setDraggedCollectionId] = useState(null);
   const [collectionsLoading, setCollectionsLoading] = useState(true);
   const [collectionId, setCollectionId] = useState(null);
   const [collectionLoading, setCollectionLoading] = useState(false);
@@ -370,6 +371,24 @@ export default function App() {
   );
   const isAdmin = account?.profile?.role === 'admin';
   const generatedAt = data.generatedAt ? new Date(data.generatedAt) : null;
+  const dropCollection = async (targetCollectionId) => {
+    if (!isAdmin || !draggedCollectionId || draggedCollectionId === targetCollectionId) return;
+    const previous = [...collections];
+    const ordered = [...collections];
+    const from = ordered.findIndex((collection) => collection.id === draggedCollectionId);
+    const to = ordered.findIndex((collection) => collection.id === targetCollectionId);
+    if (from < 0 || to < 0) return;
+    ordered.splice(to, 0, ordered.splice(from, 1)[0]);
+    setCollections(ordered);
+    setDraggedCollectionId(null);
+    try {
+      await reorderCollections(account.session.access_token, ordered.map((collection) => collection.id));
+      setToast('Collection order saved.');
+    } catch {
+      setCollections(previous);
+      setToast('Collection order could not be saved.');
+    }
+  };
 
   return (
     <div className="app-shell media-only-shell public-media-shell">
@@ -384,7 +403,7 @@ export default function App() {
             <ListOrdered size={17} />Main Watchlist
           </button>}
           <small className="collection-nav-label">COLLECTIONS</small>
-          {data?.storage === 'supabase' && collections.map((collection) => <button key={collection.id} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)}>
+          {data?.storage === 'supabase' && collections.map((collection) => <button key={collection.id} draggable={isAdmin} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)} onDragStart={(event) => { if (!isAdmin) return; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', collection.id); setDraggedCollectionId(collection.id); }} onDragEnd={() => setDraggedCollectionId(null)} onDragOver={(event) => { if (isAdmin && draggedCollectionId) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); dropCollection(collection.id); }}>
             <UserRound size={17} />{collection.title}
           </button>)}
         </nav>
@@ -783,7 +802,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canReorderShelf, canCurateM
           <span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2></span>
         </div>
         <div className="shelf-actions">
-          <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && items.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><ListOrdered size={15} /><span>{shelf.showInMainWatchlist ? 'Included' : 'Include this shelf'}</span>{shelf.showInMainWatchlist && <Check size={14} />}</button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add item</Button>}</span>
+          <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && items.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span>{shelf.showInMainWatchlist && <Check size={14} />}</button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add item</Button>}</span>
           <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => onMoveShelf(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => onMoveShelf(1)}><ArrowDown size={15} /></button>}</span>
           <span className="shelf-action-group shelf-edit-actions">{canEdit && !shelf.required && <button aria-label={`Rename ${shelf.name}`} title="Rename shelf" onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} title="Move shelf to Bin" onClick={onDelete}><X size={15} /></button>}</span>
           <span className="shelf-action-group shelf-page-actions"><button aria-label={`Scroll ${shelf.name} left`} disabled={currentPage <= 0 || pageCount <= 1} onClick={() => scrollPage(-1)}><ChevronLeft /></button>{pageCount > 1 && <small>{currentPage + 1} / {pageCount}</small>}<button aria-label={`Scroll ${shelf.name} right`} disabled={currentPage >= pageCount - 1 || pageCount <= 1} onClick={() => scrollPage(1)}><ChevronRight /></button></span>
