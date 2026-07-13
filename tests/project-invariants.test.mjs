@@ -99,7 +99,7 @@ test('rating filters match only explicitly selected half-star values', async () 
   assert.match(app, /label="Film & TV"[\s\S]*label="Rating"[\s\S]*All platforms/);
 });
 
-test('shelf membership closes immediately and updates all visible state optimistically', async () => {
+test('shelf membership toggles directly in the drawer and updates all visible state optimistically', async () => {
   const snapshot = {
     collectionId: 'collection-a',
     media: [{ database_id: 'media-a', lists: ['shelf-a'], list_positions: { 'shelf-a': 4 } }],
@@ -110,7 +110,9 @@ test('shelf membership closes immediately and updates all visible state optimist
   assert.notEqual(updated, snapshot);
 
   const app = await read('src/App.jsx');
-  assert.match(app, /setEditingShelves\(false\);[\s\S]*onUpdateShelves\(previousShelves, nextShelves\)/);
+  assert.match(app, /const toggleShelf = async[\s\S]*setOptimisticShelves\(nextShelves\)[\s\S]*onUpdateShelves\(previousShelves, nextShelves\)/);
+  assert.match(app, /aria-pressed=\{optimisticShelves\.includes\(shelf\.shelf_id\)\}/);
+  assert.doesNotMatch(app, /Edit shelves|SHELF MEMBERSHIP|Save shelves/);
   assert.match(app, /const optimisticData = applyShelfMemberships[\s\S]*setData\(optimisticData\)[\s\S]*replaceMediaShelfMemberships/);
   assert.match(app, /Previous shelves restored/);
 });
@@ -247,7 +249,30 @@ test('owners can open a collection Bin and restore media or shelves', async () =
   assert.match(app, /function CollectionBinDrawer/);
   assert.match(app, /onRestoreMedia[\s\S]*setMediaDeleted\(accessToken, item\.database_id, false\)/);
   assert.match(app, /onRestoreShelf[\s\S]*updateShelf\(accessToken, shelf\.shelf_id, \{ deleted_at: null \}\)/);
-  assert.match(app, /Delete forever/);
+  assert.doesNotMatch(app, /Delete forever|Delete permanently|permanentlyDeleteMedia|deleteShelf/);
   assert.match(styles, /\.collection-bin-drawer/);
   assert.match(styles, /\.bin-row-actions/);
+});
+
+test('add item shares the complete media details and keeps all non-name fields optional', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /function MediaDetailFields/);
+  assert.match(app, /Only the name is required/);
+  assert.match(app, />OPTIONAL</);
+  for (const label of ['Creator', 'Director', 'Format', 'Platforms', 'Genres', 'Runtime', 'Poster URL', 'Description', 'Notes']) assert.match(app, new RegExp(`>${label}`));
+  assert.match(app, /Mark as Owned/);
+  assert.match(app, /section === 'screen'[\s\S]*Mark Priority Watch/);
+  assert.match(app, /if \(priorityWatch && currentUserId\) await setInterest/);
+  assert.match(app, /<legend>Also add to<\/legend>/);
+  assert.match(styles, /\.optional-media-section/);
+  assert.match(styles, /\.add-status-options/);
+});
+
+test('shelf controls use consistent spacing and headline-style labels', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, />Arrange Shelf</);
+  assert.match(app, />Add Item</);
+  assert.match(styles, /\.shelf-content-actions\{[^}]*gap:7px/);
 });
