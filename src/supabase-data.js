@@ -20,13 +20,18 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
     collectionId: collection.id,
     ownerId: collection.owner_id,
     collectionTitle: collection.title,
+    collectionDescription: collection.description || '',
     mediaShelves: shelves.map((shelf) => ({
       shelf_id: shelf.id,
       name: shelf.name,
       section: shelf.section,
       position: shelf.position,
       deleted_at: shelf.deleted_at || null,
-      required: shelf.section === 'screen' && shelf.name.trim().toLowerCase() === 'watchlist',
+      required: shelf.is_required ?? (shelf.section === 'screen' && shelf.name.trim().toLowerCase() === 'watchlist'),
+      showInMainWatchlist: shelf.show_in_main_watchlist ?? (shelf.section === 'screen' && shelf.name.trim().toLowerCase() === 'watchlist'),
+      mainWatchlistPosition: shelf.main_watchlist_position ?? shelf.position,
+      ownerName: shelf.owner_name || null,
+      sourceSection: shelf.source_section || shelf.section,
     })),
     media: mediaItems.map((item) => {
       const membership = membershipsByItem.get(item.id) || [];
@@ -65,21 +70,31 @@ export async function loadPublicCollections({ fresh = false } = {}) {
 }
 
 export async function loadCollectionFromSupabase({ collectionId, fresh = false } = {}) {
-  const collections = await supabaseSelect(query('collections', {
+  const collectionFilter = {
     ...(collectionId ? { id: 'eq.' + collectionId } : { slug: 'eq.kits-collection' }),
-    select: 'id,owner_id,title,updated_at',
     limit: '1',
-  }), { fresh });
+  };
+  let collections;
+  try {
+    collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,description,updated_at' }), { fresh });
+  } catch {
+    collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,updated_at' }), { fresh });
+  }
 
   const collection = collections[0];
   if (!collection) return null;
 
-  const [shelves, mediaItems] = await Promise.all([
-    supabaseSelect(query('shelves', {
+  const shelvesPromise = supabaseSelect(query('shelves', {
+    collection_id: 'eq.' + collection.id,
+    select: 'id,section,name,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
+    order: 'section.asc,position.asc',
+  }), { fresh }).catch(() => supabaseSelect(query('shelves', {
       collection_id: 'eq.' + collection.id,
       select: 'id,section,name,position,deleted_at',
       order: 'section.asc,position.asc',
-    }), { fresh }),
+    }), { fresh }));
+  const [shelves, mediaItems] = await Promise.all([
+    shelvesPromise,
     supabaseSelect(query('media_items', {
       collection_id: 'eq.' + collection.id,
       select: 'id,legacy_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,runtime,deleted_at,created_at,updated_at',
@@ -111,13 +126,24 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
   if (!collections.length) return null;
 
   const collectionIds = collections.map((collection) => collection.id);
-  const shelves = await supabaseSelect(query('shelves', {
-    collection_id: 'in.(' + collectionIds.join(',') + ')',
-    section: 'eq.screen',
-    name: 'eq.Watchlist',
-    deleted_at: 'is.null',
-    select: 'id,collection_id,section,name,position,deleted_at',
-  }), { fresh });
+  let shelves;
+  try {
+    shelves = await supabaseSelect(query('shelves', {
+      collection_id: 'in.(' + collectionIds.join(',') + ')',
+      show_in_main_watchlist: 'eq.true',
+      deleted_at: 'is.null',
+      select: 'id,collection_id,section,name,position,deleted_at,show_in_main_watchlist,main_watchlist_position',
+      order: 'main_watchlist_position.asc',
+    }), { fresh });
+  } catch {
+    shelves = await supabaseSelect(query('shelves', {
+      collection_id: 'in.(' + collectionIds.join(',') + ')',
+      section: 'eq.screen',
+      name: 'eq.Watchlist',
+      deleted_at: 'is.null',
+      select: 'id,collection_id,section,name,position,deleted_at',
+    }), { fresh });
+  }
   const shelfIds = shelves.map((shelf) => shelf.id);
   const memberships = shelfIds.length ? await supabaseSelect(query('shelf_media_items', {
     shelf_id: 'in.(' + shelfIds.join(',') + ')',
@@ -128,7 +154,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
   const mediaItems = mediaIds.length ? await supabaseSelect(query('media_items', {
     id: 'in.(' + mediaIds.join(',') + ')',
     deleted_at: 'is.null',
-    select: 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,runtime,deleted_at,created_at,updated_at,external_ids',
+    select: 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,runtime,deleted_at,created_at,updated_at',
     order: 'created_at.asc',
   }), { fresh }) : [];
   const interests = mediaItems.length ? await supabaseSelect(query('media_interest', {
@@ -138,11 +164,11 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
   const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
   const collectionOrder = new Map(collections.map((collection, index) => [collection.id, index]));
   const snapshot = mapSnapshot(
-    { id: 'main-watchlist', owner_id: null, title: 'Main Watchlist', updated_at: new Date().toISOString() },
-    [...shelves].sort((a, b) => collectionOrder.get(a.collection_id) - collectionOrder.get(b.collection_id)).map((shelf) => {
+    { id: 'main-watchlist', owner_id: null, title: 'Main Watchlist', description: 'Every selected shelf, mirrored live from its owner’s collection.', updated_at: new Date().toISOString() },
+    [...shelves].sort((a, b) => (Number(a.main_watchlist_position) || collectionOrder.get(a.collection_id)) - (Number(b.main_watchlist_position) || collectionOrder.get(b.collection_id))).map((shelf) => {
       const collection = collectionById.get(shelf.collection_id);
       const ownerName = collection?.title?.replace(/[’']s Collection$/i, '') || 'Member';
-      return { ...shelf, name: ownerName + '’s Watchlist' };
+      return { ...shelf, section: 'screen', source_section: shelf.section, owner_name: ownerName, position: shelf.main_watchlist_position ?? shelf.position };
     }),
     mediaItems,
     memberships,
