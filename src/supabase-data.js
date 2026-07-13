@@ -141,6 +141,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
     shelves = await supabaseSelect(query('shelves', {
       collection_id: 'in.(' + collectionIds.join(',') + ')',
       show_in_main_watchlist: 'eq.true',
+      section: 'eq.screen',
       deleted_at: 'is.null',
       select: 'id,collection_id,section,name,position,deleted_at,show_in_main_watchlist,main_watchlist_position',
       order: 'main_watchlist_position.asc',

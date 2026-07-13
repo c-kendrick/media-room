@@ -620,7 +620,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
 
   const sourceShelves = mediaShelvesForSection(data, section);
   useEffect(() => { setOptimisticShelfIds(sourceShelves.map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves, section]);
-  useEffect(() => { setOptimisticMainShelfIds(data.mediaShelves.filter((shelf) => shelf.showInMainWatchlist).map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves]);
+  useEffect(() => { setOptimisticMainShelfIds(data.mediaShelves.filter((shelf) => shelf.section === 'screen' && shelf.showInMainWatchlist).map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves]);
   const shelfIndex = new Map(optimisticShelfIds.map((id, index) => [id, index]));
   const shelves = [...sourceShelves].sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
   const items = active(data.media).filter((item) => data.mainWatchlist || mediaSection(item) === section);
@@ -655,7 +655,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, ref
   const sectionLabel = data.mainWatchlist ? 'Main Watchlist' : section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games';
   const singularLabel = data.mainWatchlist ? 'item' : section === 'screen' ? 'film or TV show' : section === 'book' ? 'book' : 'video game';
   const canReorderShelves = canEdit || Boolean(data.mainWatchlist && isAdmin);
-  const canCurateMain = Boolean(!data.mainWatchlist && (canEdit || isAdmin));
+  const canCurateMain = Boolean(!data.mainWatchlist && section === 'screen' && (canEdit || isAdmin));
 
   const switchSection = (next) => {
     setSection(next);
