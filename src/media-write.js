@@ -144,9 +144,9 @@ export function bulkImportMedia(accessToken, collectionId, shelfId, section, ite
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
-export function enrichImportedPosters(accessToken, collectionId, items) {
+export function enrichSectionPosters(accessToken, collectionId, section) {
   return supabaseRequest('/functions/v1/enrich-poster', { method: 'POST', fresh: true,
-    body: { collection_id: collectionId, bulk_items: items },
+    body: { collection_id: collectionId, enrich_section: section },
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
