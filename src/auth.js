@@ -100,3 +100,21 @@ export async function registerWithPassword({ email, password, username, displayN
   if (result.session) storeSession(result.session);
   return result;
 }
+
+export async function updateDisplayName(accessToken, displayName) {
+  await supabaseRequest('/rest/v1/rpc/update_own_display_name', {
+    method: 'POST',
+    fresh: true,
+    body: { new_display_name: displayName },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+  });
+  return fetchProfile(accessToken);
+}
+
+export async function updatePassword(accessToken, password) {
+  return authRequest('user', {
+    method: 'PUT',
+    accessToken,
+    body: { password },
+  });
+}

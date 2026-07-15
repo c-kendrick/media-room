@@ -1,5 +1,5 @@
 import { supabaseSelect } from './supabase.js';
-import { buildWatchDemand } from './watch-demand.js';
+import { buildWatchDemand, watchIdentity } from './watch-demand.js';
 import { SECTION_NOTE_DEFAULTS } from './section-notes.js';
 
 const MEDIA_SELECT = 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,owned,runtime,deleted_at,created_at,updated_at';
@@ -47,6 +47,7 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
     mediaShelves: shelves.map((shelf) => ({
       shelf_id: shelf.id,
       name: shelf.name,
+      subtitle: shelf.subtitle || '',
       section: shelf.section,
       position: shelf.position,
       deleted_at: shelf.deleted_at || null,
@@ -57,6 +58,7 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
       ownerNote: shelf.owner_note || '',
       sourceCollectionId: shelf.source_collection_id || null,
       sourceSection: shelf.source_section || shelf.section,
+      virtual: Boolean(shelf.virtual),
     })),
     media: mediaItems.map((item) => {
       const membership = membershipsByItem.get(item.id) || [];
@@ -125,7 +127,7 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
 
   const shelvesPromise = supabaseSelect(query('shelves', {
     collection_id: 'eq.' + collection.id,
-    select: 'id,section,name,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
+    select: 'id,section,name,subtitle,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
     order: 'section.asc,position.asc',
   }), { fresh }).catch(() => supabaseSelect(query('shelves', {
       collection_id: 'eq.' + collection.id,
@@ -171,7 +173,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
       show_in_main_watchlist: 'eq.true',
       section: 'eq.screen',
       deleted_at: 'is.null',
-      select: 'id,collection_id,section,name,position,deleted_at,show_in_main_watchlist,main_watchlist_position',
+      select: 'id,collection_id,section,name,subtitle,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
       order: 'main_watchlist_position.asc',
     }), { fresh });
   } catch {
@@ -183,6 +185,26 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
       select: 'id,collection_id,section,name,position,deleted_at',
     }), { fresh });
   }
+  const allWatchlistShelves = await supabaseSelect(query('shelves', {
+    collection_id: 'in.(' + collectionIds.join(',') + ')',
+    section: 'eq.screen',
+    deleted_at: 'is.null',
+    select: 'id,collection_id,section,name,position,is_required',
+  }), { fresh });
+  const canonicalWatchlistShelves = allWatchlistShelves.filter((shelf) => shelf.is_required || shelf.name.trim().toLowerCase() === 'watchlist');
+  const interestRows = await supabaseSelect(query('media_interest', { select: 'media_item_id,user_id' }), { fresh });
+  const candidateShelfIds = canonicalWatchlistShelves.map((shelf) => shelf.id);
+  const candidateMemberships = candidateShelfIds.length ? await supabaseSelect(query('shelf_media_items', {
+    shelf_id: 'in.(' + candidateShelfIds.join(',') + ')',
+    select: 'shelf_id,media_item_id,position',
+    order: 'position.asc',
+  }), { fresh }) : [];
+  const candidateMediaIds = [...new Set([...candidateMemberships.map((membership) => membership.media_item_id), ...interestRows.map((interest) => interest.media_item_id)])];
+  const candidateMediaItems = candidateMediaIds.length ? await selectMediaItems({
+    id: 'in.(' + candidateMediaIds.join(',') + ')',
+    deleted_at: 'is.null',
+    order: 'created_at.asc',
+  }, { fresh }) : [];
   const shelfIds = shelves.map((shelf) => shelf.id);
   const memberships = shelfIds.length ? await supabaseSelect(query('shelf_media_items', {
     shelf_id: 'in.(' + shelfIds.join(',') + ')',
@@ -206,10 +228,9 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
   });
   const mirroredMediaIds = new Set(mirroredMemberships.map((membership) => membership.media_item_id));
   const mirroredMediaItems = mediaItems.filter((item) => mirroredMediaIds.has(item.id));
-  const interests = mirroredMediaItems.length ? await supabaseSelect(query('media_interest', {
-    select: 'media_item_id,user_id',
-  }), { fresh }) : [];
-  const publicProfiles = interests.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh }) : [];
+  const allMediaItems = [...new Map([...mirroredMediaItems, ...candidateMediaItems].map((item) => [item.id, item])).values()];
+  const interests = interestRows.filter((interest) => allMediaItems.some((item) => item.id === interest.media_item_id));
+  const publicProfiles = await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh });
   const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
   const collectionOrder = new Map(collections.map((collection, index) => [collection.id, index]));
   const mainPosition = (shelf) => {
@@ -228,19 +249,35 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
     if (a.collection_id !== b.collection_id) return (collectionOrder.get(a.collection_id) ?? 0) - (collectionOrder.get(b.collection_id) ?? 0);
     return mainPosition(a) - mainPosition(b) || Number(a.position || 0) - Number(b.position || 0) || a.name.localeCompare(b.name);
   });
+  const demandByMediaId = buildWatchDemand(allMediaItems, collections, interests, publicProfiles);
+  const watchlistDemandByMediaId = buildWatchDemand(candidateMediaItems, collections, interests, publicProfiles);
+  const interestedMediaIds = new Set(interests.map((interest) => interest.media_item_id));
+  const representativeByIdentity = new Map();
+  for (const item of candidateMediaItems) {
+    const demand = watchlistDemandByMediaId.get(item.id) || [];
+    if (!interestedMediaIds.has(item.id) && demand.length < 2) continue;
+    const identity = watchIdentity(item);
+    const current = representativeByIdentity.get(identity);
+    if (!current || (mirroredMediaIds.has(item.id) && !mirroredMediaIds.has(current.id))) representativeByIdentity.set(identity, item);
+  }
+  const virtualMediaItems = [...representativeByIdentity.values()];
+  const virtualShelf = {
+    id: 'main-priority-watchlist', section: 'screen', name: 'Watchlist', subtitle: 'Priority picks and titles wanted by more than one person.',
+    position: -1, deleted_at: null, virtual: true,
+  };
+  const virtualMemberships = virtualMediaItems.map((item, index) => ({ shelf_id: virtualShelf.id, media_item_id: item.id, position: (index + 1) * 1000 }));
   const snapshot = mapSnapshot(
     { id: 'main-watchlist', owner_id: null, title: 'Main Watchlist', description: 'Every selected shelf, mirrored live from its owner’s collection.', updated_at: new Date().toISOString() },
-    groupedShelves.map((shelf) => {
+    [virtualShelf, ...groupedShelves.map((shelf) => {
       const collection = collectionById.get(shelf.collection_id);
       const ownerName = collection?.title?.replace(/[’']s Collection$/i, '') || 'Member';
       return { ...shelf, section: 'screen', source_section: shelf.section, source_collection_id: shelf.collection_id, owner_name: ownerName, owner_note: collection?.description || SECTION_NOTE_DEFAULTS.screen, position: shelf.main_watchlist_position ?? shelf.position };
-    }),
-    mirroredMediaItems,
-    mirroredMemberships,
+    })],
+    [...new Map([...mirroredMediaItems, ...virtualMediaItems].map((item) => [item.id, item])).values()],
+    [...mirroredMemberships, ...virtualMemberships],
     interests,
     publicProfiles,
   );
-  const demandByMediaId = buildWatchDemand(mirroredMediaItems, collections, interests, publicProfiles);
   return { ...snapshot, mainWatchlist: true, media: snapshot.media.map((item) => {
     const watchDemand = demandByMediaId.get(item.database_id) || [];
     return { ...item, watchDemand, demandCount: watchDemand.length };
