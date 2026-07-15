@@ -154,10 +154,28 @@ test('collection summary counts use live shelf UUIDs and owned flags', async () 
     { lists: ['owned-uuid'], owned: true },
     { lists: ['watch-uuid', 'owned-uuid'], owned: true },
   ];
-  assert.deepEqual(collectionSummaryStats(items, shelves), { toWatchRead: 2, owned: 2 });
+  assert.deepEqual(collectionSummaryStats(items, shelves, 'screen'), { queued: 2, owned: 2 });
   const app = await read('src/App.jsx');
-  assert.match(app, /collectionSummaryStats\(items, shelves\)/);
+  assert.match(app, /collectionSummaryStats\(items, shelves, section\)/);
   assert.doesNotMatch(app, /\['watchlist', 'reading_list'\]/);
+});
+
+test('personal queue totals use section wording and explicit book reading lists', async () => {
+  const books = [
+    { lists: ['reading'], owned: false },
+    { lists: ['wishlist'], owned: false },
+    { lists: ['current'], owned: false },
+  ];
+  const shelves = [
+    { shelf_id: 'reading', name: 'Anything', readingList: true },
+    { shelf_id: 'wishlist', name: 'Wishlist', readingList: false },
+    { shelf_id: 'current', name: 'Currently Reading', readingList: true },
+  ];
+  assert.deepEqual(collectionSummaryStats(books, shelves, 'book'), { queued: 2, owned: 0 });
+  const app = await read('src/App.jsx');
+  assert.match(app, /section === 'book' \? 'to read' : section === 'game' \? 'to play' : 'to watch'/);
+  assert.match(app, /section === 'book' \? \{ is_reading_list: newShelfReadingList \} : \{\}/);
+  assert.match(app, /Items on this shelf count toward “to read”/);
 });
 
 test('shelves have optional subtitles and branded edit and confirmation dialogs', async () => {
@@ -170,6 +188,13 @@ test('shelves have optional subtitles and branded edit and confirmation dialogs'
   assert.doesNotMatch(app, /window\.prompt/);
   assert.match(data, /subtitle: shelf\.subtitle \|\| ''/);
   assert.match(migration, /add column if not exists subtitle text/);
+});
+
+test('shelf title and subtitle saves close immediately and update optimistically', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /onSave\(\{[\s\S]*subtitle: cleanedSubtitle \|\| null[\s\S]*\}\); onClose\(\);/);
+  assert.match(app, /setOptimisticShelfDetails[\s\S]*updateShelf\(accessToken, shelfId, changes\)\.then/);
+  assert.match(app, /Previous details restored/);
 });
 
 test('Main Watchlist includes one virtual priority and shared-demand shelf', async () => {
@@ -190,6 +215,31 @@ test('account settings support display name, password, and admin member preview'
   assert.match(auth, /rpc\/update_own_display_name/);
   assert.match(auth, /method: 'PUT'[\s\S]*body: \{ password \}/);
   assert.match(migration, /update_own_display_name/);
+});
+
+test('display-name updates rename the collection and refresh navigation and stamps', async () => {
+  const app = await read('src/App.jsx');
+  const migration = await read('supabase/migrations/20260715020000_reading_lists_and_display_names.sql');
+  assert.match(migration, /set title = cleaned_name \|\| '’s Collection'/);
+  assert.match(app, /const nextCollections = await loadPublicCollections\(\{ fresh: true \}\)/);
+  assert.match(app, /snapshotCache\.current\.clear\(\)/);
+  assert.match(app, /await refresh\(\{ fresh: true, targetCollectionId: data\.collectionId \}\)/);
+});
+
+test('search includes descriptions notes and item details everywhere', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /function mediaSearchText\(item\)/);
+  for (const field of ['item.description', 'item.notes', 'item.format', 'item.runtime']) assert.match(app, new RegExp(field.replace('.', '\\.')));
+  assert.match(app, /const searchable = mediaSearchText\(item\)/);
+  assert.match(app, /active\(data\.media\)\.filter\(\(item\) => mediaSearchText\(item\)\.includes\(normalizedQuery\)\)/);
+});
+
+test('reading-list migration marks defaults and future approved accounts', async () => {
+  const migration = await read('supabase/migrations/20260715020000_reading_lists_and_display_names.sql');
+  assert.match(migration, /add column if not exists is_reading_list boolean/);
+  assert.match(migration, /lower\(trim\(name\)\) in \('reading list', 'currently reading'\)/);
+  assert.match(migration, /\('book','Reading List',1000,false,true\)/);
+  assert.match(migration, /\('book','Currently Reading',2000,false,true\)/);
 });
 
 test('navigation and metadata refinements remain present', async () => {

@@ -48,6 +48,7 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
       shelf_id: shelf.id,
       name: shelf.name,
       subtitle: shelf.subtitle || '',
+      readingList: shelf.is_reading_list ?? (shelf.section === 'book' && ['reading list', 'currently reading'].includes(shelf.name.trim().toLowerCase())),
       section: shelf.section,
       position: shelf.position,
       deleted_at: shelf.deleted_at || null,
@@ -127,9 +128,13 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
 
   const shelvesPromise = supabaseSelect(query('shelves', {
     collection_id: 'eq.' + collection.id,
-    select: 'id,section,name,subtitle,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
+    select: 'id,section,name,subtitle,is_reading_list,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
     order: 'section.asc,position.asc',
   }), { fresh }).catch(() => supabaseSelect(query('shelves', {
+      collection_id: 'eq.' + collection.id,
+      select: 'id,section,name,subtitle,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
+      order: 'section.asc,position.asc',
+    }), { fresh })).catch(() => supabaseSelect(query('shelves', {
       collection_id: 'eq.' + collection.id,
       select: 'id,section,name,position,deleted_at',
       order: 'section.asc,position.asc',
@@ -173,17 +178,23 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
       show_in_main_watchlist: 'eq.true',
       section: 'eq.screen',
       deleted_at: 'is.null',
-      select: 'id,collection_id,section,name,subtitle,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
+      select: 'id,collection_id,section,name,subtitle,is_reading_list,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
       order: 'main_watchlist_position.asc',
     }), { fresh });
   } catch {
-    shelves = await supabaseSelect(query('shelves', {
-      collection_id: 'in.(' + collectionIds.join(',') + ')',
-      section: 'eq.screen',
-      name: 'eq.Watchlist',
-      deleted_at: 'is.null',
-      select: 'id,collection_id,section,name,position,deleted_at',
-    }), { fresh });
+    try {
+      shelves = await supabaseSelect(query('shelves', {
+        collection_id: 'in.(' + collectionIds.join(',') + ')',
+        show_in_main_watchlist: 'eq.true', section: 'eq.screen', deleted_at: 'is.null',
+        select: 'id,collection_id,section,name,subtitle,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
+        order: 'main_watchlist_position.asc',
+      }), { fresh });
+    } catch {
+      shelves = await supabaseSelect(query('shelves', {
+        collection_id: 'in.(' + collectionIds.join(',') + ')', section: 'eq.screen', name: 'eq.Watchlist', deleted_at: 'is.null',
+        select: 'id,collection_id,section,name,position,deleted_at',
+      }), { fresh });
+    }
   }
   const allWatchlistShelves = await supabaseSelect(query('shelves', {
     collection_id: 'in.(' + collectionIds.join(',') + ')',
