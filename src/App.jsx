@@ -118,6 +118,13 @@ function mediaCardDisplayTags(item) {
   return mediaDisplayTags(item);
 }
 
+function mediaSearchText(item) {
+  return [item.title, item.creator, item.director, item.description, item.notes, item.type, item.year, item.status, item.priority, item.format, item.runtime, ...(item.platforms || []), ...(item.genres || [])]
+    .filter((value) => value !== null && value !== undefined)
+    .join(' ')
+    .toLowerCase();
+}
+
 function mediaTagTone(value, isGame = false) {
   const tag = String(value || '').trim();
   if (/^4k$/i.test(tag)) return 'format-4k';
@@ -619,7 +626,7 @@ export default function App() {
           onManageUsers={() => { setAccountOpen(false); setAdminOpen(true); }}
           viewAsMember={viewAsMember}
           onViewAsMemberChange={setViewAsMember}
-          onAccountUpdated={(profile) => { setAccount((current) => ({ ...current, profile })); setToast('Account settings saved.'); }}
+          onAccountUpdated={async (profile) => { setAccount((current) => ({ ...current, profile })); const nextCollections = await loadPublicCollections({ fresh: true }); setCollections(nextCollections); snapshotCache.current.clear(); await refresh({ fresh: true, targetCollectionId: data.collectionId }); setToast('Account settings saved.'); }}
         />
       )}
 
@@ -713,6 +720,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const [ownershipFilters, setOwnershipFilters] = useState([]);
   const [stampFilters, setStampFilters] = useState([]);
   const [newShelf, setNewShelf] = useState('');
+  const [newShelfReadingList, setNewShelfReadingList] = useState(false);
   const [addingMedia, setAddingMedia] = useState(false);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [enrichingPosters, setEnrichingPosters] = useState(false);
@@ -722,14 +730,16 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const [addToShelfIds, setAddToShelfIds] = useState([]);
   const [draggedShelfId, setDraggedShelfId] = useState(null);
   const [optimisticShelfIds, setOptimisticShelfIds] = useState([]);
+  const [optimisticShelfDetails, setOptimisticShelfDetails] = useState({});
   const [optimisticMainShelfIds, setOptimisticMainShelfIds] = useState([]);
   const backupInputRef = useRef(null);
 
   const sourceShelves = mediaShelvesForSection(data, section);
   useEffect(() => { setOptimisticShelfIds(sourceShelves.map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves, section]);
+  useEffect(() => { setOptimisticShelfDetails({}); }, [data.collectionId, data.mediaShelves, section]);
   useEffect(() => { setOptimisticMainShelfIds(data.mediaShelves.filter((shelf) => shelf.section === 'screen' && shelf.showInMainWatchlist).map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves]);
   const shelfIndex = new Map(optimisticShelfIds.map((id, index) => [id, index]));
-  const shelves = [...sourceShelves].sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
+  const shelves = sourceShelves.map((shelf) => ({ ...shelf, ...(optimisticShelfDetails[shelf.shelf_id] || {}) })).sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
   const items = active(data.media).filter((item) => data.mainWatchlist || mediaSection(item) === section);
   const deletedMedia = (data.media || []).filter((item) => item.deleted_at);
   const deletedShelves = (data.mediaShelves || []).filter((shelf) => shelf.deleted_at);
@@ -745,7 +755,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const matchesAny = (selected, values) => !selected.length || selected.some((value) => values.includes(value));
   const queryLower = query.trim().toLowerCase();
   const contentFiltered = items.filter((item) => {
-    const searchable = `${item.title} ${item.creator || ''} ${item.director || ''}`.toLowerCase();
+    const searchable = mediaSearchText(item);
     return (!queryLower || searchable.includes(queryLower))
       && matchesAny(typeFilters, [item.type])
       && matchesStarRatings(item.star_rating, ratingFilters)
@@ -775,10 +785,12 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const canCurateMain = Boolean(!data.mainWatchlist && section === 'screen' && (canEdit || isAdmin));
   const sectionDescription = data.collectionDescriptions?.[section]
     ?? (section === 'screen' ? data.collectionDescription : '');
-  const collectionStats = collectionSummaryStats(items, shelves);
+  const collectionStats = collectionSummaryStats(items, shelves, section);
+  const queueLabel = section === 'book' ? 'to read' : section === 'game' ? 'to play' : 'to watch';
 
   const switchSection = (next) => {
     setSection(next);
+    setNewShelfReadingList(false);
     setQuery('');
     setListFilters([]);
     setFormatFilters([]);
@@ -885,7 +897,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
           : <EditableDescription value={sectionDescription} fallback={SECTION_NOTE_DEFAULTS[section]} canEdit={canEdit} onSave={(description) => onDescriptionChange(section, description)} title={`${data.collectionTitle || 'Collection'} ${sectionLabel} note`} />}
         icon={Clapperboard}
         stats={[
-          [data.mainWatchlist ? items.length : collectionStats.toWatchRead, 'to watch/read'],
+          [data.mainWatchlist ? items.length : collectionStats.queued, queueLabel],
           [data.mainWatchlist ? shelves.filter((shelf) => !shelf.virtual).length : collectionStats.owned, data.mainWatchlist ? 'mirrored shelves' : 'owned'],
         ]}
       />
@@ -932,7 +944,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
       {!randomPool.length && <Empty>No media matches those filters.</Empty>}
       {!data.mainWatchlist && (canEdit || isAdmin) && <section className="collection-tools">
         <div><span className="eyebrow">COLLECTION TOOLS</span><p>{canEdit ? 'Manage this section without cluttering the shelves.' : 'Administrative backup and artwork tools.'}</p></div>
-        {canEdit && <form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="Name a new shelf" aria-label="New shelf name" /><Button type="submit" icon={Plus}>Add shelf</Button></form>}
+        {canEdit && <form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), ...(section === 'book' ? { is_reading_list: newShelfReadingList } : {}), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); setNewShelfReadingList(false); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="Name a new shelf" aria-label="New shelf name" />{section === 'book' && <label className="inline-shelf-designation"><input type="checkbox" checked={newShelfReadingList} onChange={(event) => setNewShelfReadingList(event.target.checked)} /><span>Reading List</span></label>}<Button type="submit" icon={Plus}>Add shelf</Button></form>}
         <div className="collection-tool-actions">
           <Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters} onClick={enrichCurrentSection}>{enrichingPosters ? 'Finding posters…' : 'Find posters'}</Button>
           <Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button>
@@ -943,7 +955,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
       </section>}
       {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={async (item, shelfIds, priorityWatch) => { const created = await createMediaItem(accessToken, { ...item, collection_id: data.collectionId }); await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setInterest(accessToken, currentUserId, created[0].id, true); setAddingMedia(false); setAddToShelfIds([]); await refresh({ fresh: true }); notify('Media added.'); }} />}
       {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', onConfirm: async () => { await permanentlyDeleteMedia(accessToken, item.database_id); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', onConfirm: async () => { await deleteShelf(accessToken, shelf.shelf_id); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); } })} />}
-      {shelfEditor && <ShelfEditDialog shelf={shelfEditor} onClose={() => setShelfEditor(null)} onSave={async (changes) => { await updateShelf(accessToken, shelfEditor.shelf_id, changes); await refresh({ fresh: true }); notify('Shelf saved.'); }} />}
+      {shelfEditor && <ShelfEditDialog shelf={shelfEditor} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, readingList: changes.is_reading_list ?? shelfEditor.readingList } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
       {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`); }} />}
     </div>
   );
@@ -1192,7 +1204,7 @@ function SearchModal({ data, query, setQuery, onClose, onOpen }) {
   useEscape(onClose);
   const normalizedQuery = query.trim().toLowerCase();
   const results = normalizedQuery
-    ? active(data.media).filter((item) => `${item.title} ${item.creator || ''} ${item.director || ''} ${item.type} ${(item.genres || []).join(' ')}`.toLowerCase().includes(normalizedQuery))
+    ? active(data.media).filter((item) => mediaSearchText(item).includes(normalizedQuery))
     : [];
 
   return (
@@ -1236,16 +1248,15 @@ function ShelfEditDialog({ shelf, onClose, onSave }) {
   useEscape(onClose);
   const [name, setName] = useState(shelf.name);
   const [subtitle, setSubtitle] = useState(shelf.subtitle || '');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog" onSubmit={async (event) => { event.preventDefault(); const cleanedName = name.trim(); const cleanedSubtitle = subtitle.trim(); if ((!shelf.required && !cleanedName) || cleanedSubtitle.length > 180) return; setSaving(true); setError(''); try { await onSave({ ...(shelf.required ? {} : { name: cleanedName }), subtitle: cleanedSubtitle || null }); onClose(); } catch { setError('The shelf could not be updated.'); setSaving(false); } }}>
+  const [readingList, setReadingList] = useState(Boolean(shelf.readingList));
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog" onSubmit={(event) => { event.preventDefault(); const cleanedName = name.trim(); const cleanedSubtitle = subtitle.trim(); if ((!shelf.required && !cleanedName) || cleanedSubtitle.length > 180) return; onSave({ ...(shelf.required ? {} : { name: cleanedName }), subtitle: cleanedSubtitle || null, ...(shelf.section === 'book' ? { is_reading_list: readingList } : {}) }); onClose(); }}>
     <button className="close" type="button" onClick={onClose} aria-label="Close shelf editor"><X /></button>
-    <span className="eyebrow">EDIT WATCHLIST</span><h2>{shelf.name}</h2>
+    <span className="eyebrow">EDIT SHELF</span><h2>{shelf.name}</h2>
     {!shelf.required && <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>}
     <label>Subtitle <span className="field-hint">Optional</span><input autoFocus={shelf.required} value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
+    {shelf.section === 'book' && <label className="reading-list-designation"><input type="checkbox" checked={readingList} onChange={(event) => setReadingList(event.target.checked)} /><span><b>Reading List</b><small>Items on this shelf count toward “to read”.</small></span></label>}
     <small className="character-count">{subtitle.length} / 180</small>
-    {error && <p className="auth-error">{error}</p>}
-    <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose}>Cancel</button><Button type="submit" icon={Pencil} disabled={saving || (!shelf.required && !name.trim())}>{saving ? 'Saving…' : 'Save Shelf'}</Button></div>
+    <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose}>Cancel</button><Button type="submit" icon={Pencil} disabled={!shelf.required && !name.trim()}>Save Shelf</Button></div>
   </form></div>;
 }
 
@@ -1307,7 +1318,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
             <p>{account.profile?.role === 'admin' ? 'Administrator account' : account.profile?.deactivated_at ? 'Account deactivated — your library is safely stored.' : account.profile?.approved_at ? 'Approved member' : 'Pending approval'}</p>
             {account.profile?.role === 'admin' && <label className="admin-view-toggle"><input type="checkbox" checked={viewAsMember} onChange={(event) => onViewAsMemberChange(event.target.checked)} /><span><b>View as non-Admin</b><small>You will still be the owner of your own collection.</small></span></label>}
             <button className="account-settings-toggle" type="button" onClick={() => { setSettingsOpen((current) => !current); setError(''); }}>{settingsOpen ? 'Hide account settings' : 'Display name & password'}</button>
-            {settingsOpen && <form className="account-settings" onSubmit={async (event) => { event.preventDefault(); setSubmitting(true); setError(''); try { let profile = account.profile; if (nextDisplayName.trim() !== account.profile.display_name) profile = await updateDisplayName(account.session.access_token, nextDisplayName.trim()); if (nextPassword) { if (nextPassword.length < 8) throw new Error('short-password'); await updatePassword(account.session.access_token, nextPassword); setNextPassword(''); } onAccountUpdated(profile); } catch (settingsError) { setError(settingsError?.message === 'short-password' ? 'Use at least 8 characters for the new password.' : 'Those account settings could not be saved. Apply the latest Supabase migration and try again.'); } finally { setSubmitting(false); } }}>
+            {settingsOpen && <form className="account-settings" onSubmit={async (event) => { event.preventDefault(); setSubmitting(true); setError(''); try { let profile = account.profile; if (nextDisplayName.trim() !== account.profile.display_name) profile = await updateDisplayName(account.session.access_token, nextDisplayName.trim()); if (nextPassword) { if (nextPassword.length < 8) throw new Error('short-password'); await updatePassword(account.session.access_token, nextPassword); setNextPassword(''); } await onAccountUpdated(profile); } catch (settingsError) { setError(settingsError?.message === 'short-password' ? 'Use at least 8 characters for the new password.' : 'Those account settings could not be saved. Apply the latest Supabase migration and try again.'); } finally { setSubmitting(false); } }}>
               <label>Display name<input value={nextDisplayName} minLength="2" maxLength="80" onChange={(event) => setNextDisplayName(event.target.value)} required /></label>
               <label>New password <span className="field-hint">Optional</span><input type="password" value={nextPassword} minLength="8" autoComplete="new-password" onChange={(event) => setNextPassword(event.target.value)} placeholder="Leave blank to keep your password" /></label>
               <Button type="submit" disabled={submitting}>{submitting ? 'Saving…' : 'Save Account Settings'}</Button>
