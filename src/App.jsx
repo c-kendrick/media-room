@@ -35,7 +35,7 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut, updateDisplayName, updatePassword } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
-import { bulkImportMedia, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionPosters, importCollectionBackup, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
+import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchDetailCandidates, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
 import { applyShelfMemberships } from './shelf-membership.js';
@@ -520,6 +520,8 @@ export default function App() {
           canReviewPoster={Boolean((canEditCollection || isAdmin) && !data.mainWatchlist)}
           onFindPosters={() => searchPosterCandidates(account.session.access_token, selectedMedia.database_id)}
           onChoosePoster={async (posterUrl) => { await choosePosterCandidate(account.session.access_token, selectedMedia.database_id, posterUrl); await refresh({ fresh: true }); setToast('Poster saved.'); }}
+          onFindDetails={() => searchDetailCandidates(account.session.access_token, selectedMedia.database_id)}
+          onChooseDetails={async (candidate) => { const result = await chooseDetailCandidate(account.session.access_token, selectedMedia.database_id, candidate); await refresh({ fresh: true }); setToast(`${Object.keys(result?.applied || {}).length} new details saved.`); }}
           onUpdate={async (changes, messages = {}) => {
             const previousData = data;
             const applyMediaUpdate = (currentData, mediaChanges) => ({
@@ -585,7 +587,7 @@ export default function App() {
               throw error;
             }
           }}
-          onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', onConfirm: async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); setSelectedMediaId(null); await refresh({ fresh: true }); setToast('Media moved to Bin.'); } })}
+          onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const deletedAt = new Date().toISOString(); const optimisticData = { ...data, media: data.media.map((item) => item.database_id === selectedMedia.database_id ? { ...item, deleted_at: deletedAt } : item) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); setSelectedMediaId(null); try { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); snapshotCache.current.delete(MAIN_WATCHLIST_ID); setToast('Media moved to Bin.'); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); setToast('The item could not be moved to Bin.'); throw error; } } })}
           onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
         />
       )}
@@ -719,11 +721,11 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const [ratingFilters, setRatingFilters] = useState([]);
   const [ownershipFilters, setOwnershipFilters] = useState([]);
   const [stampFilters, setStampFilters] = useState([]);
-  const [newShelf, setNewShelf] = useState('');
-  const [newShelfReadingList, setNewShelfReadingList] = useState(false);
+  const [creatingShelf, setCreatingShelf] = useState(false);
   const [addingMedia, setAddingMedia] = useState(false);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [enrichingPosters, setEnrichingPosters] = useState(false);
+  const [enrichingDetails, setEnrichingDetails] = useState(false);
   const [importingBackup, setImportingBackup] = useState(false);
   const [binOpen, setBinOpen] = useState(false);
   const [shelfEditor, setShelfEditor] = useState(null);
@@ -731,16 +733,18 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const [draggedShelfId, setDraggedShelfId] = useState(null);
   const [optimisticShelfIds, setOptimisticShelfIds] = useState([]);
   const [optimisticShelfDetails, setOptimisticShelfDetails] = useState({});
+  const [optimisticDeletedShelfIds, setOptimisticDeletedShelfIds] = useState([]);
+  const [optimisticMediaItems, setOptimisticMediaItems] = useState([]);
   const [optimisticMainShelfIds, setOptimisticMainShelfIds] = useState([]);
   const backupInputRef = useRef(null);
 
-  const sourceShelves = mediaShelvesForSection(data, section);
+  const sourceShelves = mediaShelvesForSection(data, section).filter((shelf) => !optimisticDeletedShelfIds.includes(shelf.shelf_id));
   useEffect(() => { setOptimisticShelfIds(sourceShelves.map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves, section]);
   useEffect(() => { setOptimisticShelfDetails({}); }, [data.collectionId, data.mediaShelves, section]);
   useEffect(() => { setOptimisticMainShelfIds(data.mediaShelves.filter((shelf) => shelf.section === 'screen' && shelf.showInMainWatchlist).map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves]);
   const shelfIndex = new Map(optimisticShelfIds.map((id, index) => [id, index]));
   const shelves = sourceShelves.map((shelf) => ({ ...shelf, ...(optimisticShelfDetails[shelf.shelf_id] || {}) })).sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
-  const items = active(data.media).filter((item) => data.mainWatchlist || mediaSection(item) === section);
+  const items = [...active(data.media), ...optimisticMediaItems].filter((item) => data.mainWatchlist || mediaSection(item) === section);
   const deletedMedia = (data.media || []).filter((item) => item.deleted_at);
   const deletedShelves = (data.mediaShelves || []).filter((shelf) => shelf.deleted_at);
   const binCount = deletedMedia.length + deletedShelves.length;
@@ -790,7 +794,6 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
 
   const switchSection = (next) => {
     setSection(next);
-    setNewShelfReadingList(false);
     setQuery('');
     setListFilters([]);
     setFormatFilters([]);
@@ -860,6 +863,19 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
       notify('Poster enrichment could not run. Check the provider secrets and Edge Function deployment.');
     } finally {
       setEnrichingPosters(false);
+    }
+  };
+
+  const enrichDetailsInCurrentSection = async () => {
+    setEnrichingDetails(true);
+    try {
+      const result = await enrichSectionDetails(accessToken, data.collectionId, section);
+      await refresh({ fresh: true });
+      notify(`${result?.enriched || 0} items enriched${result?.reviewed ? ` from ${result.reviewed} reviewed` : ''}${result?.warnings?.length ? ` (${result.warnings.join(', ')})` : ''}.`);
+    } catch {
+      notify('Detail enrichment could not run. Check the provider secrets and Edge Function deployment.');
+    } finally {
+      setEnrichingDetails(false);
     }
   };
 
@@ -937,25 +953,27 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
           );
           if (!shelfItems.length && queryLower) return null;
           const showOwnerIntro = data.mainWatchlist && ownerIntroShelfIds.has(shelf.shelf_id);
-          return <React.Fragment key={shelf.shelf_id}>{showOwnerIntro && <section className="main-owner-intro"><h2>{shelf.ownerName}</h2><EditableDescription value={shelf.ownerNote} fallback={SECTION_NOTE_DEFAULTS.screen} canEdit={false} title={`${shelf.ownerName}’s note`} /></section>}<MediaShelf shelf={{ ...shelf, ownerName: data.mainWatchlist ? null : shelf.ownerName, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} onOpen={openMedia} canEdit={canEdit && !shelf.virtual} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={async (direction) => { const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(shelf.shelf_id); const to = from + direction; if (to < 0 || to >= ordered.length) return; [ordered[from], ordered[to]] = [ordered[to], ordered[from]]; await saveShelfOrder(ordered, previous); }} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setDraggedShelfId(null); try { await saveShelfOrder(ordered, previous); } catch {} }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={() => setShelfEditor(shelf)} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } })} /></React.Fragment>;
+          return <React.Fragment key={shelf.shelf_id}>{showOwnerIntro && <section className="main-owner-intro"><h2>{shelf.ownerName}</h2><EditableDescription value={shelf.ownerNote} fallback={SECTION_NOTE_DEFAULTS.screen} canEdit={false} title={`${shelf.ownerName}’s note`} /></section>}<MediaShelf shelf={{ ...shelf, ownerName: data.mainWatchlist ? null : shelf.ownerName, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} onOpen={openMedia} canEdit={canEdit && !shelf.virtual} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={async (direction) => { const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(shelf.shelf_id); const to = from + direction; if (to < 0 || to >= ordered.length) return; [ordered[from], ordered[to]] = [ordered[to], ordered[from]]; await saveShelfOrder(ordered, previous); }} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setDraggedShelfId(null); try { await saveShelfOrder(ordered, previous); } catch {} }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={() => setShelfEditor(shelf)} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} /></React.Fragment>;
         })}
       </div>
 
       {!randomPool.length && <Empty>No media matches those filters.</Empty>}
       {!data.mainWatchlist && (canEdit || isAdmin) && <section className="collection-tools">
         <div><span className="eyebrow">COLLECTION TOOLS</span><p>{canEdit ? 'Manage this section without cluttering the shelves.' : 'Administrative backup and artwork tools.'}</p></div>
-        {canEdit && <form className="inline-create" onSubmit={async (event) => { event.preventDefault(); if (!newShelf.trim()) return; try { await createShelf(accessToken, { collection_id: data.collectionId, section, name: newShelf.trim(), ...(section === 'book' ? { is_reading_list: newShelfReadingList } : {}), position: (shelves.at(-1)?.position || 0) + 1000 }); setNewShelf(''); setNewShelfReadingList(false); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }}><input value={newShelf} onChange={(event) => setNewShelf(event.target.value)} placeholder="Name a new shelf" aria-label="New shelf name" />{section === 'book' && <label className="inline-shelf-designation"><input type="checkbox" checked={newShelfReadingList} onChange={(event) => setNewShelfReadingList(event.target.checked)} /><span>Reading List</span></label>}<Button type="submit" icon={Plus}>Add shelf</Button></form>}
+        {canEdit && <Button className="quiet-button create-shelf-button" icon={Plus} onClick={() => setCreatingShelf(true)}>Create Shelf</Button>}
         <div className="collection-tool-actions">
           <Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters} onClick={enrichCurrentSection}>{enrichingPosters ? 'Finding posters…' : 'Find posters'}</Button>
+          <Button className="quiet-button" icon={Search} disabled={enrichingDetails} onClick={enrichDetailsInCurrentSection}>{enrichingDetails ? 'Enriching details…' : 'Enrich details'}</Button>
           <Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button>
           {canEdit && <><input ref={backupInputRef} hidden type="file" accept=".json,application/json" onChange={importBackupFile} /><Button className="quiet-button" icon={Upload} disabled={importingBackup} onClick={() => backupInputRef.current?.click()}>{importingBackup ? 'Importing backup…' : 'Import backup'}</Button></>}
           {canEdit && <Button className="quiet-button bin-button" icon={Trash2} onClick={() => setBinOpen(true)}>Bin{binCount ? ` (${binCount})` : ''}</Button>}
           {canEdit && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportOpen(true)}>Bulk Import {section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games'}</Button>}
         </div>
       </section>}
-      {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={async (item, shelfIds, priorityWatch) => { const created = await createMediaItem(accessToken, { ...item, collection_id: data.collectionId }); await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setInterest(accessToken, currentUserId, created[0].id, true); setAddingMedia(false); setAddToShelfIds([]); await refresh({ fresh: true }); notify('Media added.'); }} />}
+      {creatingShelf && <CreateShelfDialog section={section} onClose={() => setCreatingShelf(false)} onSave={async (values) => { setCreatingShelf(false); try { await createShelf(accessToken, { collection_id: data.collectionId, section, ...values, position: (shelves.at(-1)?.position || 0) + 1000 }); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }} />}
+      {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id, index) => [id, (index + 1) * 1000])), interests: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, collection_id: data.collectionId }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setInterest(accessToken, currentUserId, created[0].id, true); await refresh({ fresh: true }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('Media added.'); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('The media item could not be saved.'); }); }} />}
       {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', onConfirm: async () => { await permanentlyDeleteMedia(accessToken, item.database_id); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', onConfirm: async () => { await deleteShelf(accessToken, shelf.shelf_id); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); } })} />}
-      {shelfEditor && <ShelfEditDialog shelf={shelfEditor} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, readingList: changes.is_reading_list ?? shelfEditor.readingList } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
+      {shelfEditor && <ShelfEditDialog shelf={shelfEditor} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
       {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`); }} />}
     </div>
   );
@@ -999,7 +1017,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
       </div>
       <div className="poster-track" ref={trackRef} onScroll={(event) => { const page = event.currentTarget.querySelector('.poster-page'); const width = (page?.offsetWidth || event.currentTarget.clientWidth) + 24; if (width > 0) setCurrentPage(Math.max(0, Math.min(Math.round(event.currentTarget.scrollLeft / width), Math.max(pageCount - 1, 0)))); }}>
         {displayPages.map((pageRows, pageIndex) => <div className="poster-page" key={pageIndex}>
-          {pageRows.flat().map((item) => <MediaCard key={item.item_id} item={item} onClick={() => onOpen(item.item_id)} canRate={canRate} onRate={(starRating) => onRate(item.database_id, starRating)} draggable={canEdit} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const previous = [...displayItems]; const next = [...displayItems]; const from = next.findIndex((entry) => entry.database_id === draggedId); const to = next.findIndex((entry) => entry.database_id === item.database_id); next.splice(to, 0, next.splice(from, 1)[0]); setDisplayItems(next); setDraggedId(null); try { await onReorder(next.map((entry) => entry.database_id)); } catch { setDisplayItems(previous); } }} />)}
+          {pageRows.flat().map((item) => <MediaCard key={item.item_id} item={item} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} draggable={canEdit && !item.optimistic} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const previous = [...displayItems]; const next = [...displayItems]; const from = next.findIndex((entry) => entry.database_id === draggedId); const to = next.findIndex((entry) => entry.database_id === item.database_id); next.splice(to, 0, next.splice(from, 1)[0]); setDisplayItems(next); setDraggedId(null); try { await onReorder(next.map((entry) => entry.database_id)); } catch { setDisplayItems(previous); } }} />)}
         </div>)}
         {!displayItems.length && <div className="empty-poster">No items on this shelf yet.</div>}
       </div>
@@ -1091,7 +1109,7 @@ function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDrag
   const tags = mediaCardDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
   return (
-    <article className={cls('media-card', dragging && 'is-dragging')} onClick={onClick} draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={(event) => draggable && event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop?.(); }}>
+    <article className={cls('media-card', dragging && 'is-dragging', item.optimistic && 'is-optimistic')} onClick={onClick} draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={(event) => draggable && event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop?.(); }}>
       <button className="media-card-open" type="button" title="Open item">
         {item.poster_url
           ? <img src={item.poster_url} alt={`${title} poster`} loading="lazy" />
@@ -1114,7 +1132,7 @@ function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDrag
   );
 }
 
-function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onUpdate, onUpdateShelves, canInterest, interested, onInterest, onDelete, onRestore }) {
+function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canInterest, interested, onInterest, onDelete, onRestore }) {
   const [editing, setEditing] = useState(false);
   const [optimisticShelves, setOptimisticShelves] = useState(item.lists || []);
   const optimisticShelvesRef = useRef(item.lists || []);
@@ -1123,6 +1141,8 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
   const [posterCandidates, setPosterCandidates] = useState(null);
   const [posterReviewBusy, setPosterReviewBusy] = useState(false);
   const [posterReviewError, setPosterReviewError] = useState('');
+  const [posterReviewOpen, setPosterReviewOpen] = useState(false);
+  const [detailReviewOpen, setDetailReviewOpen] = useState(false);
   useEffect(() => { setOptimisticInterest(interested); }, [interested, item.database_id]);
   useEffect(() => { setOptimisticOwned(Boolean(item.owned)); }, [item.owned, item.database_id]);
   useEffect(() => { optimisticShelvesRef.current = item.lists || []; setOptimisticShelves(item.lists || []); }, [item.lists, item.database_id]);
@@ -1175,7 +1195,6 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
             {canEdit && <div className="drawer-owner-actions">
               <Button className="drawer-edit-button primary" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>
             </div>}
-            {!item.poster_url && canReviewPoster && <section className="poster-review-panel"><span className="eyebrow">POSTER REVIEW</span><p>{posterCandidates === null ? 'This item has no poster. Search the configured provider for reviewable options.' : posterCandidates.length ? 'Choose the correct artwork. Existing posters are never replaced automatically.' : 'No confident provider options were found. You can still add a poster URL through Edit details.'}</p>{posterCandidates === null && <Button disabled={posterReviewBusy} icon={Search} onClick={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); setPosterCandidates(result?.candidates || []); } catch { setPosterReviewError('Provider candidates could not be loaded.'); } finally { setPosterReviewBusy(false); } }}>{posterReviewBusy ? 'Searching…' : 'Review poster options'}</Button>}{posterCandidates?.length > 0 && <div className="poster-candidate-grid">{posterCandidates.map((candidate) => <button key={`${candidate.provider}-${candidate.id}`} disabled={posterReviewBusy} onClick={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { await onChoosePoster(candidate.poster_url); } catch { setPosterReviewError('That poster could not be saved.'); setPosterReviewBusy(false); } }}><img src={candidate.poster_url} alt="" /><span>{candidate.title}{candidate.year ? ` (${candidate.year})` : ''}</span><small>{candidate.provider}</small></button>)}</div>}{posterReviewError && <p className="auth-error">{posterReviewError}</p>}</section>}
             <p className="drawer-description">{item.description || item.notes || 'No description has been added yet.'}</p>
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-lists public-shelf-list">
@@ -1187,6 +1206,8 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
                 : <small>No public shelf membership.</small>}
             </div>
             {canEdit && <div className="drawer-danger-zone">
+              {!item.poster_url && canReviewPoster && <button onClick={() => setPosterReviewOpen(true)}><Search size={14} />Enrich poster</button>}
+              {canReviewPoster && <button onClick={() => setDetailReviewOpen(true)}><Search size={14} />Enrich details</button>}
               {item.deleted_at ? <button onClick={onRestore}>Restore from Bin</button> : <button onClick={onDelete}><Trash2 size={14} />Move to Bin</button>}
             </div>}
           </div>
@@ -1196,8 +1217,42 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
         await onUpdate(changes);
         setEditing(false);
       }} />}
+      {posterReviewOpen && <PosterEnrichmentDialog item={item} candidates={posterCandidates} busy={posterReviewBusy} error={posterReviewError} onClose={() => setPosterReviewOpen(false)} onLoad={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); setPosterCandidates(result?.candidates || []); } catch { setPosterReviewError('Provider candidates could not be loaded.'); } finally { setPosterReviewBusy(false); } }} onChoose={async (candidate) => { setPosterReviewBusy(true); setPosterReviewError(''); try { await onChoosePoster(candidate.poster_url); setPosterReviewOpen(false); } catch { setPosterReviewError('That poster could not be saved.'); } finally { setPosterReviewBusy(false); } }} />}
+      {detailReviewOpen && <DetailEnrichmentDialog item={item} onClose={() => setDetailReviewOpen(false)} onLoad={onFindDetails} onChoose={async (candidate) => { await onChooseDetails(candidate); setDetailReviewOpen(false); }} />}
     </div>
   );
+}
+
+function PosterEnrichmentDialog({ item, candidates, busy, error, onClose, onLoad, onChoose }) {
+  useEscape(onClose);
+  useEffect(() => { if (candidates === null && !busy) onLoad(); }, []);
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog enrichment-dialog">
+    <button className="close" onClick={onClose} aria-label="Close poster enrichment"><X /></button><span className="eyebrow">ENRICH POSTER</span><h2>{cleanImportedMediaTitle(item.title)}</h2>
+    <p className="dialog-intro">Choose the correct artwork. Nothing is saved until you select an option.</p>
+    {busy && candidates === null && <p className="enrichment-loading">Finding poster options…</p>}
+    {candidates?.length > 0 && <div className="poster-candidate-grid">{candidates.map((candidate) => <button key={`${candidate.provider}-${candidate.id}`} disabled={busy} onClick={() => onChoose(candidate)}><img src={candidate.poster_url} alt="" /><span>{candidate.title}{candidate.year ? ` (${candidate.year})` : ''}</span><small>{candidate.provider}</small></button>)}</div>}
+    {candidates?.length === 0 && !busy && <Empty>No poster options were found.</Empty>}{error && <p className="auth-error">{error}</p>}
+    <div className="dialog-actions"><button className="text-button" onClick={onClose}>Discard</button></div>
+  </section></div>;
+}
+
+function DetailEnrichmentDialog({ item, onClose, onLoad, onChoose }) {
+  useEscape(onClose);
+  const [candidates, setCandidates] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => { onLoad().then((result) => setCandidates(result?.candidates || [])).catch(() => setError('Detail options could not be loaded.')).finally(() => setBusy(false)); }, []);
+  const fields = selected?.details ? Object.entries(selected.details).filter(([, value]) => value !== null && value !== '' && (!Array.isArray(value) || value.length)) : [];
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog enrichment-dialog">
+    <button className="close" onClick={onClose} aria-label="Close detail enrichment"><X /></button><span className="eyebrow">ENRICH DETAILS</span><h2>{cleanImportedMediaTitle(item.title)}</h2><p className="dialog-intro">Pick the matching result. Saving fills blank fields only; your existing details are never replaced.</p>
+    {busy && <p className="enrichment-loading">Finding matching details…</p>}
+    {candidates?.length > 0 && <div className="detail-candidate-list">{candidates.map((candidate) => <button className={selected === candidate ? 'selected' : ''} key={`${candidate.provider}-${candidate.id}`} onClick={() => setSelected(candidate)}><span><b>{candidate.title}</b><small>{candidate.year || 'Year unknown'} · {candidate.provider}</small></span><Check size={15} /></button>)}</div>}
+    {candidates?.length === 0 && !busy && <Empty>No detail options were found.</Empty>}
+    {selected && <div className="detail-preview">{fields.map(([name, value]) => <div key={name}><small>{name.replaceAll('_', ' ')}</small><span>{Array.isArray(value) ? value.join(', ') : String(value)}</span></div>)}</div>}
+    {error && <p className="auth-error">{error}</p>}
+    <div className="dialog-actions"><button className="text-button" onClick={onClose}>Discard</button><Button icon={Check} disabled={!selected || busy} onClick={async () => { setBusy(true); setError(''); try { await onChoose(selected); } catch { setError('Those details could not be saved.'); setBusy(false); } }}>{busy && selected ? 'Saving…' : 'Save New Details'}</Button></div>
+  </section></div>;
 }
 
 function SearchModal({ data, query, setQuery, onClose, onOpen }) {
@@ -1232,7 +1287,7 @@ function SearchModal({ data, query, setQuery, onClose, onOpen }) {
 }
 
 
-function ConfirmDialog({ title, message, confirmLabel = 'Confirm', tone = 'default', onConfirm, onClose }) {
+function ConfirmDialog({ title, message, confirmLabel = 'Confirm', tone = 'default', optimistic = false, onConfirm, onClose }) {
   useEscape(onClose);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -1240,7 +1295,7 @@ function ConfirmDialog({ title, message, confirmLabel = 'Confirm', tone = 'defau
     <button className="close" onClick={onClose} aria-label="Close confirmation"><X /></button>
     <span className="eyebrow">PLEASE CONFIRM</span><h2 id="confirm-title">{title}</h2><p className="dialog-intro">{message}</p>
     {error && <p className="auth-error">{error}</p>}
-    <div className="dialog-actions"><button className="text-button" onClick={onClose} disabled={busy}>Cancel</button><Button className={tone === 'danger' ? 'confirm-danger' : ''} disabled={busy} onClick={async () => { setBusy(true); setError(''); try { await onConfirm(); onClose(); } catch { setError('That change could not be completed. Please try again.'); setBusy(false); } }}>{busy ? 'Working…' : confirmLabel}</Button></div>
+    <div className="dialog-actions"><button className="text-button" onClick={onClose} disabled={busy}>Cancel</button><Button className={tone === 'danger' ? 'confirm-danger' : ''} disabled={busy} onClick={async () => { if (optimistic) { onClose(); Promise.resolve(onConfirm()).catch(() => null); return; } setBusy(true); setError(''); try { await onConfirm(); onClose(); } catch { setError('That change could not be completed. Please try again.'); setBusy(false); } }}>{busy ? 'Working…' : confirmLabel}</Button></div>
   </section></div>;
 }
 
@@ -1248,15 +1303,35 @@ function ShelfEditDialog({ shelf, onClose, onSave }) {
   useEscape(onClose);
   const [name, setName] = useState(shelf.name);
   const [subtitle, setSubtitle] = useState(shelf.subtitle || '');
-  const [readingList, setReadingList] = useState(Boolean(shelf.readingList));
-  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog" onSubmit={(event) => { event.preventDefault(); const cleanedName = name.trim(); const cleanedSubtitle = subtitle.trim(); if ((!shelf.required && !cleanedName) || cleanedSubtitle.length > 180) return; onSave({ ...(shelf.required ? {} : { name: cleanedName }), subtitle: cleanedSubtitle || null, ...(shelf.section === 'book' ? { is_reading_list: readingList } : {}) }); onClose(); }}>
+  const [queueList, setQueueList] = useState(Boolean(shelf.queueList));
+  const queueCopy = shelf.section === 'book' ? ['Reading List', 'Items on this shelf count toward “to read”.'] : shelf.section === 'game' ? ['Backlog / To Play shelf', 'Items on this shelf count toward “to play”.'] : ['Watchlist / To Watch shelf', 'Items on this shelf count toward “to watch”.'];
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog" onSubmit={(event) => { event.preventDefault(); const cleanedName = name.trim(); const cleanedSubtitle = subtitle.trim(); if ((!shelf.required && !cleanedName) || cleanedSubtitle.length > 180) return; onSave({ ...(shelf.required ? {} : { name: cleanedName }), subtitle: cleanedSubtitle || null, is_queue_list: queueList }); onClose(); }}>
     <button className="close" type="button" onClick={onClose} aria-label="Close shelf editor"><X /></button>
     <span className="eyebrow">EDIT SHELF</span><h2>{shelf.name}</h2>
     {!shelf.required && <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>}
     <label>Subtitle <span className="field-hint">Optional</span><input autoFocus={shelf.required} value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
-    {shelf.section === 'book' && <label className="reading-list-designation"><input type="checkbox" checked={readingList} onChange={(event) => setReadingList(event.target.checked)} /><span><b>Reading List</b><small>Items on this shelf count toward “to read”.</small></span></label>}
+    <label className="reading-list-designation"><input type="checkbox" checked={queueList} onChange={(event) => setQueueList(event.target.checked)} /><span><b>{queueCopy[0]}</b><small>{queueCopy[1]}</small></span></label>
     <small className="character-count">{subtitle.length} / 180</small>
     <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose}>Cancel</button><Button type="submit" icon={Pencil} disabled={!shelf.required && !name.trim()}>Save Shelf</Button></div>
+  </form></div>;
+}
+
+function CreateShelfDialog({ section, onClose, onSave }) {
+  useEscape(onClose);
+  const [name, setName] = useState('');
+  const [subtitle, setSubtitle] = useState('');
+  const [queueList, setQueueList] = useState(false);
+  const [mainWatchlist, setMainWatchlist] = useState(false);
+  const queueCopy = section === 'book' ? ['Reading List', 'Count this shelf toward “to read”.'] : section === 'game' ? ['Backlog / To Play shelf', 'Count this shelf toward “to play”.'] : ['Watchlist / To Watch shelf', 'Count this shelf toward “to watch”.'];
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog create-shelf-dialog" onSubmit={(event) => { event.preventDefault(); if (!name.trim()) return; onSave({ name: name.trim(), subtitle: subtitle.trim() || null, is_queue_list: queueList, ...(section === 'screen' ? { show_in_main_watchlist: mainWatchlist } : {}) }); }}>
+    <button className="close" type="button" onClick={onClose} aria-label="Close create shelf"><X /></button>
+    <span className="eyebrow">NEW SHELF</span><h2>Create a Shelf</h2>
+    <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>
+    <label>Subtitle <span className="field-hint">Optional</span><input value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
+    <label className="reading-list-designation"><input type="checkbox" checked={queueList} onChange={(event) => setQueueList(event.target.checked)} /><span><b>{queueCopy[0]}</b><small>{queueCopy[1]}</small></span></label>
+    {section === 'screen' && <label className="reading-list-designation"><input type="checkbox" checked={mainWatchlist} onChange={(event) => setMainWatchlist(event.target.checked)} /><span><b>Include in Main Watchlist</b><small>Mirror this shelf publicly in the shared Main Watchlist.</small></span></label>}
+    <small className="character-count">{subtitle.length} / 180</small>
+    <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={!name.trim()}>Create Shelf</Button></div>
   </form></div>;
 }
 

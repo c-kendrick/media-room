@@ -379,6 +379,18 @@
 .reading-list-designation{grid-template-columns:auto 1fr!important;align-items:flex-start!important;padding:11px 12px;border:1px solid #d9cdbf;border-radius:6px;background:#fffaf2;cursor:pointer}
 .reading-list-designation input,.inline-shelf-designation input{width:auto!important;height:auto!important;margin:2px 0 0!important;accent-color:var(--clay)}
 .reading-list-designation>span{display:grid;gap:3px}.reading-list-designation b{font-size:10px}.reading-list-designation small{color:#81776d;font-size:8px;font-weight:400}
+.create-shelf-dialog .reading-list-designation{margin-top:2px}
+.media-card.is-optimistic{opacity:.62;pointer-events:none;animation:optimistic-arrival .25s ease-out}
+@keyframes optimistic-arrival{from{opacity:0;transform:translateY(5px)}to{opacity:.62;transform:none}}
+.enrichment-dialog{width:min(820px,calc(100vw - 32px))!important}
+.enrichment-loading{padding:24px;text-align:center;color:#7d7267;font-family:Georgia,serif}
+.detail-candidate-list{display:grid;gap:7px;margin:18px 0}
+.detail-candidate-list button{display:flex;align-items:center;justify-content:space-between;text-align:left;border:1px solid #d7c9b9;border-radius:6px;background:#fffaf2;padding:11px 13px;cursor:pointer}
+.detail-candidate-list button.selected{border-color:#8b6250;background:#f1e6da;box-shadow:0 0 0 2px rgba(139,98,80,.12)}
+.detail-candidate-list button>span{display:grid;gap:3px}.detail-candidate-list b{font-family:Georgia,serif;font-size:14px}.detail-candidate-list small{font-size:8px;color:#81766b}
+.detail-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:14px 0;padding:12px;border:1px solid #ded2c4;background:#fffdf8}
+.detail-preview>div{display:grid;gap:2px;min-width:0}.detail-preview small{text-transform:uppercase;letter-spacing:.1em;color:var(--clay);font-size:7px}.detail-preview span{font-size:9px;line-height:1.45;max-height:76px;overflow:auto}
+.drawer-danger-zone{flex-wrap:wrap}
 .inline-shelf-designation{height:38px;padding:0 9px;border:1px solid #d7cbbb;background:#fffaf2;display:inline-flex!important;align-items:center!important;gap:6px!important;white-space:nowrap;color:#675f56;font-size:9px;font-weight:700;cursor:pointer}
 .confirm-layer{z-index:180}
 .confirm-dialog{width:min(450px,calc(100vw - 32px));overflow:visible}

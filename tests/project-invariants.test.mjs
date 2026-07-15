@@ -148,7 +148,7 @@ test('opening Main Watchlist has no redundant All Watchlists tab', async () => {
 });
 
 test('collection summary counts use live shelf UUIDs and owned flags', async () => {
-  const shelves = [{ shelf_id: 'watch-uuid', name: 'Watchlist', required: true }, { shelf_id: 'owned-uuid', name: 'Owned' }];
+  const shelves = [{ shelf_id: 'watch-uuid', name: 'Anything', queueList: true }, { shelf_id: 'owned-uuid', name: 'Watchlist', queueList: false }];
   const items = [
     { lists: ['watch-uuid'], owned: false },
     { lists: ['owned-uuid'], owned: true },
@@ -160,22 +160,23 @@ test('collection summary counts use live shelf UUIDs and owned flags', async () 
   assert.doesNotMatch(app, /\['watchlist', 'reading_list'\]/);
 });
 
-test('personal queue totals use section wording and explicit book reading lists', async () => {
+test('personal queue totals use section wording and explicit queue shelves without name inference', async () => {
   const books = [
     { lists: ['reading'], owned: false },
     { lists: ['wishlist'], owned: false },
     { lists: ['current'], owned: false },
   ];
   const shelves = [
-    { shelf_id: 'reading', name: 'Anything', readingList: true },
-    { shelf_id: 'wishlist', name: 'Wishlist', readingList: false },
-    { shelf_id: 'current', name: 'Currently Reading', readingList: true },
+    { shelf_id: 'reading', name: 'Anything', queueList: true },
+    { shelf_id: 'wishlist', name: 'Reading List', queueList: false },
+    { shelf_id: 'current', name: 'Anything Else', queueList: true },
   ];
   assert.deepEqual(collectionSummaryStats(books, shelves, 'book'), { queued: 2, owned: 0 });
   const app = await read('src/App.jsx');
   assert.match(app, /section === 'book' \? 'to read' : section === 'game' \? 'to play' : 'to watch'/);
-  assert.match(app, /section === 'book' \? \{ is_reading_list: newShelfReadingList \} : \{\}/);
+  assert.match(app, /is_queue_list: queueList/);
   assert.match(app, /Items on this shelf count toward “to read”/);
+  assert.doesNotMatch(await read('src/collection-stats.js'), /watchlist|reading list|backlog|wishlist/i);
 });
 
 test('shelves have optional subtitles and branded edit and confirmation dialogs', async () => {
@@ -398,4 +399,41 @@ test('shelf controls use consistent spacing and headline-style labels', async ()
   assert.match(app, />Arrange Shelf</);
   assert.match(app, />Add Item</);
   assert.match(styles, /\.shelf-content-actions\{[^}]*gap:7px/);
+});
+
+test('queue shelf settings are explicit in every section and independent from Main Watchlist', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/supabase-data.js');
+  const migration = await read('supabase/migrations/20260715030000_queue_shelves.sql');
+  assert.match(app, /Backlog \/ To Play shelf/);
+  assert.match(app, /Watchlist \/ To Watch shelf/);
+  assert.match(app, /is_queue_list: queueList/);
+  assert.match(app, /show_in_main_watchlist: mainWatchlist/);
+  assert.match(data, /queueList: Boolean\(shelf\.is_queue_list\)/);
+  assert.match(migration, /add column if not exists is_queue_list boolean not null default false/);
+  assert.match(migration, /\('screen','Watchlist',1000,true,false,true\)/);
+  assert.match(migration, /\('book','Reading List',1000,false,true,true\)/);
+});
+
+test('Add Item and Move to Bin use immediate optimistic state with rollback', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /temporaryId = `optimistic-/);
+  assert.match(app, /setOptimisticMediaItems\(\(rows\) => \[\.\.\.rows, temporaryItem\]\)/);
+  assert.match(app, /optimistic: true, onConfirm: async \(\) => \{ const previousData = data/);
+  assert.match(app, /setSelectedMediaId\(null\); try \{ await setMediaDeleted/);
+  assert.match(app, /if \(optimistic\) \{ onClose\(\); Promise\.resolve\(onConfirm\(\)\)/);
+});
+
+test('detail enrichment is section-scoped, reviewable, and blank-only', async () => {
+  const app = await read('src/App.jsx');
+  const writes = await read('src/media-write.js');
+  const edge = await read('supabase/functions/enrich-details/index.ts');
+  assert.match(app, /enrichDetailsInCurrentSection/);
+  assert.match(app, /function DetailEnrichmentDialog/);
+  assert.match(app, /Save New Details/);
+  assert.doesNotMatch(app, /poster-review-panel/);
+  assert.match(writes, /\/functions\/v1\/enrich-details/);
+  assert.match(edge, /slice\(0, 50\)/);
+  assert.match(edge, /isBlank\(item\[field\]\) && !isBlank\(next\)/);
+  assert.match(edge, /RAWG_API_KEY/);
 });
