@@ -9,8 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clapperboard,
-  Cloud,
-  Command,
   Film,
   Download,
   Gamepad2,
@@ -19,6 +17,8 @@ import {
   LogIn,
   LogOut,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Plus,
   RotateCw,
@@ -33,7 +33,7 @@ import {
   X,
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
-import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut } from './auth.js';
+import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut, updateDisplayName, updatePassword } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
 import { bulkImportMedia, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionPosters, importCollectionBackup, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
@@ -42,6 +42,7 @@ import { applyShelfMemberships } from './shelf-membership.js';
 import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from './section-notes.js';
 import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from './ownership-filter.js';
 import { BACKUP_IMPORT_LIMITS, parseCollectionBackup } from './backup-import.js';
+import { collectionSummaryStats } from './collection-stats.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -225,13 +226,16 @@ export default function App() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [mobileNav, setMobileNav] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMediaId, setSelectedMediaId] = useState(null);
   const [account, setAccount] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [viewAsMember, setViewAsMember] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState(null);
   const [collections, setCollections] = useState([]);
   const [draggedCollectionId, setDraggedCollectionId] = useState(null);
   const [collectionsLoading, setCollectionsLoading] = useState(true);
@@ -380,7 +384,8 @@ export default function App() {
     && data.ownerId
     && account.profile.id === data.ownerId,
   );
-  const isAdmin = account?.profile?.role === 'admin';
+  const isAdminAccount = account?.profile?.role === 'admin';
+  const isAdmin = isAdminAccount && !viewAsMember;
   const saveStarRating = async (databaseId, starRating) => {
     const previousData = data;
     const applyRating = (currentData, changes) => ({
@@ -425,12 +430,12 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell media-only-shell public-media-shell">
+    <div className={cls('app-shell media-only-shell public-media-shell', navCollapsed && 'nav-collapsed')}>
       <div className="paper-texture" />
       <aside className={cls('sidebar', mobileNav && 'open')}>
         <button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
           <span className="brand-mark">KM</span>
-          <span><strong>Kit’s Media<br />Room</strong><small>A LIVING LIBRARY</small></span>
+          <span><strong>Kit’s Media<br />Room</strong></span>
         </button>
         <nav>
           {data?.storage === 'supabase' && <button className={data.mainWatchlist ? 'active' : ''} onClick={() => selectCollection(MAIN_WATCHLIST_ID)}>
@@ -443,13 +448,12 @@ export default function App() {
         </nav>
         <div className="sidebar-bottom">
           <blockquote>“Screen, shelf & story.”</blockquote>
-          <button className="drive-state" onClick={() => refresh({ fresh: true, notify: true })}>
-            <Cloud size={16} />
+          <div className="drive-state">
             <span>
               <strong>Public collection</strong>
-              <small>{refreshing ? 'Refreshing…' : generatedAt ? `Published ${generatedAt.toLocaleDateString('en-AU')}` : 'Static snapshot'}</small>
+              <small>{generatedAt ? `Published ${generatedAt.toLocaleDateString('en-AU')}` : 'Static snapshot'}</small>
             </span>
-          </button>
+          </div>
         </div>
       </aside>
 
@@ -458,26 +462,24 @@ export default function App() {
       <div className="workspace">
         <header className="topbar">
           <button className="mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button>
+          <button className="nav-toggle" onClick={() => setNavCollapsed((current) => !current)} aria-label={navCollapsed ? 'Open navigation' : 'Close navigation'} title={navCollapsed ? 'Open navigation' : 'Close navigation'}>{navCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
           <button className="search-trigger" onClick={() => setSearchOpen(true)}>
-            <Search size={17} /><span>Search the collection…</span><kbd><Command size={12} />K</kbd>
+            <Search size={17} /><span>Search the collection…</span><kbd>Ctrl K</kbd>
           </button>
           <div className="top-actions">
             <span className="today"><CalendarDays size={14} />{new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}</span>
             {authLoading ? <span className="account-state">Checking account…</span> : (
               <Button className="account-button" icon={account ? UserRound : LogIn} onClick={() => setAccountOpen(true)}>
-                {account?.profile?.display_name || account?.profile?.username || 'Sign in'}
+                {account ? `${account.profile?.display_name || account.profile?.username}${viewAsMember ? ' · Member view' : ''}` : 'Sign in'}
               </Button>
             )}
-            <Button className="sync-button" icon={RotateCw} onClick={() => refresh({ fresh: true, notify: true })} disabled={refreshing}>
-              {refreshing ? 'Refreshing' : 'Refresh'}
-            </Button>
           </div>
         </header>
 
         {error && <div className="error-banner">The public collection could not refresh: {error}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} currentUserId={account?.profile?.id} refresh={refresh} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
+          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} currentUserId={account?.profile?.id} refresh={refresh} requestConfirmation={setConfirmation} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
             const previousData = data;
             const optimisticData = {
               ...data,
@@ -576,7 +578,7 @@ export default function App() {
               throw error;
             }
           }}
-          onDelete={async () => { if (!window.confirm('Move this item to Bin?')) return; await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); setSelectedMediaId(null); await refresh({ fresh: true }); setToast('Media moved to Bin.'); }}
+          onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', onConfirm: async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); setSelectedMediaId(null); await refresh({ fresh: true }); setToast('Media moved to Bin.'); } })}
           onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
         />
       )}
@@ -600,6 +602,7 @@ export default function App() {
           onClose={() => setAccountOpen(false)}
           onSignedIn={(nextAccount) => {
             setAccount(nextAccount);
+            setViewAsMember(false);
             setAccountOpen(false);
             setLandingApplied(false);
             userSelectedCollection.current = false;
@@ -607,12 +610,16 @@ export default function App() {
           }}
           onSignedOut={() => {
             setAccount(null);
+            setViewAsMember(false);
             setAccountOpen(false);
             setLandingApplied(false);
             userSelectedCollection.current = false;
             setToast('Signed out.');
           }}
           onManageUsers={() => { setAccountOpen(false); setAdminOpen(true); }}
+          viewAsMember={viewAsMember}
+          onViewAsMemberChange={setViewAsMember}
+          onAccountUpdated={(profile) => { setAccount((current) => ({ ...current, profile })); setToast('Account settings saved.'); }}
         />
       )}
 
@@ -627,6 +634,7 @@ export default function App() {
           if (kit) selectCollection(kit.id, { userInitiated: false });
         }
       }} />}
+      {confirmation && <ConfirmDialog {...confirmation} onClose={() => setConfirmation(null)} />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
     </div>
   );
@@ -694,7 +702,7 @@ function EditableDescription({ value, canEdit, onSave, fallback = '', title = 'C
   return <textarea className="editable-description-input" aria-label="Collection note" autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value || fallback); setEditing(false); } if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') event.currentTarget.blur(); }} />;
 }
 
-function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, currentUserId, refresh, onExport, onStarRatingChange, onDescriptionChange }) {
+function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, currentUserId, refresh, requestConfirmation, onExport, onStarRatingChange, onDescriptionChange }) {
   const [section, setSection] = useState('screen');
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -710,6 +718,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const [enrichingPosters, setEnrichingPosters] = useState(false);
   const [importingBackup, setImportingBackup] = useState(false);
   const [binOpen, setBinOpen] = useState(false);
+  const [shelfEditor, setShelfEditor] = useState(null);
   const [addToShelfIds, setAddToShelfIds] = useState([]);
   const [draggedShelfId, setDraggedShelfId] = useState(null);
   const [optimisticShelfIds, setOptimisticShelfIds] = useState([]);
@@ -762,9 +771,11 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const sectionLabel = data.mainWatchlist ? 'Main Watchlist' : section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games';
   const singularLabel = data.mainWatchlist ? 'item' : section === 'screen' ? 'film or TV show' : section === 'book' ? 'book' : 'video game';
   const canReorderShelves = canEdit || Boolean(data.mainWatchlist && isAdmin);
+  const reorderableShelves = shelves.filter((shelf) => !shelf.virtual);
   const canCurateMain = Boolean(!data.mainWatchlist && section === 'screen' && (canEdit || isAdmin));
   const sectionDescription = data.collectionDescriptions?.[section]
     ?? (section === 'screen' ? data.collectionDescription : '');
+  const collectionStats = collectionSummaryStats(items, shelves);
 
   const switchSection = (next) => {
     setSection(next);
@@ -801,7 +812,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const saveShelfOrder = async (ordered, previous) => {
     setOptimisticShelfIds(ordered);
     try {
-      if (data.mainWatchlist) await reorderMainWatchlist(accessToken, ordered);
+      if (data.mainWatchlist) await reorderMainWatchlist(accessToken, ordered.filter((shelfId) => shelfId !== 'main-priority-watchlist'));
       else await reorderShelves(accessToken, data.collectionId, section, ordered);
       await refresh({ fresh: true });
       notify(data.mainWatchlist ? 'Main Watchlist order saved.' : 'Shelf order saved.');
@@ -874,17 +885,17 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
           : <EditableDescription value={sectionDescription} fallback={SECTION_NOTE_DEFAULTS[section]} canEdit={canEdit} onSave={(description) => onDescriptionChange(section, description)} title={`${data.collectionTitle || 'Collection'} ${sectionLabel} note`} />}
         icon={Clapperboard}
         stats={[
-          [data.mainWatchlist ? items.length : items.filter((item) => ['watchlist', 'reading_list'].some((list) => item.lists?.includes(list))).length, 'to watch/read'],
-          [data.mainWatchlist ? shelves.length : items.filter((item) => ['collection', 'library', 'top_shelf', 'xbox', 'rpg', 'action_adventure', 'building_puzzle', 'strategy', 'vr'].some((list) => item.lists?.includes(list))).length, data.mainWatchlist ? 'mirrored shelves' : 'owned'],
+          [data.mainWatchlist ? items.length : collectionStats.toWatchRead, 'to watch/read'],
+          [data.mainWatchlist ? shelves.filter((shelf) => !shelf.virtual).length : collectionStats.owned, data.mainWatchlist ? 'mirrored shelves' : 'owned'],
         ]}
       />
 
       <div className="media-command public-media-command">
-        <div className={cls('media-tabs', data.mainWatchlist && 'single')}>
-          <button className={section === 'screen' ? 'active' : ''} onClick={() => switchSection('screen')}>{data.mainWatchlist ? <ListOrdered /> : <Film />}{data.mainWatchlist ? 'All Watchlists' : 'Film & TV'}</button>
-          {!data.mainWatchlist && <button className={section === 'book' ? 'active' : ''} onClick={() => switchSection('book')}><BookOpen />Books</button>}
-          {!data.mainWatchlist && <button className={section === 'game' ? 'active' : ''} onClick={() => switchSection('game')}><Gamepad2 />Video Games</button>}
-        </div>
+        {!data.mainWatchlist && <div className="media-tabs">
+          <button className={section === 'screen' ? 'active' : ''} onClick={() => switchSection('screen')}><Film />Film & TV</button>
+          <button className={section === 'book' ? 'active' : ''} onClick={() => switchSection('book')}><BookOpen />Books</button>
+          <button className={section === 'game' ? 'active' : ''} onClick={() => switchSection('game')}><Gamepad2 />Video Games</button>
+        </div>}
 
         <div className={cls('media-filters', section === 'screen' && 'has-type')}>
           <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}…`} /></label>
@@ -914,7 +925,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
           );
           if (!shelfItems.length && queryLower) return null;
           const showOwnerIntro = data.mainWatchlist && ownerIntroShelfIds.has(shelf.shelf_id);
-          return <React.Fragment key={shelf.shelf_id}>{showOwnerIntro && <section className="main-owner-intro"><h2>{shelf.ownerName}</h2><EditableDescription value={shelf.ownerNote} fallback={SECTION_NOTE_DEFAULTS.screen} canEdit={false} title={`${shelf.ownerName}’s note`} /></section>}<MediaShelf shelf={{ ...shelf, ownerName: data.mainWatchlist ? null : shelf.ownerName, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} onOpen={openMedia} canEdit={canEdit} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin)} onRemoveMirror={async () => { if (!window.confirm(`Remove ${shelf.name} from Main Watchlist? The original shelf will be left untouched.`)) return; try { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } catch { notify('That mirror could not be removed.'); } }} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={shelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < shelves.length - 1} onMoveShelf={async (direction) => { const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(shelf.shelf_id); const to = from + direction; if (to < 0 || to >= ordered.length) return; [ordered[from], ordered[to]] = [ordered[to], ordered[from]]; await saveShelfOrder(ordered, previous); }} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setDraggedShelfId(null); try { await saveShelfOrder(ordered, previous); } catch {} }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={async () => { const name = window.prompt('Shelf name', shelf.name); if (name?.trim() && name.trim() !== shelf.name) { await updateShelf(accessToken, shelf.shelf_id, { name: name.trim() }); await refresh({ fresh: true }); } }} onDelete={async () => { if (window.confirm(`Move ${shelf.name} to Bin? Its media will remain.`)) { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); } }} /></React.Fragment>;
+          return <React.Fragment key={shelf.shelf_id}>{showOwnerIntro && <section className="main-owner-intro"><h2>{shelf.ownerName}</h2><EditableDescription value={shelf.ownerNote} fallback={SECTION_NOTE_DEFAULTS.screen} canEdit={false} title={`${shelf.ownerName}’s note`} /></section>}<MediaShelf shelf={{ ...shelf, ownerName: data.mainWatchlist ? null : shelf.ownerName, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} onOpen={openMedia} canEdit={canEdit && !shelf.virtual} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={async (direction) => { const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(shelf.shelf_id); const to = from + direction; if (to < 0 || to >= ordered.length) return; [ordered[from], ordered[to]] = [ordered[to], ordered[from]]; await saveShelfOrder(ordered, previous); }} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setDraggedShelfId(null); try { await saveShelfOrder(ordered, previous); } catch {} }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={() => setShelfEditor(shelf)} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } })} /></React.Fragment>;
         })}
       </div>
 
@@ -931,7 +942,8 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
         </div>
       </section>}
       {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={async (item, shelfIds, priorityWatch) => { const created = await createMediaItem(accessToken, { ...item, collection_id: data.collectionId }); await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setInterest(accessToken, currentUserId, created[0].id, true); setAddingMedia(false); setAddToShelfIds([]); await refresh({ fresh: true }); notify('Media added.'); }} />}
-      {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={async (item) => { if (!window.confirm(`Permanently delete ${item.title}? This cannot be undone.`)) return; await permanentlyDeleteMedia(accessToken, item.database_id); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); }} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={async (shelf) => { if (!window.confirm(`Permanently delete the shelf ${shelf.name}? Its media items will remain in the collection.`)) return; await deleteShelf(accessToken, shelf.shelf_id); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); }} />}
+      {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', onConfirm: async () => { await permanentlyDeleteMedia(accessToken, item.database_id); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', onConfirm: async () => { await deleteShelf(accessToken, shelf.shelf_id); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); } })} />}
+      {shelfEditor && <ShelfEditDialog shelf={shelfEditor} onClose={() => setShelfEditor(null)} onSave={async (changes) => { await updateShelf(accessToken, shelfEditor.shelf_id, changes); await refresh({ fresh: true }); notify('Shelf saved.'); }} />}
       {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`); }} />}
     </div>
   );
@@ -964,12 +976,12 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
       <div className="shelf-head">
         <div className="shelf-title">
           {canReorderShelf && <button className="shelf-drag-handle" aria-label={`Drag ${shelf.name} to reorder`} title="Drag to reorder shelf" draggable onDragStart={onShelfDragStart} onDragEnd={onShelfDragEnd}><GripVertical size={16} /></button>}
-          <span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2></span>
+          <span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2>{shelf.subtitle && <p className="shelf-subtitle">{shelf.subtitle}</p>}</span>
         </div>
         <div className="shelf-actions">
           <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && items.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
           <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => onMoveShelf(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => onMoveShelf(1)}><ArrowDown size={15} /></button>}</span>
-          <span className="shelf-action-group shelf-edit-actions">{canEdit && !shelf.required && <button aria-label={`Rename ${shelf.name}`} title="Rename shelf" onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} title="Move shelf to Bin" onClick={onDelete}><X size={15} /></button>}</span>
+          <span className="shelf-action-group shelf-edit-actions">{canEdit && <button aria-label={`Edit ${shelf.name}`} title="Edit shelf" onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} title="Move shelf to Bin" onClick={onDelete}><X size={15} /></button>}</span>
           <span className="shelf-action-group shelf-page-actions"><button aria-label={`Scroll ${shelf.name} left`} disabled={currentPage <= 0 || pageCount <= 1} onClick={() => scrollPage(-1)}><ChevronLeft /></button>{pageCount > 1 && <small>{currentPage + 1} / {pageCount}</small>}<button aria-label={`Scroll ${shelf.name} right`} disabled={currentPage >= pageCount - 1 || pageCount <= 1} onClick={() => scrollPage(1)}><ChevronRight /></button></span>
         </div>
       </div>
@@ -1208,7 +1220,36 @@ function SearchModal({ data, query, setQuery, onClose, onOpen }) {
 }
 
 
-function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers }) {
+function ConfirmDialog({ title, message, confirmLabel = 'Confirm', tone = 'default', onConfirm, onClose }) {
+  useEscape(onClose);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  return <div className="modal-layer confirm-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+    <button className="close" onClick={onClose} aria-label="Close confirmation"><X /></button>
+    <span className="eyebrow">PLEASE CONFIRM</span><h2 id="confirm-title">{title}</h2><p className="dialog-intro">{message}</p>
+    {error && <p className="auth-error">{error}</p>}
+    <div className="dialog-actions"><button className="text-button" onClick={onClose} disabled={busy}>Cancel</button><Button className={tone === 'danger' ? 'confirm-danger' : ''} disabled={busy} onClick={async () => { setBusy(true); setError(''); try { await onConfirm(); onClose(); } catch { setError('That change could not be completed. Please try again.'); setBusy(false); } }}>{busy ? 'Working…' : confirmLabel}</Button></div>
+  </section></div>;
+}
+
+function ShelfEditDialog({ shelf, onClose, onSave }) {
+  useEscape(onClose);
+  const [name, setName] = useState(shelf.name);
+  const [subtitle, setSubtitle] = useState(shelf.subtitle || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog" onSubmit={async (event) => { event.preventDefault(); const cleanedName = name.trim(); const cleanedSubtitle = subtitle.trim(); if ((!shelf.required && !cleanedName) || cleanedSubtitle.length > 180) return; setSaving(true); setError(''); try { await onSave({ ...(shelf.required ? {} : { name: cleanedName }), subtitle: cleanedSubtitle || null }); onClose(); } catch { setError('The shelf could not be updated.'); setSaving(false); } }}>
+    <button className="close" type="button" onClick={onClose} aria-label="Close shelf editor"><X /></button>
+    <span className="eyebrow">EDIT WATCHLIST</span><h2>{shelf.name}</h2>
+    {!shelf.required && <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>}
+    <label>Subtitle <span className="field-hint">Optional</span><input autoFocus={shelf.required} value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
+    <small className="character-count">{subtitle.length} / 180</small>
+    {error && <p className="auth-error">{error}</p>}
+    <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose}>Cancel</button><Button type="submit" icon={Pencil} disabled={saving || (!shelf.required && !name.trim())}>{saving ? 'Saving…' : 'Save Shelf'}</Button></div>
+  </form></div>;
+}
+
+function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers, viewAsMember, onViewAsMemberChange, onAccountUpdated }) {
   useEscape(onClose);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -1217,6 +1258,9 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [nextDisplayName, setNextDisplayName] = useState(account?.profile?.display_name || '');
+  const [nextPassword, setNextPassword] = useState('');
 
   const submit = async (event) => {
     event.preventDefault();
@@ -1261,7 +1305,15 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
             <span className="eyebrow">SIGNED IN</span>
             <h2>{account.profile?.display_name || account.profile?.username || 'Media Room member'}</h2>
             <p>{account.profile?.role === 'admin' ? 'Administrator account' : account.profile?.deactivated_at ? 'Account deactivated — your library is safely stored.' : account.profile?.approved_at ? 'Approved member' : 'Pending approval'}</p>
-            {account.profile?.role === 'admin' && <Button onClick={onManageUsers}>User management</Button>}<Button icon={LogOut} onClick={leave} disabled={submitting}>Sign out</Button>
+            {account.profile?.role === 'admin' && <label className="admin-view-toggle"><input type="checkbox" checked={viewAsMember} onChange={(event) => onViewAsMemberChange(event.target.checked)} /><span><b>View as non-Admin</b><small>You will still be the owner of your own collection.</small></span></label>}
+            <button className="account-settings-toggle" type="button" onClick={() => { setSettingsOpen((current) => !current); setError(''); }}>{settingsOpen ? 'Hide account settings' : 'Display name & password'}</button>
+            {settingsOpen && <form className="account-settings" onSubmit={async (event) => { event.preventDefault(); setSubmitting(true); setError(''); try { let profile = account.profile; if (nextDisplayName.trim() !== account.profile.display_name) profile = await updateDisplayName(account.session.access_token, nextDisplayName.trim()); if (nextPassword) { if (nextPassword.length < 8) throw new Error('short-password'); await updatePassword(account.session.access_token, nextPassword); setNextPassword(''); } onAccountUpdated(profile); } catch (settingsError) { setError(settingsError?.message === 'short-password' ? 'Use at least 8 characters for the new password.' : 'Those account settings could not be saved. Apply the latest Supabase migration and try again.'); } finally { setSubmitting(false); } }}>
+              <label>Display name<input value={nextDisplayName} minLength="2" maxLength="80" onChange={(event) => setNextDisplayName(event.target.value)} required /></label>
+              <label>New password <span className="field-hint">Optional</span><input type="password" value={nextPassword} minLength="8" autoComplete="new-password" onChange={(event) => setNextPassword(event.target.value)} placeholder="Leave blank to keep your password" /></label>
+              <Button type="submit" disabled={submitting}>{submitting ? 'Saving…' : 'Save Account Settings'}</Button>
+            </form>}
+            {error && <p className="auth-error">{error}</p>}
+            <div className="account-actions">{account.profile?.role === 'admin' && <Button onClick={onManageUsers}>User Management</Button>}<Button icon={LogOut} onClick={leave} disabled={submitting}>Sign Out</Button></div>
           </>
         ) : (
           <>
@@ -1430,7 +1482,7 @@ function EditMediaDialog({ item, onClose, onSave }) {
       </div>
       <MediaDetailFields form={form} setForm={setForm} section={mediaSection(item)} />
       {error && <p className="auth-error">{error}</p>}
-      <Button type="submit" icon={Pencil} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>
+      <div className="dialog-actions edit-media-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={Check} disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</Button></div>
     </form>
   </div>;
 }

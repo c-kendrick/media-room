@@ -8,6 +8,7 @@ import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from '../src/section-note
 import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from '../src/ownership-filter.js';
 import { parseCollectionBackup, validateCollectionBackup } from '../src/backup-import.js';
 import { supabaseRequest } from '../src/supabase.js';
+import { collectionSummaryStats } from '../src/collection-stats.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -138,11 +139,69 @@ test('collection notes are section-specific while Main Watchlist mirrors Film & 
   assert.match(migration, /add column if not exists game_description/);
 });
 
-test('opening Main Watchlist always starts on All Watchlists', async () => {
+test('opening Main Watchlist has no redundant All Watchlists tab', async () => {
   const app = await read('src/App.jsx');
   assert.match(app, /<MediaView key=\{data\.collectionId\}/);
   assert.match(app, /useState\('screen'\)/);
-  assert.match(app, /data\.mainWatchlist \? 'All Watchlists'/);
+  assert.doesNotMatch(app, />All Watchlists</);
+  assert.match(app, /!data\.mainWatchlist && <div className="media-tabs">/);
+});
+
+test('collection summary counts use live shelf UUIDs and owned flags', async () => {
+  const shelves = [{ shelf_id: 'watch-uuid', name: 'Watchlist', required: true }, { shelf_id: 'owned-uuid', name: 'Owned' }];
+  const items = [
+    { lists: ['watch-uuid'], owned: false },
+    { lists: ['owned-uuid'], owned: true },
+    { lists: ['watch-uuid', 'owned-uuid'], owned: true },
+  ];
+  assert.deepEqual(collectionSummaryStats(items, shelves), { toWatchRead: 2, owned: 2 });
+  const app = await read('src/App.jsx');
+  assert.match(app, /collectionSummaryStats\(items, shelves\)/);
+  assert.doesNotMatch(app, /\['watchlist', 'reading_list'\]/);
+});
+
+test('shelves have optional subtitles and branded edit and confirmation dialogs', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/supabase-data.js');
+  const migration = await read('supabase/migrations/20260715010000_shelf_subtitles_and_profile_settings.sql');
+  assert.match(app, /function ShelfEditDialog/);
+  assert.match(app, /shelf\.subtitle && <p className="shelf-subtitle">/);
+  assert.match(app, /function ConfirmDialog/);
+  assert.doesNotMatch(app, /window\.prompt/);
+  assert.match(data, /subtitle: shelf\.subtitle \|\| ''/);
+  assert.match(migration, /add column if not exists subtitle text/);
+});
+
+test('Main Watchlist includes one virtual priority and shared-demand shelf', async () => {
+  const data = await read('src/supabase-data.js');
+  assert.match(data, /id: 'main-priority-watchlist'/);
+  assert.match(data, /interestedMediaIds\.has\(item\.id\) && demand\.length < 2/);
+  assert.match(data, /representativeByIdentity/);
+  assert.match(data, /virtual: true/);
+});
+
+test('account settings support display name, password, and admin member preview', async () => {
+  const app = await read('src/App.jsx');
+  const auth = await read('src/auth.js');
+  const migration = await read('supabase/migrations/20260715010000_shelf_subtitles_and_profile_settings.sql');
+  assert.match(app, /View as non-Admin/);
+  assert.match(app, /const isAdmin = isAdminAccount && !viewAsMember/);
+  assert.match(app, /Save Account Settings/);
+  assert.match(auth, /rpc\/update_own_display_name/);
+  assert.match(auth, /method: 'PUT'[\s\S]*body: \{ password \}/);
+  assert.match(migration, /update_own_display_name/);
+});
+
+test('navigation and metadata refinements remain present', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  const mediaStyles = await read('src/media-layout.css');
+  assert.doesNotMatch(app, /A LIVING LIBRARY|>Refresh</);
+  assert.match(app, /<kbd>Ctrl K<\/kbd>/);
+  assert.match(app, /navCollapsed/);
+  assert.match(styles, /\.nav-collapsed \.workspace\{margin-left:0\}/);
+  assert.match(mediaStyles, /\.media-card-meta,[\s\S]*font-size: 10px/);
+  assert.match(app, /Save Changes/);
 });
 
 test('owned status is owner-controlled, optimistic, and displayed as a muted card tag', async () => {
