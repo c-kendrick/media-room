@@ -19,7 +19,7 @@ No Second Brain notes, projects, university records, fitness data, database file
 
 - Run [the Supabase foundation setup](docs/SUPABASE-FOUNDATION.md) when you are ready to create the Supabase project.
 - Apply every migration in `supabase/migrations` in timestamp order.
-- Deploy `supabase/functions/enrich-poster` after provider changes.
+- Deploy `supabase/functions/enrich-poster` and `supabase/functions/enrich-details` after provider changes.
 - Keep provider keys in Supabase Edge Function secrets, never Vite or GitHub.
 - Never put a Supabase service-role key in this repository or browser code.
 
@@ -31,12 +31,16 @@ For protected poster enrichment, deploy the included Edge Function and set the p
 
 ```powershell
 supabase functions deploy enrich-poster
+supabase functions deploy enrich-details
 supabase secrets set TMDB_API_KEY=your_tmdb_key
 supabase secrets set GOOGLE_BOOKS_API_KEY=your_google_books_key
 supabase secrets set STEAMGRIDDB_API_KEY=your_steamgriddb_key
+supabase secrets set RAWG_API_KEY=your_rawg_key
 ```
 
 The browser never receives these keys. Poster enrichment is a separate collection tool from Bulk Import and can process up to 50 blank posters in the current section. Collection owners and administrators can run it; automatic enrichment never replaces existing artwork. It supports TMDB for Film & TV, Google Books with an Open Library fallback for books, and SteamGridDB for games. Exact matches are applied automatically; ambiguous matches remain blank.
+
+Detail enrichment also processes at most 50 items in the current section and fills blank fields only. TMDB provides Film & TV details, Google Books provides book details (its key is optional for lower-volume use), and RAWG provides video-game details. Individual item results remain reviewable before saving.
 
 ## 1. Set up the GitHub Pages version on your PC
 
