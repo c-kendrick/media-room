@@ -125,6 +125,13 @@ function mediaSearchText(item) {
     .toLowerCase();
 }
 
+function retryLabel(seconds) {
+  if (!seconds) return '';
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return minutes ? `${minutes}m ${String(remainder).padStart(2, '0')}s` : `${remainder}s`;
+}
+
 function mediaTagTone(value, isGame = false) {
   const tag = String(value || '').trim();
   if (/^4k$/i.test(tag)) return 'format-4k';
@@ -746,6 +753,8 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [enrichingPosters, setEnrichingPosters] = useState(false);
   const [enrichingDetails, setEnrichingDetails] = useState(false);
+  const [posterRetryAfter, setPosterRetryAfter] = useState(0);
+  const [detailsRetryAfter, setDetailsRetryAfter] = useState(0);
   const [importingBackup, setImportingBackup] = useState(false);
   const [binOpen, setBinOpen] = useState(false);
   const [shelfEditor, setShelfEditor] = useState(null);
@@ -757,6 +766,15 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const [optimisticMediaItems, setOptimisticMediaItems] = useState([]);
   const [optimisticMainShelfIds, setOptimisticMainShelfIds] = useState([]);
   const backupInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!posterRetryAfter && !detailsRetryAfter) return undefined;
+    const timer = window.setInterval(() => {
+      setPosterRetryAfter((seconds) => Math.max(0, seconds - 1));
+      setDetailsRetryAfter((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [posterRetryAfter > 0, detailsRetryAfter > 0]);
 
   const sourceShelves = mediaShelvesForSection(data, section).filter((shelf) => !optimisticDeletedShelfIds.includes(shelf.shelf_id));
   useEffect(() => { setOptimisticShelfIds(sourceShelves.map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves, section]);
@@ -793,6 +811,9 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
       )));
   });
   const randomPool = contentFiltered.filter((item) => matchesAny(listFilters, item.lists || []));
+  const searchResults = queryLower
+    ? [...new Map(randomPool.map((item) => [item.database_id || item.item_id, item])).values()]
+    : [];
   const visibleShelves = shelves.filter((shelf) => !listFilters.length || listFilters.includes(shelf.shelf_id));
   const seenOwners = new Set();
   const ownerIntroShelfIds = new Set(visibleShelves.filter((shelf) => {
@@ -879,8 +900,9 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
       const result = await enrichSectionPosters(accessToken, data.collectionId, section);
       await refresh({ fresh: true });
       notify(`${result?.enriched || 0} posters added${result?.unmatched ? `; ${result.unmatched} left for review` : ''}${result?.warnings?.length ? ` (${result.warnings.join(', ')})` : ''}.`);
-    } catch {
-      notify('Poster enrichment could not run. Check the provider secrets and Edge Function deployment.');
+    } catch (error) {
+      if (error?.retryAfter) setPosterRetryAfter(error.retryAfter);
+      notify(error?.message || 'Poster enrichment could not run. Check the provider secrets and Edge Function deployment.');
     } finally {
       setEnrichingPosters(false);
     }
@@ -892,8 +914,9 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
       const result = await enrichSectionDetails(accessToken, data.collectionId, section);
       await refresh({ fresh: true });
       notify(`${result?.enriched || 0} items enriched${result?.reviewed ? ` from ${result.reviewed} reviewed` : ''}${result?.warnings?.length ? ` (${result.warnings.join(', ')})` : ''}.`);
-    } catch {
-      notify('Detail enrichment could not run. Check the provider secrets and Edge Function deployment.');
+    } catch (error) {
+      if (error?.retryAfter) setDetailsRetryAfter(error.retryAfter);
+      notify(error?.message || 'Detail enrichment could not run. Check the provider secrets and Edge Function deployment.');
     } finally {
       setEnrichingDetails(false);
     }
@@ -963,7 +986,9 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
         </div>
       </div>
 
-      <div className="dynamic-shelves">
+      {queryLower && <SearchResultsSection items={searchResults} onOpen={openMedia} canRate={canEdit} onRate={onStarRatingChange} />}
+
+      <div className={cls('dynamic-shelves', queryLower && 'has-search-results')}>
         {visibleShelves.map((shelf) => {
           const shelfItems = sortShelfItems(
             contentFiltered.filter((item) => item.lists?.includes(shelf.shelf_id)),
@@ -981,8 +1006,8 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
         <div><span className="eyebrow">COLLECTION TOOLS</span><p>{canEdit ? 'Manage this section without cluttering the shelves.' : 'Administrative backup and artwork tools.'}</p></div>
         {canEdit && <Button className="quiet-button create-shelf-button" icon={Plus} onClick={() => setCreatingShelf(true)}>Create Shelf</Button>}
         <div className="collection-tool-actions">
-          <Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters} onClick={enrichCurrentSection}>{enrichingPosters ? 'Finding posters…' : 'Find posters'}</Button>
-          <Button className="quiet-button" icon={Search} disabled={enrichingDetails} onClick={enrichDetailsInCurrentSection}>{enrichingDetails ? 'Enriching details…' : 'Enrich details'}</Button>
+          <Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters || posterRetryAfter > 0} onClick={enrichCurrentSection}>{enrichingPosters ? 'Finding posters…' : posterRetryAfter ? `Find posters in ${retryLabel(posterRetryAfter)}` : 'Find posters'}</Button>
+          <Button className="quiet-button" icon={Search} disabled={enrichingDetails || detailsRetryAfter > 0} onClick={enrichDetailsInCurrentSection}>{enrichingDetails ? 'Enriching details…' : detailsRetryAfter ? `Enrich details in ${retryLabel(detailsRetryAfter)}` : 'Enrich details'}</Button>
           <Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button>
           {canEdit && <><input ref={backupInputRef} hidden type="file" accept=".json,application/json" onChange={importBackupFile} /><Button className="quiet-button" icon={Upload} disabled={importingBackup} onClick={() => backupInputRef.current?.click()}>{importingBackup ? 'Importing backup…' : 'Import backup'}</Button></>}
           {canEdit && <Button className="quiet-button bin-button" icon={Trash2} onClick={() => setBinOpen(true)}>Bin{binCount ? ` (${binCount})` : ''}</Button>}
@@ -996,6 +1021,18 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
       {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`); }} />}
     </div>
   );
+}
+
+function SearchResultsSection({ items, onOpen, canRate, onRate }) {
+  return <section className="media-search-results" aria-live="polite">
+    <div className="search-results-heading">
+      <span><span className="eyebrow">CURRENT SEARCH</span><h2>Search Results <b>{items.length}</b></h2></span>
+      <p>Each matching title appears once. Your shelves remain below.</p>
+    </div>
+    {items.length > 0
+      ? <div className="search-results-grid">{items.map((item) => <MediaCard key={item.database_id || item.item_id} item={item} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} />)}</div>
+      : <Empty>No media matches those filters.</Empty>}
+  </section>;
 }
 
 function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorderShelf, canCurateMain, canRemoveMirror, onRemoveMirror, onToggleMain, canMoveUp, canMoveDown, onMoveShelf, onAdd, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
@@ -1236,7 +1273,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
         await onUpdate(changes);
         setEditing(false);
       }} />}
-      {posterReviewOpen && <PosterEnrichmentDialog item={item} candidates={posterCandidates} busy={posterReviewBusy} error={posterReviewError} onClose={() => setPosterReviewOpen(false)} onLoad={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); setPosterCandidates(result?.candidates || []); } catch { setPosterReviewError('Provider candidates could not be loaded.'); } finally { setPosterReviewBusy(false); } }} onChoose={(candidate) => { setPosterReviewOpen(false); setPosterReviewBusy(false); setPosterReviewError(''); onChoosePoster(candidate.poster_url).catch(() => null); }} />}
+      {posterReviewOpen && <PosterEnrichmentDialog item={item} candidates={posterCandidates} busy={posterReviewBusy} error={posterReviewError} onClose={() => setPosterReviewOpen(false)} onLoad={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); setPosterCandidates(result?.candidates || []); } catch (error) { setPosterReviewError(error?.message || 'Provider candidates could not be loaded.'); } finally { setPosterReviewBusy(false); } }} onChoose={(candidate) => { setPosterReviewOpen(false); setPosterReviewBusy(false); setPosterReviewError(''); onChoosePoster(candidate.poster_url).catch(() => null); }} />}
       {detailReviewOpen && <DetailEnrichmentDialog item={item} onClose={() => setDetailReviewOpen(false)} onLoad={onFindDetails} onChoose={async (candidate) => { await onChooseDetails(candidate); setDetailReviewOpen(false); }} />}
     </div>
   );
@@ -1261,7 +1298,7 @@ function DetailEnrichmentDialog({ item, onClose, onLoad, onChoose }) {
   const [selected, setSelected] = useState(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
-  useEffect(() => { onLoad().then((result) => setCandidates(result?.candidates || [])).catch(() => setError('Detail options could not be loaded.')).finally(() => setBusy(false)); }, []);
+  useEffect(() => { onLoad().then((result) => setCandidates(result?.candidates || [])).catch((loadError) => setError(loadError?.message || 'Detail options could not be loaded.')).finally(() => setBusy(false)); }, []);
   const fields = selected?.details ? Object.entries(selected.details).filter(([, value]) => value !== null && value !== '' && (!Array.isArray(value) || value.length)) : [];
   return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog enrichment-dialog">
     <button className="close" onClick={onClose} aria-label="Close detail enrichment"><X /></button><span className="eyebrow">ENRICH DETAILS</span><h2>{cleanImportedMediaTitle(item.title)}</h2><p className="dialog-intro">Pick the matching result. Saving fills blank fields only; your existing details are never replaced.</p>

@@ -22,10 +22,11 @@ export async function supabaseRequest(path, { fresh = false, headers = {}, metho
   if (!response.ok) {
     let payload = null;
     try { payload = text ? JSON.parse(text) : null; } catch { /* Keep the HTTP fallback below. */ }
-    const details = [payload?.message, payload?.details, payload?.hint].filter(Boolean);
+    const details = [payload?.error, payload?.message, payload?.details, payload?.hint].filter(Boolean);
     const error = new Error(details.length ? [...new Set(details)].join(' ') : 'Supabase request failed (' + response.status + ').');
     error.status = response.status;
     error.code = payload?.code || null;
+    error.retryAfter = Number(payload?.retry_after || response.headers.get('Retry-After')) || 0;
     throw error;
   }
 
