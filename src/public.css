@@ -287,7 +287,7 @@
 
 /* Refined navigation, discovery controls, and modal spacing -------------- */
 .sidebar{border-right-color:#ded4c7;background:rgba(250,246,239,.97)}
-.sidebar .brand{padding:20px 15px 18px;border-bottom:1px solid #e7ddd0}
+.sidebar .brand{padding:20px 15px 18px;border-bottom:0}
 .sidebar nav{padding:16px 10px!important;gap:4px!important}
 .sidebar nav button{min-height:38px;padding:9px 10px!important;font-size:11px!important}
 .collection-nav-label{margin-top:18px;padding:0 9px}
@@ -301,6 +301,7 @@
 .editable-description:hover,.editable-description:focus{border-bottom-color:#b99d8f;color:#51463d;outline:0}
 .editable-description-input{display:block;width:min(620px,100%);min-height:54px;margin:7px 0 0;padding:0;border:0;border-bottom:1px solid #b99d8f;background:transparent;color:#6f6458;outline:0;resize:vertical;font-family:var(--serif);font-size:13px;line-height:1.5}
 .collection-note-preview{display:flex;align-items:flex-end;gap:10px;min-width:0;max-width:760px}
+.page-hero .collection-note-preview{min-height:59px}
 .collection-note-preview>p{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;white-space:pre-line}
 .open-note-button{flex:0 0 auto;border:0;background:transparent;color:#765548;padding:4px 0;display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap}
 .open-note-button:hover{text-decoration:underline}

@@ -65,6 +65,28 @@ test('Main Watchlist demand counts each person once across shelves, copies, and 
   }
 });
 
+test('Main Main Watchlist matches title variants and missing years without merging known remakes', () => {
+  const collections = [
+    { id: 'collection-a', owner_id: 'person-a', title: 'Alex’s Collection' },
+    { id: 'collection-b', owner_id: 'person-b', title: 'Blair’s Collection' },
+  ];
+  const shared = [
+    { id: 'godfather-a', collection_id: 'collection-a', type: 'film', title: 'The Godfather', year: 1972 },
+    { id: 'godfather-b', collection_id: 'collection-b', type: 'movie', title: 'Godfather!', year: null },
+  ];
+  const sharedDemand = buildWatchDemand(shared, collections, [], []);
+  assert.deepEqual(sharedDemand.get('godfather-a').map((person) => person.id).sort(), ['person-a', 'person-b']);
+  assert.deepEqual(sharedDemand.get('godfather-b').map((person) => person.id).sort(), ['person-a', 'person-b']);
+
+  const remakes = [
+    { id: 'film-old', collection_id: 'collection-a', type: 'film', title: 'Same Title', year: 1954 },
+    { id: 'film-new', collection_id: 'collection-b', type: 'film', title: 'Same Title', year: 2024 },
+  ];
+  const remakeDemand = buildWatchDemand(remakes, collections, [], []);
+  assert.deepEqual(remakeDemand.get('film-old').map((person) => person.id), ['person-a']);
+  assert.deepEqual(remakeDemand.get('film-new').map((person) => person.id), ['person-b']);
+});
+
 test('the first Main Watchlist interest filter remains a genuine single-stamp filter', async () => {
   const source = await read('src/App.jsx');
   assert.match(source, /count === '1'[\s\S]*\(item\.interests\?\.length \|\| 0\) === 1/);
@@ -201,7 +223,11 @@ test('shelf title and subtitle saves close immediately and update optimistically
 test('Main Watchlist includes one virtual priority and shared-demand shelf', async () => {
   const data = await read('src/supabase-data.js');
   assert.match(data, /id: 'main-priority-watchlist'/);
-  assert.match(data, /interestedMediaIds\.has\(item\.id\) && demand\.length < 2/);
+  assert.match(data, /mirroredShelfIdsByIdentity/);
+  assert.match(data, /mirroredShelfCount < 2/);
+  assert.match(data, /interestedIdentities\.has\(identity\)/);
+  assert.match(data, /allWatchlistShelves\.filter\(\(shelf\) => shelf\.is_required \|\| shelf\.is_queue_list\)/);
+  assert.doesNotMatch(data, /canonicalWatchlistShelves/);
   assert.match(data, /representativeByIdentity/);
   assert.match(data, /virtual: true/);
 });
@@ -436,4 +462,19 @@ test('detail enrichment is section-scoped, reviewable, and blank-only', async ()
   assert.match(edge, /slice\(0, 50\)/);
   assert.match(edge, /isBlank\(item\[field\]\) && !isBlank\(next\)/);
   assert.match(edge, /RAWG_API_KEY/);
+});
+
+test('poster selection is optimistic and closes its chooser immediately', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /const optimisticData = \{[\s\S]*poster_url: posterUrl[\s\S]*setData\(optimisticData\)/);
+  assert.match(app, /setPosterReviewOpen\(false\); setPosterReviewBusy\(false\); setPosterReviewError\(''\); onChoosePoster/);
+  assert.match(app, /Previous artwork restored/);
+});
+
+test('branding and collection hero polish remain stable', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.doesNotMatch(app, /Screen, shelf & story|SCREEN, SHELF & STORY|EVERYONE’S NEXT WATCH/i);
+  assert.match(styles, /\.sidebar \.brand\{[^}]*border-bottom:0/);
+  assert.match(styles, /\.page-hero \.collection-note-preview\{min-height:59px\}/);
 });

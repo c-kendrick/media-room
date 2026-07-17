@@ -1,5 +1,5 @@
 import { supabaseSelect } from './supabase.js';
-import { buildWatchDemand, watchIdentity } from './watch-demand.js';
+import { buildWatchDemand, buildWatchGroupIdentities } from './watch-demand.js';
 import { SECTION_NOTE_DEFAULTS } from './section-notes.js';
 
 const MEDIA_SELECT = 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,owned,runtime,deleted_at,created_at,updated_at';
@@ -201,11 +201,11 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
     collection_id: 'in.(' + collectionIds.join(',') + ')',
     section: 'eq.screen',
     deleted_at: 'is.null',
-    select: 'id,collection_id,section,name,position,is_required',
+    select: 'id,collection_id,section,name,position,is_required,is_queue_list',
   }), { fresh });
-  const canonicalWatchlistShelves = allWatchlistShelves.filter((shelf) => shelf.is_required || shelf.name.trim().toLowerCase() === 'watchlist');
+  const queueWatchlistShelves = allWatchlistShelves.filter((shelf) => shelf.is_required || shelf.is_queue_list);
   const interestRows = await supabaseSelect(query('media_interest', { select: 'media_item_id,user_id' }), { fresh });
-  const candidateShelfIds = canonicalWatchlistShelves.map((shelf) => shelf.id);
+  const candidateShelfIds = queueWatchlistShelves.map((shelf) => shelf.id);
   const candidateMemberships = candidateShelfIds.length ? await supabaseSelect(query('shelf_media_items', {
     shelf_id: 'in.(' + candidateShelfIds.join(',') + ')',
     select: 'shelf_id,media_item_id,position',
@@ -262,13 +262,22 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
     return mainPosition(a) - mainPosition(b) || Number(a.position || 0) - Number(b.position || 0) || a.name.localeCompare(b.name);
   });
   const demandByMediaId = buildWatchDemand(allMediaItems, collections, interests, publicProfiles);
-  const watchlistDemandByMediaId = buildWatchDemand(candidateMediaItems, collections, interests, publicProfiles);
-  const interestedMediaIds = new Set(interests.map((interest) => interest.media_item_id));
+  const watchlistIdentityByMediaId = buildWatchGroupIdentities(allMediaItems);
+  const mirroredShelfIdsByIdentity = new Map();
+  for (const membership of mirroredMemberships) {
+    const identity = watchlistIdentityByMediaId.get(membership.media_item_id);
+    if (!identity) continue;
+    const shelfIds = mirroredShelfIdsByIdentity.get(identity) || new Set();
+    shelfIds.add(membership.shelf_id);
+    mirroredShelfIdsByIdentity.set(identity, shelfIds);
+  }
+  const interestedIdentities = new Set(interests.map((interest) => watchlistIdentityByMediaId.get(interest.media_item_id)).filter(Boolean));
   const representativeByIdentity = new Map();
-  for (const item of candidateMediaItems) {
-    const demand = watchlistDemandByMediaId.get(item.id) || [];
-    if (!interestedMediaIds.has(item.id) && demand.length < 2) continue;
-    const identity = watchIdentity(item);
+  for (const item of allMediaItems) {
+    const identity = watchlistIdentityByMediaId.get(item.id);
+    const demand = demandByMediaId.get(item.id) || [];
+    const mirroredShelfCount = mirroredShelfIdsByIdentity.get(identity)?.size || 0;
+    if (!interestedIdentities.has(identity) && demand.length < 2 && mirroredShelfCount < 2) continue;
     const current = representativeByIdentity.get(identity);
     if (!current || (mirroredMediaIds.has(item.id) && !mirroredMediaIds.has(current.id))) representativeByIdentity.set(identity, item);
   }
