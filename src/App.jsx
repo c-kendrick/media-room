@@ -177,7 +177,7 @@ function PageHero({ eyebrow, title, description, icon: Icon, stats }) {
     <section className="page-hero dotted">
       {Icon && <div className="hero-icon"><Icon size={28} /></div>}
       <div className="hero-copy">
-        <span className="eyebrow">{eyebrow}</span>
+        {eyebrow && <span className="eyebrow">{eyebrow}</span>}
         <h1>{title}</h1>
         {description && (typeof description === 'string' ? <p>{description}</p> : description)}
       </div>
@@ -454,7 +454,6 @@ export default function App() {
           </button>)}
         </nav>
         <div className="sidebar-bottom">
-          <blockquote>“Screen, shelf & story.”</blockquote>
           <div className="drive-state">
             <span>
               <strong>Public collection</strong>
@@ -519,7 +518,28 @@ export default function App() {
           onStarRatingChange={(starRating) => saveStarRating(selectedMedia.database_id, starRating)}
           canReviewPoster={Boolean((canEditCollection || isAdmin) && !data.mainWatchlist)}
           onFindPosters={() => searchPosterCandidates(account.session.access_token, selectedMedia.database_id)}
-          onChoosePoster={async (posterUrl) => { await choosePosterCandidate(account.session.access_token, selectedMedia.database_id, posterUrl); await refresh({ fresh: true }); setToast('Poster saved.'); }}
+          onChoosePoster={async (posterUrl) => {
+            const previousData = data;
+            const optimisticData = {
+              ...data,
+              media: data.media.map((item) => item.database_id === selectedMedia.database_id
+                ? { ...item, poster_url: posterUrl, updated_at: new Date().toISOString() }
+                : item),
+            };
+            setData(optimisticData);
+            cacheSnapshot(optimisticData, data.collectionId);
+            snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+            try {
+              await choosePosterCandidate(account.session.access_token, selectedMedia.database_id, posterUrl);
+              await refresh({ fresh: true });
+              setToast('Poster saved.');
+            } catch (error) {
+              setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
+              cacheSnapshot(previousData, previousData.collectionId);
+              setToast('That poster could not be saved. Previous artwork restored.');
+              throw error;
+            }
+          }}
           onFindDetails={() => searchDetailCandidates(account.session.access_token, selectedMedia.database_id)}
           onChooseDetails={async (candidate) => { const result = await chooseDetailCandidate(account.session.access_token, selectedMedia.database_id, candidate); await refresh({ fresh: true }); setToast(`${Object.keys(result?.applied || {}).length} new details saved.`); }}
           onUpdate={async (changes, messages = {}) => {
@@ -906,7 +926,6 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   return (
     <div className="page media-page">
       <PageHero
-        eyebrow={data.mainWatchlist ? 'EVERYONE’S NEXT WATCH' : 'SCREEN, SHELF & STORY'}
         title={data.collectionTitle || 'The media room'}
         description={data.mainWatchlist
           ? 'Every selected shelf, mirrored live from its owner’s collection.'
@@ -1217,7 +1236,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
         await onUpdate(changes);
         setEditing(false);
       }} />}
-      {posterReviewOpen && <PosterEnrichmentDialog item={item} candidates={posterCandidates} busy={posterReviewBusy} error={posterReviewError} onClose={() => setPosterReviewOpen(false)} onLoad={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); setPosterCandidates(result?.candidates || []); } catch { setPosterReviewError('Provider candidates could not be loaded.'); } finally { setPosterReviewBusy(false); } }} onChoose={async (candidate) => { setPosterReviewBusy(true); setPosterReviewError(''); try { await onChoosePoster(candidate.poster_url); setPosterReviewOpen(false); } catch { setPosterReviewError('That poster could not be saved.'); } finally { setPosterReviewBusy(false); } }} />}
+      {posterReviewOpen && <PosterEnrichmentDialog item={item} candidates={posterCandidates} busy={posterReviewBusy} error={posterReviewError} onClose={() => setPosterReviewOpen(false)} onLoad={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); setPosterCandidates(result?.candidates || []); } catch { setPosterReviewError('Provider candidates could not be loaded.'); } finally { setPosterReviewBusy(false); } }} onChoose={(candidate) => { setPosterReviewOpen(false); setPosterReviewBusy(false); setPosterReviewError(''); onChoosePoster(candidate.poster_url).catch(() => null); }} />}
       {detailReviewOpen && <DetailEnrichmentDialog item={item} onClose={() => setDetailReviewOpen(false)} onLoad={onFindDetails} onChoose={async (candidate) => { await onChooseDetails(candidate); setDetailReviewOpen(false); }} />}
     </div>
   );
