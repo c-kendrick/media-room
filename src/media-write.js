@@ -1,5 +1,25 @@
 import { supabaseRequest } from './supabase.js';
 
+const enrichmentCandidateCache = new Map();
+const ENRICHMENT_CACHE_MS = 30 * 60 * 1000;
+
+function cachedEnrichment(key) {
+  const cached = enrichmentCandidateCache.get(key);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    enrichmentCandidateCache.delete(key);
+    return null;
+  }
+  return cached.value;
+}
+
+async function cachedEnrichmentRequest(key, request) {
+  const cached = cachedEnrichment(key);
+  if (cached) return cached;
+  const value = await request();
+  enrichmentCandidateCache.set(key, { value, expiresAt: Date.now() + ENRICHMENT_CACHE_MS });
+  return value;
+}
+
 export async function updateMediaItem(accessToken, databaseId, changes) {
   if (!accessToken || !databaseId) throw new Error('You must be signed in to edit this item.');
 
@@ -175,11 +195,12 @@ export function enrichSectionPosters(accessToken, collectionId, section) {
 }
 
 export function searchPosterCandidates(accessToken, mediaItemId) {
-  return supabaseRequest('/functions/v1/enrich-poster', { method: 'POST', fresh: true,
-    body: { media_item_id: mediaItemId }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+  return cachedEnrichmentRequest(`poster:${mediaItemId}`, () => supabaseRequest('/functions/v1/enrich-poster', { method: 'POST', fresh: true,
+    body: { media_item_id: mediaItemId }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } }));
 }
 
 export function choosePosterCandidate(accessToken, mediaItemId, posterUrl) {
+  enrichmentCandidateCache.delete(`poster:${mediaItemId}`);
   return supabaseRequest('/functions/v1/enrich-poster', { method: 'POST', fresh: true,
     body: { media_item_id: mediaItemId, choose_url: posterUrl }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
@@ -191,11 +212,12 @@ export function enrichSectionDetails(accessToken, collectionId, section) {
 }
 
 export function searchDetailCandidates(accessToken, mediaItemId) {
-  return supabaseRequest('/functions/v1/enrich-details', { method: 'POST', fresh: true,
-    body: { media_item_id: mediaItemId }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+  return cachedEnrichmentRequest(`details:${mediaItemId}`, () => supabaseRequest('/functions/v1/enrich-details', { method: 'POST', fresh: true,
+    body: { media_item_id: mediaItemId }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } }));
 }
 
 export function chooseDetailCandidate(accessToken, mediaItemId, candidate) {
+  enrichmentCandidateCache.delete(`details:${mediaItemId}`);
   return supabaseRequest('/functions/v1/enrich-details', { method: 'POST', fresh: true,
     body: { media_item_id: mediaItemId, candidate }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }

@@ -3,7 +3,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type' };
-const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+const json = (value: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(value), { status, headers: { ...cors, 'Content-Type': 'application/json', ...headers } });
 const normalized = (value: unknown) => String(value || '').trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const yearFrom = (value: unknown) => Number(String(value || '').slice(0, 4)) || null;
 
@@ -13,6 +13,14 @@ type MediaItem = Details & { id: string; collection_id: string; type: MediaType;
 type Candidate = { id: string | number; title: string; year: number | null; provider: string; details: Details };
 const writableFields = ['year', 'creator', 'director', 'description', 'format', 'platforms', 'genres', 'runtime'] as const;
 const isBlank = (value: unknown) => value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
+
+async function enforceRateLimit(client: ReturnType<typeof createClient>, action: string) {
+  const { data, error } = await client.rpc('claim_enrichment_request', { target_action: action });
+  if (error) return json({ error: 'Enrichment limits are not available. Apply the latest Supabase migration and try again.' }, 503);
+  const retryAfter = Number(data?.retry_after) || 0;
+  if (data?.allowed === false) return json({ error: `Please wait ${retryAfter} seconds before enriching again.`, retry_after: retryAfter }, 429, { 'Retry-After': String(retryAfter) });
+  return null;
+}
 
 async function tmdbCandidates(item: MediaItem): Promise<Candidate[]> {
   const key = Deno.env.get('TMDB_API_KEY');
@@ -108,6 +116,10 @@ Deno.serve(async (request) => {
       if (error) return json({ error: error.message }, 400);
       const types = body.enrich_section === 'screen' ? ['film', 'television'] : [body.enrich_section];
       const targets = (rows || []).filter((item: MediaItem) => types.includes(item.type) && writableFields.some((field) => isBlank(item[field]))).slice(0, 50);
+      if (targets.length) {
+        const limited = await enforceRateLimit(client, 'details-batch');
+        if (limited) return limited;
+      }
       const warnings = new Set<string>(); let enriched = 0;
       for (let index = 0; index < targets.length; index += 4) {
         const results = await Promise.all(targets.slice(index, index + 4).map(async (item: MediaItem) => {
@@ -137,6 +149,8 @@ Deno.serve(async (request) => {
       }
       return json({ applied });
     }
+    const limited = await enforceRateLimit(client, 'details-search');
+    if (limited) return limited;
     return json({ candidates: (await providerCandidates(item)).map((candidate) => ({ ...candidate, details: blankOnly(item, candidate) })).filter((candidate) => Object.keys(candidate.details).length).slice(0, 8) });
   } catch (error) { return json({ error: error instanceof Error ? error.message : 'Detail enrichment failed.' }, 500); }
 });

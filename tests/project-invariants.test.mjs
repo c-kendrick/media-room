@@ -349,7 +349,7 @@ test('exported backups can be validated and imported through the owner-only merg
 
 test('poster enrichment is labelled Find posters', async () => {
   const app = await read('src/App.jsx');
-  assert.match(app, /Finding posters…' : 'Find posters'/);
+  assert.match(app, /Finding posters…'[\s\S]{0,140}: 'Find posters'/);
   assert.doesNotMatch(app, />Enrich posters</);
 });
 
@@ -477,4 +477,52 @@ test('branding and collection hero polish remain stable', async () => {
   assert.doesNotMatch(app, /Screen, shelf & story|SCREEN, SHELF & STORY|EVERYONE’S NEXT WATCH/i);
   assert.match(styles, /\.sidebar \.brand\{[^}]*border-bottom:0/);
   assert.match(styles, /\.page-hero \.collection-note-preview\{min-height:59px\}/);
+});
+
+test('active searches render one temporary deduplicated result grid above real shelves', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /const searchResults = queryLower[\s\S]*new Map\(randomPool\.map/);
+  assert.match(app, /queryLower && <SearchResultsSection[\s\S]*<div className=\{cls\('dynamic-shelves'/);
+  assert.match(app, /function SearchResultsSection/);
+  assert.match(app, /Each matching title appears once\. Your shelves remain below\./);
+  assert.doesNotMatch(app, /createShelf[\s\S]{0,120}Search Results/);
+  assert.match(styles, /\.search-results-grid\{display:grid;grid-template-columns:repeat\(auto-fill,var\(--media-card-width\)\)/);
+});
+
+test('enrichment requests are cached, server-rate-limited, and return retry timing to the UI', async () => {
+  const app = await read('src/App.jsx');
+  const writes = await read('src/media-write.js');
+  const client = await read('src/supabase.js');
+  const poster = await read('supabase/functions/enrich-poster/index.ts');
+  const details = await read('supabase/functions/enrich-details/index.ts');
+  const migration = await read('supabase/migrations/20260717010000_enrichment_rate_limits.sql');
+
+  assert.match(writes, /ENRICHMENT_CACHE_MS = 30 \* 60 \* 1000/);
+  assert.match(writes, /cachedEnrichmentRequest\(`poster:/);
+  assert.match(writes, /cachedEnrichmentRequest\(`details:/);
+  assert.match(client, /error\.retryAfter = Number\(payload\?\.retry_after/);
+  assert.match(app, /Find posters in \$\{retryLabel\(posterRetryAfter\)\}/);
+  assert.match(app, /Enrich details in \$\{retryLabel\(detailsRetryAfter\)\}/);
+  for (const edge of [poster, details]) {
+    assert.match(edge, /claim_enrichment_request/);
+    assert.match(edge, /'Retry-After'/);
+    assert.match(edge, /status, headers/);
+  }
+  assert.match(migration, /pg_advisory_xact_lock/);
+  assert.match(migration, /\('poster-batch', 120, 10\)/);
+  assert.match(migration, /\('details-search', 6, 60\)/);
+  assert.match(migration, /grant execute on function public\.claim_enrichment_request\(text\) to authenticated/);
+  assert.match(migration, /alter table public\.enrichment_requests enable row level security/);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: 'Please wait 42 seconds before enriching again.', retry_after: 42 }), { status: 429, headers: { 'Retry-After': '42' } });
+  try {
+    await assert.rejects(
+      () => supabaseRequest('/functions/v1/enrich-poster'),
+      (error) => error.status === 429 && error.retryAfter === 42 && /Please wait 42 seconds/.test(error.message),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

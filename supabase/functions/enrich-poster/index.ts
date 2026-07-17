@@ -3,12 +3,20 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type' };
-const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+const json = (value: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(value), { status, headers: { ...cors, 'Content-Type': 'application/json', ...headers } });
 const normalized = (value: unknown) => String(value || '').trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const yearFrom = (value: unknown) => Number(String(value || '').slice(0, 4)) || null;
 
 type MediaItem = { id: string; collection_id: string; type: 'film' | 'television' | 'book' | 'game'; title: string; year: number | null; poster_url?: string | null };
 type Candidate = { id: string | number; title: string; year: number | null; poster_url: string; provider: string };
+
+async function enforceRateLimit(client: ReturnType<typeof createClient>, action: string) {
+  const { data, error } = await client.rpc('claim_enrichment_request', { target_action: action });
+  if (error) return json({ error: 'Enrichment limits are not available. Apply the latest Supabase migration and try again.' }, 503);
+  const retryAfter = Number(data?.retry_after) || 0;
+  if (data?.allowed === false) return json({ error: `Please wait ${retryAfter} seconds before enriching again.`, retry_after: retryAfter }, 429, { 'Retry-After': String(retryAfter) });
+  return null;
+}
 
 async function tmdbCandidates(item: MediaItem, query?: string): Promise<Candidate[]> {
   const key = Deno.env.get('TMDB_API_KEY');
@@ -103,6 +111,10 @@ Deno.serve(async (request) => {
       if (itemsError) return json({ error: itemsError.message }, 400);
       const sectionTypes = body.enrich_section === 'screen' ? ['film', 'television'] : [body.enrich_section];
       const targets = (collectionItems || []).filter((item: MediaItem) => !item.poster_url && sectionTypes.includes(item.type)).slice(0, 50);
+      if (targets.length) {
+        const limited = await enforceRateLimit(client, 'poster-batch');
+        if (limited) return limited;
+      }
       const warnings = new Set<string>();
       if (targets.some((item: MediaItem) => ['film', 'television'].includes(item.type)) && !Deno.env.get('TMDB_API_KEY')) warnings.add('TMDB key missing');
       if (targets.some((item: MediaItem) => item.type === 'game') && !Deno.env.get('STEAMGRIDDB_API_KEY')) warnings.add('SteamGridDB key missing');
@@ -130,6 +142,8 @@ Deno.serve(async (request) => {
       const { error: updateError } = await client.from('media_items').update({ poster_url: choose_url }).eq('id', item.id);
       return updateError ? json({ error: updateError.message }, 400) : json({ poster_url: choose_url, source: 'chosen' });
     }
+    const limited = await enforceRateLimit(client, 'poster-search');
+    if (limited) return limited;
     return json({ candidates: (await providerCandidates(item, query)).slice(0, 8) });
   } catch (error) { return json({ error: error instanceof Error ? error.message : 'Poster enrichment failed.' }, 500); }
 });
