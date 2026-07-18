@@ -22,7 +22,7 @@ async function selectMediaItems(parameters, options) {
   }
 }
 
-function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [], publicProfiles = []) {
+export function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [], publicProfiles = []) {
   const membershipsByItem = new Map();
 
   for (const membership of memberships) {

@@ -6,6 +6,7 @@ import {
   BookOpen,
   CalendarDays,
   Check,
+  Copy,
   ChevronLeft,
   ChevronRight,
   Clapperboard,
@@ -14,6 +15,7 @@ import {
   Gamepad2,
   GripVertical,
   ListOrdered,
+  Link2,
   LogIn,
   LogOut,
   Menu,
@@ -23,6 +25,7 @@ import {
   Plus,
   RotateCw,
   Search,
+  Share2,
   Shuffle,
   SlidersHorizontal,
   Trash2,
@@ -44,6 +47,7 @@ import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from './section-notes.js'
 import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from './ownership-filter.js';
 import { BACKUP_IMPORT_LIMITS, parseCollectionBackup } from './backup-import.js';
 import { collectionSummaryStats } from './collection-stats.js';
+import { buildCollectionShareUrl, createCollectionShare, deleteCollectionShare, getCollectionShare, loadSharedCollection, readShareToken, setCollectionShareEnabled } from './collection-share.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -237,6 +241,8 @@ function MultiSelect({ label, values, options, onChange }) {
 }
 
 export default function App() {
+  const [shareToken] = useState(() => readShareToken());
+  const sharedMode = Boolean(shareToken);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -250,6 +256,7 @@ export default function App() {
   const [account, setAccount] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [viewAsMember, setViewAsMember] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [adminClubs, setAdminClubs] = useState([]);
@@ -257,10 +264,10 @@ export default function App() {
   const [confirmation, setConfirmation] = useState(null);
   const [collections, setCollections] = useState([]);
   const [draggedCollectionId, setDraggedCollectionId] = useState(null);
-  const [collectionsLoading, setCollectionsLoading] = useState(true);
+  const [collectionsLoading, setCollectionsLoading] = useState(() => !sharedMode);
   const [collectionId, setCollectionId] = useState(null);
   const [collectionLoading, setCollectionLoading] = useState(false);
-  const [landingApplied, setLandingApplied] = useState(false);
+  const [landingApplied, setLandingApplied] = useState(() => sharedMode);
   const snapshotCache = useRef(new Map());
   const latestRequest = useRef(0);
   const userSelectedCollection = useRef(false);
@@ -288,9 +295,13 @@ export default function App() {
     const request = ++latestRequest.current;
     if (fresh) setRefreshing(true);
     try {
-      const snapshot = await loadMediaSnapshot({ fresh, collectionId: targetCollectionId, accessToken, mainWatchlistOwnerIds });
-      cacheSnapshot(snapshot, targetCollectionId);
-      if (fresh && snapshot.collectionId !== MAIN_WATCHLIST_ID) snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+      const snapshot = sharedMode
+        ? await loadSharedCollection(shareToken)
+        : await loadMediaSnapshot({ fresh, collectionId: targetCollectionId, accessToken, mainWatchlistOwnerIds });
+      if (!sharedMode) {
+        cacheSnapshot(snapshot, targetCollectionId);
+        if (fresh && snapshot.collectionId !== MAIN_WATCHLIST_ID) snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+      }
       if (request !== latestRequest.current) return;
       setData(snapshot);
       setError('');
@@ -321,9 +332,14 @@ export default function App() {
 
   useEffect(() => {
     refresh();
-  }, [collectionId, accessToken, mainWatchlistScopeKey]);
+  }, [collectionId, accessToken, mainWatchlistScopeKey, shareToken]);
 
   useEffect(() => {
+    if (sharedMode) {
+      setCollections([]);
+      setCollectionsLoading(false);
+      return;
+    }
     setCollectionsLoading(true);
     loadPublicCollections({ fresh: true, accessToken })
       .then((nextCollections) => {
@@ -335,7 +351,7 @@ export default function App() {
       })
       .catch(() => setCollections([]))
       .finally(() => setCollectionsLoading(false));
-  }, [accessToken]);
+  }, [accessToken, sharedMode]);
 
   useEffect(() => {
     if (account?.profile?.role !== 'admin' || !accessToken) {
@@ -352,6 +368,7 @@ export default function App() {
   }, [accessToken, account?.profile?.role]);
 
   useEffect(() => {
+    if (sharedMode) return undefined;
     if (!data?.collectionId || !collections.length) return undefined;
     let cancelled = false;
     const prefetch = async () => {
@@ -373,7 +390,7 @@ export default function App() {
       if (window.cancelIdleCallback) window.cancelIdleCallback(idle);
       else window.clearTimeout(idle);
     };
-  }, [collections, data?.collectionId, accessToken, viewAsMember, adminClubs]);
+  }, [collections, data?.collectionId, accessToken, viewAsMember, adminClubs, sharedMode]);
 
   useEffect(() => {
     if (!viewAsMember || account?.profile?.role !== 'admin' || !data?.collectionId || data.collectionId === MAIN_WATCHLIST_ID) return;
@@ -432,8 +449,9 @@ export default function App() {
 
   if (!data) {
     return (
-      <div className="loading-screen">
-        <p>{error || 'The public media collection could not be opened.'}</p>
+      <div className={cls('loading-screen', sharedMode && 'shared-unavailable')}>
+        {sharedMode && <><div className="brand-mark"><Link2 /></div><span className="eyebrow">SHARED COLLECTION</span><h1>Link unavailable</h1></>}
+        <p>{error || (sharedMode ? 'This share link is invalid, disabled, deleted, or has been replaced.' : 'The public media collection could not be opened.')}</p>
         <Button onClick={() => refresh({ fresh: true })}>Try again</Button>
       </div>
     );
@@ -441,13 +459,16 @@ export default function App() {
 
   const selectedMedia = data.media.find((item) => item.item_id === selectedMediaId);
   const canEditCollection = Boolean(
+    !sharedMode
+    &&
     account?.profile?.approved_at
     && !account.profile.deactivated_at
     && data.ownerId
     && account.profile.id === data.ownerId,
   );
   const isAdminAccount = account?.profile?.role === 'admin';
-  const isAdmin = isAdminAccount && !viewAsMember;
+  const isAdmin = isAdminAccount && !viewAsMember && !sharedMode;
+  const canShareCollection = canEditCollection && !data.mainWatchlist;
   const saveStarRating = async (databaseId, starRating) => {
     const previousData = data;
     const applyRating = (currentData, changes) => ({
@@ -492,14 +513,14 @@ export default function App() {
   };
 
   return (
-    <div className={cls('app-shell media-only-shell public-media-shell', navCollapsed && 'nav-collapsed')}>
+    <div className={cls('app-shell media-only-shell public-media-shell', navCollapsed && 'nav-collapsed', sharedMode && 'shared-collection-shell')}>
       <div className="paper-texture" />
       <aside className={cls('sidebar', mobileNav && 'open')}>
         <button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
           <span className="brand-mark">KM</span>
           <span><strong>Kit’s Media<br />Room</strong></span>
         </button>
-        <nav>
+        {!sharedMode && <nav>
           {data?.storage === 'supabase' && <button className={data.mainWatchlist ? 'active' : ''} onClick={() => selectCollection(MAIN_WATCHLIST_ID)}>
             <ListOrdered size={17} />Main Watchlist
           </button>}
@@ -507,12 +528,12 @@ export default function App() {
           {data?.storage === 'supabase' && displayedCollections.map((collection) => <button key={collection.id} draggable={isAdmin} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)} onDragStart={(event) => { if (!isAdmin) return; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', collection.id); setDraggedCollectionId(collection.id); }} onDragEnd={() => setDraggedCollectionId(null)} onDragOver={(event) => { if (isAdmin && draggedCollectionId) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); dropCollection(collection.id); }}>
             <UserRound size={17} />{collection.title}
           </button>)}
-        </nav>
+        </nav>}
         <div className="sidebar-bottom">
           <div className="drive-state">
             <span>
-              <strong>Public collection</strong>
-              <small>{generatedAt ? `Published ${generatedAt.toLocaleDateString('en-AU')}` : 'Static snapshot'}</small>
+              <strong>{sharedMode ? 'Shared Collection' : 'Public collection'}</strong>
+              <small>{sharedMode ? 'Read-only link' : generatedAt ? `Published ${generatedAt.toLocaleDateString('en-AU')}` : 'Static snapshot'}</small>
             </span>
           </div>
         </div>
@@ -528,7 +549,9 @@ export default function App() {
             <Search size={17} /><span>Search the collection…</span><kbd>Ctrl K</kbd>
           </button>
           <div className="top-actions">
+            {sharedMode && <span className="shared-mode-badge"><Link2 size={14} />Shared Collection</span>}
             <span className="today"><CalendarDays size={14} />{new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}</span>
+            {canShareCollection && <Button className="share-collection-button" icon={Share2} onClick={() => setShareOpen(true)}>Share Collection</Button>}
             {authLoading ? <span className="account-state">Checking account…</span> : (
               <Button className="account-button" icon={account ? UserRound : LogIn} onClick={() => setAccountOpen(true)}>
                 {account ? `${account.profile?.display_name || account.profile?.username}${viewAsMember ? ' · Member view' : ''}` : 'Sign in'}
@@ -537,7 +560,7 @@ export default function App() {
           </div>
         </header>
 
-        {error && <div className="error-banner">The public collection could not refresh: {error}</div>}
+        {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh' : 'The public collection could not refresh'}: {error}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
           <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} currentUserId={account?.profile?.id} refresh={refresh} requestConfirmation={setConfirmation} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
@@ -639,7 +662,7 @@ export default function App() {
               throw error;
             }
           }}
-          canInterest={Boolean(account?.profile?.approved_at && !account.profile.deactivated_at && ['film', 'television'].includes(selectedMedia.type))}
+          canInterest={Boolean(!sharedMode && account?.profile?.approved_at && !account.profile.deactivated_at && ['film', 'television'].includes(selectedMedia.type))}
           interested={Boolean(selectedMedia.interests?.some((person) => person?.username === account?.profile?.username))}
           onInterest={async (enabled) => {
             const previousData = data;
@@ -708,6 +731,8 @@ export default function App() {
           onAccountUpdated={async (profile) => { setAccount((current) => ({ ...current, profile })); const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); snapshotCache.current.clear(); await refresh({ fresh: true, targetCollectionId: data.collectionId }); setToast('Account settings saved.'); }}
         />
       )}
+
+      {shareOpen && <ShareCollectionDialog accessToken={accessToken} collectionId={data.collectionId} collectionTitle={data.collectionTitle} notify={setToast} onClose={() => setShareOpen(false)} />}
 
       {adminOpen && <AdminUsers accessToken={accessToken} clubs={adminClubs} onClubsChange={setAdminClubs} mainWatchlistClubId={adminMainClubId} onMainWatchlistClubChange={(clubId) => {
         if (clubId) window.localStorage.setItem(ADMIN_MAIN_CLUB_KEY, clubId);
@@ -1004,6 +1029,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   return (
     <div className="page media-page">
       <PageHero
+        eyebrow={data.shared ? 'SHARED COLLECTION · READ ONLY' : undefined}
         title={data.collectionTitle || 'The media room'}
         description={data.mainWatchlist
           ? 'Every selected shelf, mirrored live from its owner’s collection.'
@@ -1421,6 +1447,89 @@ function ConfirmDialog({ title, message, confirmLabel = 'Confirm', tone = 'defau
     <span className="eyebrow">PLEASE CONFIRM</span><h2 id="confirm-title">{title}</h2><p className="dialog-intro">{message}</p>
     {error && <p className="auth-error">{error}</p>}
     <div className="dialog-actions"><button className="text-button" onClick={onClose} disabled={busy}>Cancel</button><Button className={tone === 'danger' ? 'confirm-danger' : ''} disabled={busy} onClick={async () => { if (optimistic) { onClose(); Promise.resolve(onConfirm()).catch(() => null); return; } setBusy(true); setError(''); try { await onConfirm(); onClose(); } catch { setError('That change could not be completed. Please try again.'); setBusy(false); } }}>{busy ? 'Working…' : confirmLabel}</Button></div>
+  </section></div>;
+}
+
+function ShareCollectionDialog({ accessToken, collectionId, collectionTitle, notify, onClose }) {
+  useEscape(onClose);
+  const [share, setShare] = useState(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    getCollectionShare(accessToken, collectionId)
+      .then((value) => { if (!cancelled) setShare(value || null); })
+      .catch(() => { if (!cancelled) setError('Sharing status could not be loaded. Please try again.'); });
+    return () => { cancelled = true; };
+  }, [accessToken, collectionId]);
+
+  const shareUrl = share?.token ? buildCollectionShareUrl(share.token) : '';
+  const createOrRotate = async (rotate = false) => {
+    if (rotate && !window.confirm('Create a new link? The current URL will stop working immediately.')) return;
+    setBusy(true);
+    setError('');
+    try {
+      const nextShare = await createCollectionShare(accessToken, collectionId, rotate);
+      setShare(nextShare);
+      notify(rotate ? 'New share link created. The old link is now unavailable.' : 'Share link created.');
+    } catch {
+      setError(rotate ? 'A new link could not be created. The current link is unchanged.' : 'The share link could not be created.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggleEnabled = async () => {
+    const previous = share;
+    const optimistic = { ...share, enabled: !share.enabled };
+    setShare(optimistic);
+    setError('');
+    try {
+      const confirmed = await setCollectionShareEnabled(accessToken, collectionId, optimistic.enabled);
+      setShare(confirmed);
+      notify(confirmed.enabled ? 'Share link turned on.' : 'Share link turned off. The URL has been retained.');
+    } catch {
+      setShare(previous);
+      setError('Sharing could not be changed. The previous setting has been restored.');
+      notify('Share setting could not be saved. Previous setting restored.');
+    }
+  };
+  const removeLink = async () => {
+    if (!window.confirm('Delete this share link? Anyone using this URL will lose access immediately.')) return;
+    const previous = share;
+    setShare(null);
+    setError('');
+    try {
+      await deleteCollectionShare(accessToken, collectionId);
+      notify('Share link deleted.');
+    } catch {
+      setShare(previous);
+      setError('The link could not be deleted. It has been restored.');
+      notify('Share link could not be deleted. Previous link restored.');
+    }
+  };
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      notify('Share link copied.');
+    } catch {
+      setError('The browser could not copy the link. Select the URL and copy it manually.');
+    }
+  };
+
+  return <div className="modal-layer editor-layer share-dialog-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog share-collection-dialog" role="dialog" aria-modal="true" aria-labelledby="share-dialog-title">
+    <button className="close" type="button" onClick={onClose} aria-label="Close share collection"><X /></button>
+    <span className="eyebrow">READ-ONLY ACCESS</span><h2 id="share-dialog-title">Share Collection</h2>
+    <p className="dialog-intro">Create a private-by-link, read-only view of {collectionTitle}. The collection will not appear in the visitor's sidebar or Main Watchlist.</p>
+    {share === undefined && !error && <div className="share-loading">Checking sharing status…</div>}
+    {share === null && <div className="share-empty"><Link2 size={24} /><strong>Sharing is not set up</strong><small>Create an unguessable link that you can revoke at any time.</small><Button icon={Link2} disabled={busy} onClick={() => createOrRotate(false)}>{busy ? 'Creating…' : 'Create share link'}</Button></div>}
+    {share && <>
+      <div className={cls('share-status', share.enabled ? 'enabled' : 'disabled')}><span><i />{share.enabled ? 'Sharing enabled' : 'Sharing disabled'}</span><small>{share.enabled ? 'Anyone with this exact URL can view this collection.' : 'This URL is retained but currently unavailable to visitors.'}</small></div>
+      <label className="share-url-label">Share URL<div className="share-url-row"><input readOnly value={shareUrl} onFocus={(event) => event.target.select()} /><Button icon={Copy} onClick={copyLink}>Copy link</Button></div></label>
+      <div className="share-primary-actions"><Button className={share.enabled ? 'share-disable-button' : 'share-enable-button'} icon={Link2} onClick={toggleEnabled}>{share.enabled ? 'Turn link off' : 'Turn link on'}</Button></div>
+      <div className="share-danger-zone"><div><strong>Replace or remove this link</strong><small>A new link immediately invalidates the old URL. Deleting removes sharing entirely.</small></div><span><Button className="quiet-button" disabled={busy} onClick={() => createOrRotate(true)}>{busy ? 'Creating…' : 'Create new link'}</Button><Button className="share-delete-button" icon={Trash2} onClick={removeLink}>Delete link</Button></span></div>
+    </>}
+    {error && <p className="auth-error">{error}</p>}
   </section></div>;
 }
 
