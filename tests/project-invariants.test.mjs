@@ -549,6 +549,17 @@ test('deactivated collections stay out of admin navigation and Main Watchlist re
   assert.match(migration, /public\.can_view_collection\(m\.collection_id\)[\s\S]*m\.deleted_at is null or public\.can_manage_collection\(m\.collection_id\)/);
 });
 
+test('collection titles use a plain apostrophe for current and future members', async () => {
+  const migration = await read('supabase/migrations/20260718030000_fix_collection_apostrophes.sql');
+
+  assert.match(migration, /update public\.collections c[\s\S]*p\.display_name \|\| '''s Collection'/);
+  assert.match(migration, /c\.slug <> 'kits-collection'/);
+  assert.match(migration, /create or replace function public\.update_own_display_name/);
+  assert.match(migration, /create or replace function public\.approve_profile/);
+  assert.equal((migration.match(/'''s Collection'/g) || []).length, 3);
+  assert.doesNotMatch(migration, /â|€™|’s Collection/);
+});
+
 test('enrichment requests are cached, server-rate-limited, and return retry timing to the UI', async () => {
   const app = await read('src/App.jsx');
   const writes = await read('src/media-write.js');
