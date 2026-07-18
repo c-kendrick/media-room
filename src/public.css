@@ -184,10 +184,10 @@
 .shelf-order-actions,.shelf-edit-actions,.shelf-page-actions{border-color:#cdbdac;background:#fffaf2}
 .shelf-page-actions small{min-width:30px;color:#756b61;font-size:8px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums}
 .bulk-import-dialog{width:min(660px,calc(100vw - 32px))}
-.bulk-import-destination,.bulk-import-input{display:grid;gap:7px;margin-top:16px;color:#51473d;font-size:12px;font-weight:700}
-.bulk-import-destination select,.bulk-import-input textarea{width:100%;box-sizing:border-box;border:1px solid #bdb09e;background:#fffdf8;color:#332b25;padding:10px 11px;font:inherit}
+.bulk-import-input{display:grid;gap:7px;margin-top:16px;color:#51473d;font-size:12px;font-weight:700}
+.bulk-import-input textarea{width:100%;box-sizing:border-box;border:1px solid #bdb09e;background:#fffdf8;color:#332b25;padding:10px 11px;font:inherit}
 .bulk-import-input textarea{resize:vertical;line-height:1.55}
-.bulk-import-format{margin:7px 0 18px!important;color:#83766a!important;font-size:9px!important}
+.bulk-import-dialog .shelf-picker{margin-top:18px}
 
 .media-card[draggable="true"]{cursor:grab}
 .media-card[draggable="true"]:active{cursor:grabbing}
