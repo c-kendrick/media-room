@@ -537,6 +537,18 @@ test('private clubs restrict collection visibility and stay admin-only', async (
   assert.match(styles, /\.admin-club-panel/);
 });
 
+test('deactivated collections stay out of admin navigation and Main Watchlist reads', async () => {
+  const migration = await read('supabase/migrations/20260718020000_hide_deactivated_collections.sql');
+  const clubs = await read('supabase/migrations/20260718010000_private_clubs.sql');
+
+  assert.match(clubs, /public\.profile_is_active\(c\.owner_id\)/);
+  assert.match(migration, /using \(public\.can_view_collection\(id\)\)/);
+  assert.doesNotMatch(migration, /can_view_collection\(id\) or public\.can_manage_collection\(id\)/);
+  assert.match(migration, /public\.can_view_collection\(collection_id\)[\s\S]*deleted_at is null or public\.can_manage_collection\(collection_id\)/);
+  assert.match(migration, /public\.can_view_collection\(s\.collection_id\)[\s\S]*s\.deleted_at is null or public\.can_manage_collection\(s\.collection_id\)/);
+  assert.match(migration, /public\.can_view_collection\(m\.collection_id\)[\s\S]*m\.deleted_at is null or public\.can_manage_collection\(m\.collection_id\)/);
+});
+
 test('enrichment requests are cached, server-rate-limited, and return retry timing to the UI', async () => {
   const app = await read('src/App.jsx');
   const writes = await read('src/media-write.js');
