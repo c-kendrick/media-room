@@ -805,7 +805,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   const [stampFilters, setStampFilters] = useState([]);
   const [creatingShelf, setCreatingShelf] = useState(false);
   const [addingMedia, setAddingMedia] = useState(false);
-  const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [bulkImportType, setBulkImportType] = useState(null);
   const [enrichingPosters, setEnrichingPosters] = useState(false);
   const [enrichingDetails, setEnrichingDetails] = useState(false);
   const [posterRetryAfter, setPosterRetryAfter] = useState(0);
@@ -1066,14 +1066,29 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
           <Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button>
           {canEdit && <><input ref={backupInputRef} hidden type="file" accept=".json,application/json" onChange={importBackupFile} /><Button className="quiet-button" icon={Upload} disabled={importingBackup} onClick={() => backupInputRef.current?.click()}>{importingBackup ? 'Importing backup…' : 'Import backup'}</Button></>}
           {canEdit && <Button className="quiet-button bin-button" icon={Trash2} onClick={() => setBinOpen(true)}>Bin{binCount ? ` (${binCount})` : ''}</Button>}
-          {canEdit && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportOpen(true)}>Bulk Import {section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games'}</Button>}
+          {canEdit && section === 'screen' && <><Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('film')}>Bulk Import Film</Button><Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('television')}>Bulk Import Television</Button></>}
+          {canEdit && section === 'book' && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('book')}>Bulk Import Books</Button>}
+          {canEdit && section === 'game' && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('game')}>Bulk Import Video Games</Button>}
         </div>
       </section>}
       {creatingShelf && <CreateShelfDialog section={section} onClose={() => setCreatingShelf(false)} onSave={async (values) => { setCreatingShelf(false); try { await createShelf(accessToken, { collection_id: data.collectionId, section, ...values, position: (shelves.at(-1)?.position || 0) + 1000 }); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }} />}
       {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id, index) => [id, (index + 1) * 1000])), interests: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, collection_id: data.collectionId }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setInterest(accessToken, currentUserId, created[0].id, true); await refresh({ fresh: true }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('Media added.'); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('The media item could not be saved.'); }); }} />}
       {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); try { await permanentlyDeleteMedia(accessToken, item.database_id); snapshotCache.current.delete(MAIN_WATCHLIST_ID); notify(`${item.title} permanently deleted.`); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); try { await deleteShelf(accessToken, shelf.shelf_id); snapshotCache.current.delete(MAIN_WATCHLIST_ID); notify(`${shelf.name} permanently deleted.`); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })} />}
       {shelfEditor && <ShelfEditDialog shelf={shelfEditor} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
-      {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`); }} />}
+      {bulkImportType && <BulkImportDialog type={bulkImportType} shelves={shelves} onClose={() => setBulkImportType(null)} onImport={(shelfIds, rows) => {
+        const temporaryBatch = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const temporaryItems = rows.map((item, index) => ({ ...item, year: null, item_id: `bulk-${temporaryBatch}-${index}`, database_id: `bulk-${temporaryBatch}-${index}`, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id) => [id, (index + 1) * 1000])), interests: [], optimistic: true, created_at: new Date().toISOString() }));
+        setOptimisticMediaItems((current) => [...current, ...temporaryItems]);
+        setBulkImportType(null);
+        bulkImportMedia(accessToken, data.collectionId, shelfIds, section, rows).then(async (result) => {
+          await refresh({ fresh: true });
+          setOptimisticMediaItems((current) => current.filter((item) => !String(item.database_id).startsWith(`bulk-${temporaryBatch}-`)));
+          notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`);
+        }).catch(() => {
+          setOptimisticMediaItems((current) => current.filter((item) => !String(item.database_id).startsWith(`bulk-${temporaryBatch}-`)));
+          notify('The items could not be imported. Apply the latest Supabase migration and try again.');
+        });
+      }} />}
     </div>
   );
 }
@@ -1613,35 +1628,20 @@ function AddMediaDialog({ section, shelves, initialShelfIds = [], onClose, onSav
   </form></div>;
 }
 
-function BulkImportDialog({ section, shelves, onClose, onImport }) {
+function BulkImportDialog({ type, shelves, onClose, onImport }) {
   useEscape(onClose);
   const [text, setText] = useState('');
-  const [shelfId, setShelfId] = useState(shelves[0]?.shelf_id || '');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const sectionLabel = section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games';
-  const example = section === 'screen' ? 'Film | Arrival | 2016\nTV | Severance | 2022' : section === 'book' ? 'The Left Hand of Darkness | 1969' : 'Disco Elysium | 2019';
-  const parsed = text.split(/\r?\n/).map((line, index) => ({ line: line.trim(), number: index + 1 })).filter((row) => row.line).map((row) => {
-    const parts = row.line.split('|').map((part) => part.trim());
-    const typeToken = section === 'screen' ? String(parts.shift() || '').toLowerCase() : section;
-    const type = typeToken === 'tv' ? 'television' : typeToken;
-    const title = parts.shift() || '';
-    const yearText = parts.shift() || '';
-    const year = yearText ? Number(yearText) : null;
-    const validType = section === 'screen' ? type === 'film' || type === 'television' : type === section;
-    const validYear = year === null || (Number.isInteger(year) && year >= 1000 && year <= 3000);
-    return { ...row, item: { type, title, year }, valid: validType && Boolean(title) && validYear && parts.length === 0 };
-  });
-  const invalidRows = parsed.filter((row) => !row.valid);
-  const items = parsed.filter((row) => row.valid).map((row) => row.item);
+  const [shelfIds, setShelfIds] = useState(() => shelves[0]?.shelf_id ? [shelves[0].shelf_id] : []);
+  const labels = { film: 'Film', television: 'Television', book: 'Books', game: 'Video Games' };
+  const itemLabels = { film: ['Film', 'Films'], television: ['TV Show', 'TV Shows'], book: ['Book', 'Books'], game: ['Video Game', 'Video Games'] };
+  const examples = { film: 'Arrival\nIkiru\nThe Godfather', television: 'Severance\nThe Bear\nAndor', book: 'The Left Hand of Darkness\nBeloved\nPiranesi', game: 'Disco Elysium\nPentiment\nHades' };
+  const items = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((title) => ({ type, title }));
 
-  return <div className="modal-layer editor-layer"><form className="media-edit-dialog bulk-import-dialog" onSubmit={async (event) => { event.preventDefault(); if (!shelfId || !items.length || invalidRows.length) return; setSaving(true); setError(''); try { await onImport(shelfId, items); } catch { setError('Nothing was imported. Check the format, apply the latest Supabase migration, and try again.'); setSaving(false); } }}>
-    <button className="close" type="button" onClick={onClose} aria-label="Close bulk import"><X /></button><span className="eyebrow">OWNER-ONLY IMPORT</span><h2>Bulk Import {sectionLabel}</h2><p className="dialog-intro">This batch can contain only {sectionLabel.toLowerCase()} entries and will be added to one shelf. Matching title-and-year duplicates are skipped.</p>
-    <label className="bulk-import-destination">Destination shelf<select value={shelfId} onChange={(event) => setShelfId(event.target.value)}>{shelves.map((shelf) => <option key={shelf.shelf_id} value={shelf.shelf_id}>{shelf.name}</option>)}</select></label>
-    <label className="bulk-import-input">One item per line<textarea autoFocus rows="10" value={text} onChange={(event) => setText(event.target.value)} placeholder={example} /></label>
-    <p className="bulk-import-format">{section === 'screen' ? 'Format: Film or TV | Title | Year (year optional)' : 'Format: Title | Year (year optional)'}</p>
-    {invalidRows.length > 0 && <p className="auth-error">Check line{invalidRows.length === 1 ? '' : 's'} {invalidRows.map((row) => row.number).join(', ')}. This batch has not been imported.</p>}{error && <p className="auth-error">{error}</p>}
-    <div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={saving || !items.length || invalidRows.length > 0 || !shelfId}>{saving ? 'Importing…' : `Bulk Import ${items.length || ''} ${sectionLabel}`}</Button></div>
+  return <div className="modal-layer editor-layer"><form className="media-edit-dialog bulk-import-dialog" onSubmit={(event) => { event.preventDefault(); if (!shelfIds.length || !items.length) return; onImport(shelfIds, items); }}>
+    <button className="close" type="button" onClick={onClose} aria-label="Close bulk import"><X /></button><span className="eyebrow">BULK IMPORT</span><h2>Bulk Import {labels[type]}</h2><p className="dialog-intro">Add one title per line, then choose every shelf it belongs on.</p>
+    <label className="bulk-import-input">One title per line<textarea autoFocus rows="10" value={text} onChange={(event) => setText(event.target.value)} placeholder={examples[type]} /></label>
+    <fieldset className="shelf-picker"><legend>Add to shelves</legend>{shelves.map((shelf) => <label className={shelfIds.includes(shelf.shelf_id) ? 'selected' : ''} key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} /><span>{shelf.name}</span></label>)}</fieldset>
+    <div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={!items.length || !shelfIds.length}>{items.length ? `Import ${items.length} ${itemLabels[type][items.length === 1 ? 0 : 1]}` : 'Import'}</Button></div>
   </form></div>;
 }
 

@@ -10,7 +10,9 @@ const yearFrom = (value: unknown) => Number(String(value || '').slice(0, 4)) || 
 type MediaType = 'film' | 'television' | 'book' | 'game';
 type Details = { year?: number | null; creator?: string | null; director?: string | null; description?: string | null; format?: string | null; platforms?: string[]; genres?: string[]; runtime?: number | null };
 type MediaItem = Details & { id: string; collection_id: string; type: MediaType; title: string };
-type Candidate = { id: string | number; title: string; year: number | null; provider: string; details: Details };
+type Candidate = { id: string | number; title: string; year: number | null; provider: string; details: Details; year_fallback?: boolean };
+type TmdbEndpoint = 'movie' | 'tv';
+type TmdbMatch = { id: number; title?: string; name?: string; release_date?: string; first_air_date?: string };
 const writableFields = ['year', 'creator', 'director', 'description', 'format', 'platforms', 'genres', 'runtime'] as const;
 const isBlank = (value: unknown) => value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
 
@@ -22,25 +24,51 @@ async function enforceRateLimit(client: ReturnType<typeof createClient>, action:
   return null;
 }
 
-async function tmdbCandidates(item: MediaItem): Promise<Candidate[]> {
+async function tmdbSearch(key: string, endpoint: TmdbEndpoint, title: string, year?: number | null): Promise<TmdbMatch[]> {
+  const yearName = endpoint === 'tv' ? 'first_air_date_year' : 'primary_release_year';
+  const yearQuery = year ? `&${yearName}=${year}` : '';
+  const response = await fetch(`https://api.themoviedb.org/3/search/${endpoint}?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(title)}${yearQuery}`);
+  if (!response.ok) throw new Error('TMDB search failed');
+  return (await response.json()).results || [];
+}
+
+async function tmdbEndpointMatches(key: string, endpoint: TmdbEndpoint, item: MediaItem, manualReview: boolean) {
+  const strict = await tmdbSearch(key, endpoint, item.title, item.year);
+  if (!item.year) return strict.map((match) => ({ match, yearFallback: false }));
+  if (manualReview) {
+    const broad = await tmdbSearch(key, endpoint, item.title);
+    const seen = new Set(strict.map((match: { id: number }) => match.id));
+    return [
+      ...strict.map((match) => ({ match, yearFallback: false })),
+      ...broad.filter((match) => !seen.has(match.id)).map((match) => ({ match, yearFallback: true })),
+    ];
+  }
+  if (strict.length) return strict.map((match) => ({ match, yearFallback: false }));
+  return (await tmdbSearch(key, endpoint, item.title)).map((match) => ({ match, yearFallback: true }));
+}
+
+async function tmdbCandidates(item: MediaItem, manualReview = false): Promise<Candidate[]> {
   const key = Deno.env.get('TMDB_API_KEY');
   if (!key) throw new Error('TMDB_API_KEY is not configured');
-  const endpoint = item.type === 'television' ? 'tv' : 'movie';
-  const yearName = item.type === 'television' ? 'first_air_date_year' : 'year';
-  const year = item.year ? `&${yearName}=${item.year}` : '';
-  const search = await fetch(`https://api.themoviedb.org/3/search/${endpoint}?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(item.title)}${year}`);
-  if (!search.ok) throw new Error('TMDB search failed');
-  const matches = ((await search.json()).results || []).slice(0, 8);
-  return Promise.all(matches.map(async (match: { id: number; title?: string; name?: string; release_date?: string; first_air_date?: string }) => {
+  const preferred: TmdbEndpoint = item.type === 'television' ? 'tv' : 'movie';
+  const endpoints: TmdbEndpoint[] = [preferred, preferred === 'tv' ? 'movie' : 'tv'];
+  const matches = (await Promise.all(endpoints.map(async (endpoint) => ({ endpoint, matches: await tmdbEndpointMatches(key, endpoint, item, manualReview) })))).flatMap(({ endpoint, matches: endpointMatches }) => {
+    const strictMatches = endpointMatches.filter(({ yearFallback }) => !yearFallback).slice(0, 2);
+    const selected = manualReview && item.year
+      ? [...strictMatches, ...endpointMatches.filter(({ yearFallback }) => yearFallback).slice(0, 4 - strictMatches.length)]
+      : endpointMatches.slice(0, 4);
+    return selected.map(({ match, yearFallback }) => ({ endpoint, match, yearFallback }));
+  });
+  return Promise.all(matches.map(async ({ endpoint, match, yearFallback }) => {
     const response = await fetch(`https://api.themoviedb.org/3/${endpoint}/${match.id}?api_key=${encodeURIComponent(key)}&append_to_response=credits`);
     if (!response.ok) throw new Error('TMDB details failed');
     const detail = await response.json();
     const directors = (detail.credits?.crew || []).filter((person: { job?: string }) => person.job === 'Director').map((person: { name?: string }) => person.name).filter(Boolean);
     const creators = (detail.created_by || []).map((person: { name?: string }) => person.name).filter(Boolean);
-    return { id: match.id, title: match.title || match.name || '', year: yearFrom(match.release_date || match.first_air_date), provider: 'TMDB', details: {
+    return { id: `${endpoint}:${match.id}`, title: match.title || match.name || '', year: yearFrom(match.release_date || match.first_air_date), provider: endpoint === 'movie' ? 'TMDB Film' : 'TMDB Television', year_fallback: yearFallback, details: {
       year: yearFrom(match.release_date || match.first_air_date), director: directors.join(', ') || null, creator: creators.join(', ') || null,
       description: detail.overview || null, genres: (detail.genres || []).map((genre: { name?: string }) => genre.name).filter(Boolean),
-      runtime: item.type === 'television' ? detail.episode_run_time?.[0] || null : detail.runtime || null,
+      runtime: endpoint === 'tv' ? detail.episode_run_time?.[0] || null : detail.runtime || null,
     } };
   }));
 }
@@ -76,10 +104,10 @@ async function rawgCandidates(item: MediaItem): Promise<Candidate[]> {
   }));
 }
 
-function providerCandidates(item: MediaItem) {
+function providerCandidates(item: MediaItem, manualReview = false) {
   if (item.type === 'book') return googleBookCandidates(item);
   if (item.type === 'game') return rawgCandidates(item);
-  return tmdbCandidates(item);
+  return tmdbCandidates(item, manualReview);
 }
 
 function blankOnly(item: MediaItem, candidate: Candidate) {
@@ -92,7 +120,9 @@ function blankOnly(item: MediaItem, candidate: Candidate) {
 }
 
 function confidentCandidate(item: MediaItem, candidates: Candidate[]) {
-  const exact = candidates.filter((candidate) => normalized(candidate.title) === normalized(item.title) && (!item.year || !candidate.year || candidate.year === item.year));
+  const exact = candidates.filter((candidate) => normalized(candidate.title) === normalized(item.title)
+    && (!item.year || !candidate.year || candidate.year === item.year)
+    && !(candidate.year_fallback && item.year && candidate.year !== item.year));
   return exact.length === 1 ? exact[0] : null;
 }
 
@@ -151,6 +181,6 @@ Deno.serve(async (request) => {
     }
     const limited = await enforceRateLimit(client, 'details-search');
     if (limited) return limited;
-    return json({ candidates: (await providerCandidates(item)).map((candidate) => ({ ...candidate, details: blankOnly(item, candidate) })).filter((candidate) => Object.keys(candidate.details).length).slice(0, 8) });
+    return json({ candidates: (await providerCandidates(item, true)).map((candidate) => ({ ...candidate, details: blankOnly(item, candidate) })).filter((candidate) => Object.keys(candidate.details).length).slice(0, 8) });
   } catch (error) { return json({ error: error instanceof Error ? error.message : 'Detail enrichment failed.' }, 500); }
 });

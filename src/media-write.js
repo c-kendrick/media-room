@@ -176,9 +176,9 @@ export function reorderCollections(accessToken, orderedCollectionIds) {
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
-export function bulkImportMedia(accessToken, collectionId, shelfId, section, items) {
-  return supabaseRequest('/rest/v1/rpc/bulk_import_media', { method: 'POST', fresh: true,
-    body: { target_collection_id: collectionId, target_shelf_id: shelfId, target_section: section, import_items: items },
+export function bulkImportMedia(accessToken, collectionId, shelfIds, section, items) {
+  return supabaseRequest('/rest/v1/rpc/bulk_import_media_to_shelves', { method: 'POST', fresh: true,
+    body: { target_collection_id: collectionId, target_shelf_ids: shelfIds, target_section: section, import_items: items },
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 

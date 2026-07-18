@@ -596,3 +596,47 @@ test('enrichment requests are cached, server-rate-limited, and return retry timi
     globalThis.fetch = originalFetch;
   }
 });
+
+test('bulk imports are contextual, title-only, multi-shelf, and optimistic', async () => {
+  const app = await read('src/App.jsx');
+  const writes = await read('src/media-write.js');
+  const styles = await read('src/public.css');
+  const migration = await read('supabase/migrations/20260719010000_multi_shelf_bulk_import.sql');
+  const dialog = app.slice(app.indexOf('function BulkImportDialog'), app.indexOf('function EditMediaDialog'));
+
+  assert.match(app, />Bulk Import Film</);
+  assert.match(app, />Bulk Import Television</);
+  assert.match(app, />Bulk Import Books</);
+  assert.match(app, />Bulk Import Video Games</);
+  assert.doesNotMatch(dialog, /OWNER-ONLY IMPORT|Destination shelf|year optional|Film \||TV \|/i);
+  assert.match(dialog, /className="shelf-picker"/);
+  assert.match(dialog, /shelfIds\.includes\(shelf\.shelf_id\)/);
+  assert.match(app, /setBulkImportType\(null\);[\s\S]*bulkImportMedia\(/);
+  assert.match(app, /database_id: `bulk-\$\{temporaryBatch\}-\$\{index\}`/);
+  assert.match(writes, /rpc\/bulk_import_media_to_shelves/);
+  assert.match(writes, /target_shelf_ids: shelfIds/);
+  assert.match(styles, /\.bulk-import-dialog \.shelf-picker/);
+  assert.match(migration, /target_shelf_ids uuid\[\]/);
+  assert.match(migration, /foreach target_shelf_id in array target_shelf_ids/);
+  assert.match(migration, /m\.type = item_type[\s\S]*lower\(trim\(m\.title\)\) = lower\(item_title\)/);
+  assert.doesNotMatch(migration, /item_year|entry->>'year'/);
+});
+
+test('TMDB safely searches Film and Television with review-only year fallbacks', async () => {
+  const details = await read('supabase/functions/enrich-details/index.ts');
+  const poster = await read('supabase/functions/enrich-poster/index.ts');
+
+  for (const edge of [details, poster]) {
+    assert.match(edge, /type TmdbEndpoint = 'movie' \| 'tv'/);
+    assert.match(edge, /const endpoints: TmdbEndpoint\[\] = \[preferred, preferred === 'tv' \? 'movie' : 'tv'\]/);
+    assert.match(edge, /await tmdbSearch\(key, endpoint, [^)]+, item\.year\)/);
+    assert.match(edge, /endpoint === 'tv' \? 'first_air_date_year' : 'primary_release_year'/);
+    assert.match(edge, /year_fallback/);
+    assert.match(edge, /candidate\.year_fallback && item\.year && candidate\.year !== item\.year/);
+  }
+  assert.match(details, /if \(manualReview\) \{[\s\S]*await tmdbSearch\(key, endpoint, item\.title\)/);
+  assert.match(details, /providerCandidates\(item, true\)/);
+  assert.match(details, /TMDB Film/);
+  assert.match(details, /TMDB Television/);
+  assert.match(poster, /if \(strict\.length \|\| !item\.year\)/);
+});

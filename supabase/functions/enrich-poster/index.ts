@@ -8,7 +8,9 @@ const normalized = (value: unknown) => String(value || '').trim().toLocaleLowerC
 const yearFrom = (value: unknown) => Number(String(value || '').slice(0, 4)) || null;
 
 type MediaItem = { id: string; collection_id: string; type: 'film' | 'television' | 'book' | 'game'; title: string; year: number | null; poster_url?: string | null };
-type Candidate = { id: string | number; title: string; year: number | null; poster_url: string; provider: string };
+type Candidate = { id: string | number; title: string; year: number | null; poster_url: string; provider: string; year_fallback?: boolean };
+type TmdbEndpoint = 'movie' | 'tv';
+type TmdbMatch = { id: number; title?: string; name?: string; poster_path?: string; release_date?: string; first_air_date?: string };
 
 async function enforceRateLimit(client: ReturnType<typeof createClient>, action: string) {
   const { data, error } = await client.rpc('claim_enrichment_request', { target_action: action });
@@ -18,19 +20,29 @@ async function enforceRateLimit(client: ReturnType<typeof createClient>, action:
   return null;
 }
 
+async function tmdbSearch(key: string, endpoint: TmdbEndpoint, title: string, year?: number | null): Promise<TmdbMatch[]> {
+  const yearName = endpoint === 'tv' ? 'first_air_date_year' : 'primary_release_year';
+  const yearQuery = year ? `&${yearName}=${year}` : '';
+  const response = await fetch(`https://api.themoviedb.org/3/search/${endpoint}?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(title)}${yearQuery}`);
+  if (!response.ok) throw new Error('TMDB search failed');
+  return (await response.json()).results || [];
+}
+
 async function tmdbCandidates(item: MediaItem, query?: string): Promise<Candidate[]> {
   const key = Deno.env.get('TMDB_API_KEY');
   if (!key) throw new Error('TMDB_API_KEY is not configured');
-  const endpoint = item.type === 'television' ? 'tv' : 'movie';
-  const yearName = item.type === 'television' ? 'first_air_date_year' : 'year';
-  const year = item.year ? `&${yearName}=${item.year}` : '';
-  const response = await fetch(`https://api.themoviedb.org/3/search/${endpoint}?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(query || item.title)}${year}`);
-  if (!response.ok) throw new Error('TMDB search failed');
-  const results = (await response.json()).results || [];
-  return results.filter((result: { poster_path?: string }) => result.poster_path).map((result: { id: number; title?: string; name?: string; poster_path: string; release_date?: string; first_air_date?: string }) => ({
-    id: result.id, title: result.title || result.name || '', year: yearFrom(result.release_date || result.first_air_date),
-    poster_url: `https://image.tmdb.org/t/p/w780${result.poster_path}`, provider: 'tmdb',
+  const title = query || item.title;
+  const preferred: TmdbEndpoint = item.type === 'television' ? 'tv' : 'movie';
+  const endpoints: TmdbEndpoint[] = [preferred, preferred === 'tv' ? 'movie' : 'tv'];
+  const endpointResults = await Promise.all(endpoints.map(async (endpoint) => {
+    const strict = await tmdbSearch(key, endpoint, title, item.year);
+    if (strict.length || !item.year) return { endpoint, results: strict, yearFallback: false };
+    return { endpoint, results: await tmdbSearch(key, endpoint, title), yearFallback: true };
   }));
+  return endpointResults.flatMap(({ endpoint, results, yearFallback }) => results.filter((result) => result.poster_path).slice(0, 4).map((result) => ({
+    id: `${endpoint}:${result.id}`, title: result.title || result.name || '', year: yearFrom(result.release_date || result.first_air_date),
+    poster_url: `https://image.tmdb.org/t/p/w780${result.poster_path!}`, provider: endpoint === 'movie' ? 'tmdb-film' : 'tmdb-television', year_fallback: yearFallback,
+  })));
 }
 
 async function googleBookCandidates(item: MediaItem, query?: string): Promise<Candidate[]> {
@@ -86,7 +98,8 @@ async function confidentPoster(item: MediaItem) {
   const candidates = await providerCandidates(item);
   if (item.type === 'game') return candidates[0] || null;
   const exact = candidates.filter((candidate) => normalized(candidate.title) === normalized(item.title)
-    && (!item.year || candidate.year === null || candidate.year === item.year));
+    && (!item.year || candidate.year === null || candidate.year === item.year)
+    && !(candidate.year_fallback && item.year && candidate.year !== item.year));
   const uniqueUrls = [...new Map(exact.map((candidate) => [candidate.poster_url, candidate])).values()];
   return uniqueUrls.length === 1 ? uniqueUrls[0] : null;
 }
