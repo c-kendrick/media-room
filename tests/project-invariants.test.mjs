@@ -537,6 +537,72 @@ test('private clubs restrict collection visibility and stay admin-only', async (
   assert.match(styles, /\.admin-club-panel/);
 });
 
+test('collection share links preserve Club isolation and expose one sanitized anonymous snapshot', async () => {
+  const migration = await read('supabase/migrations/20260719020000_revocable_collection_share_links.sql');
+
+  assert.match(migration, /create table public\.collection_share_links/);
+  assert.match(migration, /collection_id uuid primary key/);
+  assert.match(migration, /encode\(gen_random_bytes\(32\), 'hex'\)/);
+  assert.match(migration, /alter table public\.collection_share_links enable row level security/);
+  assert.match(migration, /revoke all on public\.collection_share_links from public, anon, authenticated/);
+  assert.match(migration, /create or replace function public\.get_shared_collection\(share_token text\)/);
+  assert.match(migration, /link\.token = share_token[\s\S]*link\.enabled/);
+  assert.match(migration, /p\.approved_at is not null[\s\S]*p\.rejected_at is null[\s\S]*p\.deactivated_at is null/);
+  assert.match(migration, /s\.collection_id = c\.id and s\.deleted_at is null/);
+  assert.match(migration, /m\.collection_id = c\.id and m\.deleted_at is null/);
+  assert.match(migration, /join public\.shelves s[\s\S]*join public\.media_items m/);
+  assert.match(migration, /grant execute on function public\.get_shared_collection\(text\) to anon, authenticated/);
+  assert.doesNotMatch(migration, /create (?:or replace )?policy/i);
+  assert.doesNotMatch(migration, /create or replace function public\.can_view_collection/);
+  assert.doesNotMatch(migration, /media_interest|public_profiles/);
+});
+
+test('share management supports stable disablement, rotation, deletion, and optimistic rollback', async () => {
+  const migration = await read('supabase/migrations/20260719020000_revocable_collection_share_links.sql');
+  const app = await read('src/App.jsx');
+  const share = await read('src/collection-share.js');
+
+  assert.match(migration, /create_collection_share\(target_collection_id uuid, rotate_token boolean default false\)/);
+  assert.match(migration, /case when rotate_token then encode\(gen_random_bytes\(32\), 'hex'\) else collection_share_links\.token end/);
+  assert.match(migration, /set_collection_share_enabled\(target_collection_id uuid, share_enabled boolean\)/);
+  assert.match(migration, /delete_collection_share\(target_collection_id uuid\)/);
+  assert.match(migration, /c\.owner_id = auth\.uid\(\)/);
+  assert.match(share, /fresh: true/);
+  assert.match(share, /'Cache-Control': 'no-store'/);
+  assert.match(app, /const optimistic = \{ \.\.\.share, enabled: !share\.enabled \}/);
+  assert.match(app, /setShare\(previous\)[\s\S]*Previous setting restored/);
+  assert.match(app, /setShare\(null\)[\s\S]*setShare\(previous\)/);
+});
+
+test('shared collection routing is read-only and completely isolated from Main Watchlist state', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/data.js');
+  const share = await read('src/collection-share.js');
+
+  assert.match(app, /const sharedMode = Boolean\(shareToken\)/);
+  assert.match(app, /sharedMode[\s\S]*await loadSharedCollection\(shareToken\)[\s\S]*await loadMediaSnapshot/);
+  assert.match(app, /if \(!sharedMode\) \{[\s\S]*cacheSnapshot/);
+  assert.match(app, /!sharedMode[\s\S]*account\?\.profile\?\.approved_at/);
+  assert.match(app, /const isAdmin = isAdminAccount && !viewAsMember && !sharedMode/);
+  assert.match(app, /canInterest=\{Boolean\(!sharedMode/);
+  assert.match(app, /data\.shared \? 'SHARED COLLECTION · READ ONLY'/);
+  assert.match(app, /sharedMode \? 'Read-only link'/);
+  assert.match(share, /share link is unavailable or has been revoked/i);
+  assert.doesNotMatch(data, /loadSharedCollection|get_shared_collection/);
+  assert.match(share, /mapSnapshot\(payload\.collection, payload\.shelves \|\| \[\], payload\.media \|\| \[\], payload\.memberships \|\| \[\]\)/);
+  assert.match(share, /shared: true/);
+});
+
+test('share URLs use a validated 256-bit token query route', async () => {
+  const { buildCollectionShareUrl, readShareToken, SHARE_TOKEN_PATTERN } = await import('../src/collection-share.js');
+  const token = 'ab'.repeat(32);
+  assert.equal(SHARE_TOKEN_PATTERN.test(token), true);
+  assert.equal(readShareToken({ search: `?share=${token.toUpperCase()}` }), token);
+  assert.equal(readShareToken({ search: '?share=short' }), 'short');
+  assert.equal(readShareToken({ search: '' }), '');
+  assert.equal(buildCollectionShareUrl(token, { href: 'https://example.test/media-room/?old=1#section' }), `https://example.test/media-room/?share=${token}`);
+});
+
 test('deactivated collections stay out of admin navigation and Main Watchlist reads', async () => {
   const migration = await read('supabase/migrations/20260718020000_hide_deactivated_collections.sql');
   const clubs = await read('supabase/migrations/20260718010000_private_clubs.sql');

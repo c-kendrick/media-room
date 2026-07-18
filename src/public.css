@@ -311,6 +311,20 @@
 .search-trigger{border-radius:999px!important;border-color:#ded3c5!important;background:#fffaf4!important;height:34px!important;min-width:0;max-width:410px}
 .search-trigger span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .top-actions{gap:4px!important}
+.share-collection-button{border-radius:999px!important;min-height:34px!important;background:#6f302d!important;border-color:#6f302d!important;color:#fff!important;box-shadow:none!important}
+.share-collection-button:hover{background:#83423c!important;border-color:#83423c!important}
+.shared-mode-badge{height:30px;padding:0 10px;border:1px solid #d1c0af;border-radius:999px;background:#fffaf2;color:#74584b;display:inline-flex;align-items:center;gap:6px;font-size:8px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.shared-collection-shell .sidebar nav{display:none}
+.shared-collection-shell .drive-state{border-color:#cdb8a8;background:#f7ebe1}
+.shared-unavailable{text-align:center;padding:24px}.shared-unavailable .brand-mark{display:grid;place-items:center}.shared-unavailable h1{margin:0;font-family:var(--serif);font-size:34px}.shared-unavailable p{max-width:520px;color:#746a60;line-height:1.6}
+.share-collection-dialog{width:min(620px,calc(100vw - 32px))!important}
+.share-collection-dialog .dialog-intro{margin:0 0 20px;color:#756a60;font-family:var(--serif);font-size:12px;line-height:1.55}
+.share-loading,.share-empty{min-height:170px;border:1px dashed #d4c6b7;border-radius:7px;background:#fffaf2;display:grid;place-items:center;align-content:center;gap:8px;color:#766b60}
+.share-empty strong{font-family:var(--serif);font-size:17px}.share-empty small{margin-bottom:8px;color:#8b8074}
+.share-status{padding:13px 14px;border:1px solid #d8ccbe;border-radius:7px;background:#fffaf2;display:grid;gap:5px}.share-status>span{display:flex;align-items:center;gap:7px;font-weight:800}.share-status i{width:9px;height:9px;border-radius:50%;background:#9b8e81;box-shadow:0 0 0 4px rgba(155,142,129,.12)}.share-status.enabled i{background:#71816c;box-shadow:0 0 0 4px rgba(113,129,108,.14)}.share-status.enabled{border-color:#b9c4b4;background:#f1f4ed}.share-status small{color:#7d7369;font-size:9px}
+.share-url-label{display:grid;gap:7px;margin-top:16px;color:#62594f;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}.share-url-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px}.share-url-row input{min-width:0;height:40px;border:1px solid #d4c7b7;border-radius:4px;background:#fffdf8;padding:0 11px;color:#635a52;font-size:10px}.share-url-row .button{white-space:nowrap}
+.share-primary-actions{margin-top:11px}.share-disable-button{background:#eee4d8!important;color:#564c44!important;border-color:#d2c4b5!important}.share-enable-button{background:#6f302d!important;border-color:#6f302d!important;color:#fff!important}
+.share-danger-zone{margin-top:22px;padding-top:17px;border-top:1px solid #dfd4c7;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center}.share-danger-zone>div{display:grid;gap:4px}.share-danger-zone strong{font-family:var(--serif);font-size:13px}.share-danger-zone small{max-width:330px;color:#8a7f74;font-size:8px;line-height:1.45}.share-danger-zone>span{display:flex;gap:5px}.share-delete-button{background:transparent!important;border-color:transparent!important;box-shadow:none!important;color:#8d4a42!important}
 
 .editable-description{width:fit-content;max-width:100%;border-bottom:1px dashed transparent;cursor:text;transition:border-color .15s,color .15s}
 .editable-description:hover,.editable-description:focus{border-bottom-color:#b99d8f;color:#51463d;outline:0}
@@ -441,6 +455,10 @@
   .top-actions{flex:0 0 auto;min-width:0}
   .account-button{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
+
+@media(max-width:760px){.share-collection-button{width:36px;padding:0!important;font-size:0}.share-collection-button svg{margin:0}.shared-mode-badge{display:none}.share-danger-zone{grid-template-columns:1fr}.share-danger-zone>span{justify-content:flex-start}}
+
+@media(max-width:520px){.share-url-row{grid-template-columns:1fr}.share-url-row .button{justify-self:start}.share-danger-zone>span{flex-wrap:wrap}}
 
 @media(max-width:1200px) and (min-width:761px){
   .media-filters,.media-filters.has-type{grid-template-columns:repeat(2,minmax(0,1fr))!important}
