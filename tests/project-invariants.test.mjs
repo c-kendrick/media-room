@@ -727,17 +727,20 @@ test('password recovery has a dedicated callback, private acknowledgement, and w
   assert.doesNotMatch(app, /No account exists|email is not registered/i);
 });
 
-test('Main Watchlist selection lives in the sidebar title without an extra content box', async () => {
+test('Main Watchlist selection lives in the hero title without an extra content box', async () => {
   const app = await read('src/App.jsx');
   const styles = await read('src/public.css');
   assert.match(app, /`\$\{selectedMainWatchlistClub\.name\} Watchlist`/);
-  assert.match(app, /className=\{cls\('main-watchlist-nav', data\.mainWatchlist && 'active'\)\}/);
-  assert.match(app, /<span>\{mainWatchlistTitle\}<\/span><ChevronDown/);
-  assert.match(app, /chooseMainWatchlist\(club\.id\)/);
+  assert.match(app, /function WatchlistTitle/);
+  assert.match(app, /if \(clubs\.length <= 1\) return <h1>\{title\}<\/h1>/);
+  assert.match(app, /titleControl=\{data\.mainWatchlist \? <WatchlistTitle/);
+  assert.match(app, /<ListOrdered size=\{17\} \/>Main Watchlist<\/button>/);
   assert.match(app, /const defaultClubId = memberClubs\[0\]\.id/);
   assert.doesNotMatch(app, /My Watchlist/);
   assert.doesNotMatch(app, /className="main-watchlist-scope"/);
   assert.doesNotMatch(styles, /\.main-watchlist-scope/);
+  assert.doesNotMatch(styles, /\.main-watchlist-nav/);
+  assert.match(styles, /\.watchlist-title-selector/);
 });
 
 test('Share Collection always manages the signed-in owner collection and no duplicate Friends button remains', async () => {
@@ -787,7 +790,8 @@ test('each Club has an isolated Main Watchlist with personal fallback and distin
   assert.match(app, /selectedMainWatchlistClub\?\.member_ids \|\| \[account\.profile\.id\]/);
   assert.match(app, /loadMediaSnapshot\(\{ fresh, collectionId: targetCollectionId, accessToken, mainWatchlistOwnerIds \}\)/);
   assert.match(app, /const defaultClubId = memberClubs\[0\]\.id/);
-  assert.match(app, /memberClubs\.map\(\(club\) => <button/);
+  assert.match(app, /clubs\.map\(\(club\) => <button/);
+  assert.match(app, /if \(clubs\.length <= 1\) return <h1>\{title\}<\/h1>/);
   assert.doesNotMatch(app, /My Watchlist/);
   assert.match(data, /allowedOwnerIds = Array\.isArray\(ownerIds\) \? new Set\(ownerIds\) : null/);
   assert.match(data, /show_in_main_watchlist: 'eq\.true'/);

@@ -189,13 +189,23 @@ function Empty({ children }) {
   return <div className="empty-state">{children}</div>;
 }
 
-function PageHero({ eyebrow, title, description, icon: Icon, stats }) {
+function WatchlistTitle({ title, clubs, selectedClubId, onChange }) {
+  if (clubs.length <= 1) return <h1>{title}</h1>;
+  return <details className="watchlist-title-selector">
+    <summary><h1>{title}</h1><ChevronDown size={24} /></summary>
+    <div className="watchlist-title-menu">
+      {clubs.map((club) => <button className={club.id === selectedClubId ? 'selected' : ''} key={club.id} onClick={(event) => { event.currentTarget.closest('details').removeAttribute('open'); onChange(club.id); }}>{club.name} Watchlist</button>)}
+    </div>
+  </details>;
+}
+
+function PageHero({ eyebrow, title, titleControl, description, icon: Icon, stats }) {
   return (
-    <section className="page-hero dotted">
+    <section className={cls('page-hero dotted', titleControl && 'has-title-control')}>
       {Icon && <div className="hero-icon"><Icon size={28} /></div>}
       <div className="hero-copy">
         {eyebrow && <span className="eyebrow">{eyebrow}</span>}
-        <h1>{title}</h1>
+        {titleControl || <h1>{title}</h1>}
         {description && (typeof description === 'string' ? <p>{description}</p> : description)}
       </div>
       <div className="hero-side">
@@ -577,13 +587,7 @@ export default function App() {
           <span><strong>Kit’s Media<br />Room</strong></span>
         </button>
         {!sharedMode && <nav>
-          {data?.storage === 'supabase' && <details className={cls('main-watchlist-nav', data.mainWatchlist && 'active')}>
-            <summary><ListOrdered size={17} /><span>{mainWatchlistTitle}</span><ChevronDown size={14} /></summary>
-            <div className="main-watchlist-nav-menu">
-              {!memberClubs.length && <button className="selected" onClick={(event) => { event.currentTarget.closest('details').removeAttribute('open'); chooseMainWatchlist(''); }}>Main Watchlist</button>}
-              {memberClubs.map((club) => <button className={club.id === mainWatchlistClubId ? 'selected' : ''} key={club.id} onClick={(event) => { event.currentTarget.closest('details').removeAttribute('open'); chooseMainWatchlist(club.id); }}>{club.name} Watchlist</button>)}
-            </div>
-          </details>}
+          {data?.storage === 'supabase' && <button className={data.mainWatchlist ? 'active' : ''} onClick={() => selectCollection(MAIN_WATCHLIST_ID)}><ListOrdered size={17} />Main Watchlist</button>}
           <small className="collection-nav-label">COLLECTIONS</small>
           {data?.storage === 'supabase' && displayedCollections.map((collection) => <button key={collection.id} draggable={isAdmin} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)} onDragStart={(event) => { if (!isAdmin) return; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', collection.id); setDraggedCollectionId(collection.id); }} onDragEnd={() => setDraggedCollectionId(null)} onDragOver={(event) => { if (isAdmin && draggedCollectionId) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); dropCollection(collection.id); }}>
             <UserRound size={17} />{collection.title}
@@ -624,7 +628,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh' : 'The public collection could not refresh'}: {error}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} currentUserId={account?.profile?.id} refresh={refresh} requestConfirmation={setConfirmation} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
+          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} currentUserId={account?.profile?.id} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
             const previousData = data;
             const optimisticData = {
               ...data,
@@ -882,7 +886,7 @@ function EditableDescription({ value, canEdit, onSave, fallback = '', title = 'C
   return <textarea className="editable-description-input" aria-label="Collection note" autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value || fallback); setEditing(false); } if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') event.currentTarget.blur(); }} />;
 }
 
-function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, currentUserId, refresh, requestConfirmation, onExport, onStarRatingChange, onDescriptionChange }) {
+function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, currentUserId, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, onDescriptionChange }) {
   const [section, setSection] = useState('screen');
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -1095,6 +1099,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
       <PageHero
         eyebrow={data.shared ? 'SHARED COLLECTION · READ ONLY' : undefined}
         title={data.collectionTitle || 'The media room'}
+        titleControl={data.mainWatchlist ? <WatchlistTitle title={mainWatchlistTitle} clubs={mainWatchlistClubs} selectedClubId={mainWatchlistClubId} onChange={onMainWatchlistClubChange} /> : null}
         description={data.mainWatchlist
           ? 'Every selected shelf, mirrored live from its owner’s collection.'
           : <EditableDescription value={sectionDescription} fallback={SECTION_NOTE_DEFAULTS[section]} canEdit={canEdit} onSave={(description) => onDescriptionChange(section, description)} title={`${data.collectionTitle || 'Collection'} ${sectionLabel} note`} />}
