@@ -1,6 +1,7 @@
 import { SUPABASE_PUBLISHABLE_KEY, supabaseRequest } from './supabase.js';
 
 const SESSION_KEY = 'kits-media-auth-session';
+const DEFAULT_PUBLIC_SITE_URL = 'https://c-kendrick.github.io/media-room/';
 
 function readStoredSession() {
   try {
@@ -16,8 +17,12 @@ function storeSession(session) {
   else window.localStorage.removeItem(SESSION_KEY);
 }
 
+export function appSiteUrl() {
+  return new URL(import.meta.env?.VITE_PUBLIC_SITE_URL || DEFAULT_PUBLIC_SITE_URL).toString();
+}
+
 function appAuthUrl(mode) {
-  const url = new URL(import.meta.env.BASE_URL, window.location.origin);
+  const url = new URL(appSiteUrl());
   url.searchParams.set('auth', mode);
   return url.toString();
 }

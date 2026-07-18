@@ -9,7 +9,7 @@ import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from '../src/ownership-fil
 import { parseCollectionBackup, validateCollectionBackup } from '../src/backup-import.js';
 import { supabaseRequest } from '../src/supabase.js';
 import { collectionSummaryStats } from '../src/collection-stats.js';
-import { signupRateLimitDetails } from '../src/auth.js';
+import { appSiteUrl, signupRateLimitDetails } from '../src/auth.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -714,6 +714,9 @@ test('password recovery has a dedicated callback, private acknowledgement, and w
 
   assert.match(auth, /signup\?redirect_to=' \+ encodeURIComponent\(appAuthUrl\('signin'\)\)/);
   assert.match(auth, /recover\?redirect_to=' \+ encodeURIComponent\(appAuthUrl\('recovery'\)\)/);
+  assert.equal(appSiteUrl(), 'https://c-kendrick.github.io/media-room/');
+  assert.match(auth, /DEFAULT_PUBLIC_SITE_URL = 'https:\/\/c-kendrick\.github\.io\/media-room\/'/);
+  assert.doesNotMatch(auth, /new URL\(import\.meta\.env\.BASE_URL, window\.location\.origin\)/);
   assert.match(auth, /params\.get\('type'\) !== 'recovery'/);
   assert.match(auth, /storeSession\(\{ access_token:/);
   assert.match(auth, /window\.history\.replaceState\(\{\}, '', appAuthUrl\('recovery'\)\)/);
@@ -722,6 +725,30 @@ test('password recovery has a dedicated callback, private acknowledgement, and w
   assert.match(app, /updatePassword\(account\.session\.access_token,password\)/);
   assert.match(app, /If an account exists for that email, a recovery link has been sent\./);
   assert.doesNotMatch(app, /No account exists|email is not registered/i);
+});
+
+test('Main Watchlist selection lives in the sidebar title without an extra content box', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /`\$\{selectedMainWatchlistClub\.name\} Watchlist`/);
+  assert.match(app, /className=\{cls\('main-watchlist-nav', data\.mainWatchlist && 'active'\)\}/);
+  assert.match(app, /<span>\{mainWatchlistTitle\}<\/span><ChevronDown/);
+  assert.match(app, /chooseMainWatchlist\(club\.id\)/);
+  assert.match(app, /const defaultClubId = memberClubs\[0\]\.id/);
+  assert.doesNotMatch(app, /My Watchlist/);
+  assert.doesNotMatch(app, /className="main-watchlist-scope"/);
+  assert.doesNotMatch(styles, /\.main-watchlist-scope/);
+});
+
+test('Share Collection always manages the signed-in owner collection and no duplicate Friends button remains', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /const \[ownCollection, setOwnCollection\] = useState\(null\)/);
+  assert.match(app, /setOwnCollection\(visibleCollections\.find\(\(collection\) => collection\.owner_id === account\.profile\.id\) \|\| null\)/);
+  assert.match(app, /const canShareCollection = Boolean\(account\?\.profile\?\.approved_at[\s\S]*&& ownCollection\)/);
+  assert.doesNotMatch(app, /canShareCollection = Boolean\([^\n]*!sharedMode/);
+  assert.match(app, /collectionId=\{ownCollection\.id\} collectionTitle=\{ownCollection\.title\}/);
+  assert.doesNotMatch(app, /canAddFriend|addFriendFromCollection|friendTarget/);
+  assert.doesNotMatch(app, />Friends<\/Button>/);
 });
 
 test('signup email rate limits are friendly and only count down reliable server timing', async () => {
@@ -759,7 +786,9 @@ test('each Club has an isolated Main Watchlist with personal fallback and distin
   const migration = await read('supabase/migrations/20260719030000_friends_and_member_clubs.sql');
   assert.match(app, /selectedMainWatchlistClub\?\.member_ids \|\| \[account\.profile\.id\]/);
   assert.match(app, /loadMediaSnapshot\(\{ fresh, collectionId: targetCollectionId, accessToken, mainWatchlistOwnerIds \}\)/);
-  assert.match(app, /<option value="">My Watchlist<\/option>/);
+  assert.match(app, /const defaultClubId = memberClubs\[0\]\.id/);
+  assert.match(app, /memberClubs\.map\(\(club\) => <button/);
+  assert.doesNotMatch(app, /My Watchlist/);
   assert.match(data, /allowedOwnerIds = Array\.isArray\(ownerIds\) \? new Set\(ownerIds\) : null/);
   assert.match(data, /show_in_main_watchlist: 'eq\.true'/);
   assert.match(data, /if \(!interestedIdentities\.has\(identity\) && demand\.length < 2\) continue/);
