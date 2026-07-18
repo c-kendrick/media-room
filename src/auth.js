@@ -16,6 +16,31 @@ function storeSession(session) {
   else window.localStorage.removeItem(SESSION_KEY);
 }
 
+function appAuthUrl(mode) {
+  const url = new URL(import.meta.env.BASE_URL, window.location.origin);
+  url.searchParams.set('auth', mode);
+  return url.toString();
+}
+
+export function signupRateLimitDetails(error) {
+  const message = String(error?.message || '');
+  const limited = error?.status === 429 || error?.code === 'over_email_send_rate_limit' || /rate.?limit|too many requests|email.*limit/i.test(message);
+  const suppliedRetry = Number(error?.retryAfter);
+  return {
+    limited,
+    retryAfter: limited && Number.isFinite(suppliedRetry) && suppliedRetry > 0 ? Math.ceil(suppliedRetry) : 0,
+  };
+}
+
+export function consumeRecoverySessionFromUrl() {
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  if (params.get('type') !== 'recovery' || !params.get('access_token')) return false;
+  const expiresIn = Number(params.get('expires_in')) || 3600;
+  storeSession({ access_token: params.get('access_token'), refresh_token: params.get('refresh_token'), token_type: params.get('token_type') || 'bearer', expires_in: expiresIn, expires_at: Math.floor(Date.now() / 1000) + expiresIn });
+  window.history.replaceState({}, '', appAuthUrl('recovery'));
+  return true;
+}
+
 async function authRequest(path, { method = 'POST', body, accessToken } = {}) {
   return supabaseRequest('/auth/v1/' + path, {
     method,
@@ -90,7 +115,7 @@ export async function signOut() {
 }
 
 export async function registerWithPassword({ email, password, username, displayName }) {
-  const result = await authRequest('signup', {
+  const result = await authRequest('signup?redirect_to=' + encodeURIComponent(appAuthUrl('signin')), {
     body: {
       email,
       password,
@@ -99,6 +124,12 @@ export async function registerWithPassword({ email, password, username, displayN
   });
   if (result.session) storeSession(result.session);
   return result;
+}
+
+export async function requestPasswordRecovery(email) {
+  try {
+    await authRequest('recover?redirect_to=' + encodeURIComponent(appAuthUrl('recovery')), { body: { email } });
+  } catch { /* Always acknowledge generically so account existence is private. */ }
 }
 
 export async function updateDisplayName(accessToken, displayName) {
