@@ -96,31 +96,31 @@ function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [
   };
 }
 
-export async function loadPublicCollections({ fresh = false } = {}) {
+export async function loadPublicCollections({ fresh = false, accessToken } = {}) {
   try {
-    return await supabaseSelect(query('collections', { select: 'id,owner_id,title,slug,description,position', order: 'position.asc,title.asc' }), { fresh });
+    return await supabaseSelect(query('collections', { select: 'id,owner_id,title,slug,description,position', order: 'position.asc,title.asc' }), { fresh, accessToken });
   } catch {
     try {
-      return await supabaseSelect(query('collections', { select: 'id,owner_id,title,slug,description', order: 'title.asc' }), { fresh });
+      return await supabaseSelect(query('collections', { select: 'id,owner_id,title,slug,description', order: 'title.asc' }), { fresh, accessToken });
     } catch {
-      return supabaseSelect(query('collections', { select: 'id,owner_id,title,slug', order: 'title.asc' }), { fresh });
+      return supabaseSelect(query('collections', { select: 'id,owner_id,title,slug', order: 'title.asc' }), { fresh, accessToken });
     }
   }
 }
 
-export async function loadCollectionFromSupabase({ collectionId, fresh = false } = {}) {
+export async function loadCollectionFromSupabase({ collectionId, fresh = false, accessToken } = {}) {
   const collectionFilter = {
     ...(collectionId ? { id: 'eq.' + collectionId } : { slug: 'eq.kits-collection' }),
     limit: '1',
   };
   let collections;
   try {
-    collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,description,book_description,game_description,updated_at' }), { fresh });
+    collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,description,book_description,game_description,updated_at' }), { fresh, accessToken });
   } catch {
     try {
-      collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,description,updated_at' }), { fresh });
+      collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,description,updated_at' }), { fresh, accessToken });
     } catch {
-      collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,updated_at' }), { fresh });
+      collections = await supabaseSelect(query('collections', { ...collectionFilter, select: 'id,owner_id,title,updated_at' }), { fresh, accessToken });
     }
   }
 
@@ -131,21 +131,21 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
     collection_id: 'eq.' + collection.id,
     select: 'id,section,name,subtitle,is_queue_list,is_reading_list,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
     order: 'section.asc,position.asc',
-  }), { fresh }).catch(() => supabaseSelect(query('shelves', {
+  }), { fresh, accessToken }).catch(() => supabaseSelect(query('shelves', {
       collection_id: 'eq.' + collection.id,
       select: 'id,section,name,subtitle,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
       order: 'section.asc,position.asc',
-    }), { fresh })).catch(() => supabaseSelect(query('shelves', {
+    }), { fresh, accessToken })).catch(() => supabaseSelect(query('shelves', {
       collection_id: 'eq.' + collection.id,
       select: 'id,section,name,position,deleted_at',
       order: 'section.asc,position.asc',
-    }), { fresh }));
+    }), { fresh, accessToken }));
   const [shelves, mediaItems] = await Promise.all([
     shelvesPromise,
     selectMediaItems({
       collection_id: 'eq.' + collection.id,
       order: 'created_at.asc',
-    }, { fresh }),
+    }, { fresh, accessToken }),
   ]);
 
   const memberships = shelves.length
@@ -153,7 +153,7 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
       shelf_id: 'in.(' + shelves.map((shelf) => shelf.id).join(',') + ')',
       select: 'shelf_id,media_item_id,position',
       order: 'position.asc',
-    }), { fresh })
+    }), { fresh, accessToken })
     : [];
 
   // Do not put every media UUID into an `in.(...)` URL parameter. A large
@@ -162,16 +162,23 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false }
   // retrieve them once and associate them in mapSnapshot instead.
   const interests = mediaItems.length ? await supabaseSelect(query('media_interest', {
     select: 'media_item_id,user_id',
-  }), { fresh }) : [];
-  const publicProfiles = collections.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh }) : [];
+  }), { fresh, accessToken }) : [];
+  const publicProfiles = collections.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh, accessToken }) : [];
   return mapSnapshot(collection, shelves, mediaItems, memberships, interests, publicProfiles);
 }
 
-export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
-  const collections = await loadPublicCollections({ fresh });
+export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken, ownerIds } = {}) {
+  const allowedOwnerIds = Array.isArray(ownerIds) ? new Set(ownerIds) : null;
+  const collections = (await loadPublicCollections({ fresh, accessToken }))
+    .filter((collection) => !allowedOwnerIds || collection.slug === 'kits-collection' || allowedOwnerIds.has(collection.owner_id));
   if (!collections.length) return null;
 
   const collectionIds = collections.map((collection) => collection.id);
+  const publicProfiles = await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh, accessToken });
+  const visibleProfileIds = new Set(publicProfiles.map((profile) => profile.id));
+  const scopedProfileIds = allowedOwnerIds
+    ? new Set(collections.map((collection) => collection.owner_id))
+    : visibleProfileIds;
   let shelves;
   try {
     shelves = await supabaseSelect(query('shelves', {
@@ -181,7 +188,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
       deleted_at: 'is.null',
       select: 'id,collection_id,section,name,subtitle,is_queue_list,is_reading_list,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
       order: 'main_watchlist_position.asc',
-    }), { fresh });
+    }), { fresh, accessToken });
   } catch {
     try {
       shelves = await supabaseSelect(query('shelves', {
@@ -189,12 +196,12 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
         show_in_main_watchlist: 'eq.true', section: 'eq.screen', deleted_at: 'is.null',
         select: 'id,collection_id,section,name,subtitle,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
         order: 'main_watchlist_position.asc',
-      }), { fresh });
+      }), { fresh, accessToken });
     } catch {
       shelves = await supabaseSelect(query('shelves', {
         collection_id: 'in.(' + collectionIds.join(',') + ')', section: 'eq.screen', name: 'eq.Watchlist', deleted_at: 'is.null',
         select: 'id,collection_id,section,name,position,deleted_at',
-      }), { fresh });
+      }), { fresh, accessToken });
     }
   }
   const allWatchlistShelves = await supabaseSelect(query('shelves', {
@@ -202,33 +209,35 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
     section: 'eq.screen',
     deleted_at: 'is.null',
     select: 'id,collection_id,section,name,position,is_required,is_queue_list',
-  }), { fresh });
+  }), { fresh, accessToken });
   const queueWatchlistShelves = allWatchlistShelves.filter((shelf) => shelf.is_required || shelf.is_queue_list);
-  const interestRows = await supabaseSelect(query('media_interest', { select: 'media_item_id,user_id' }), { fresh });
+  const interestRows = (await supabaseSelect(query('media_interest', { select: 'media_item_id,user_id' }), { fresh, accessToken }))
+    .filter((interest) => scopedProfileIds.has(interest.user_id));
   const candidateShelfIds = queueWatchlistShelves.map((shelf) => shelf.id);
   const candidateMemberships = candidateShelfIds.length ? await supabaseSelect(query('shelf_media_items', {
     shelf_id: 'in.(' + candidateShelfIds.join(',') + ')',
     select: 'shelf_id,media_item_id,position',
     order: 'position.asc',
-  }), { fresh }) : [];
+  }), { fresh, accessToken }) : [];
   const candidateMediaIds = [...new Set([...candidateMemberships.map((membership) => membership.media_item_id), ...interestRows.map((interest) => interest.media_item_id)])];
   const candidateMediaItems = candidateMediaIds.length ? await selectMediaItems({
     id: 'in.(' + candidateMediaIds.join(',') + ')',
+    collection_id: 'in.(' + collectionIds.join(',') + ')',
     deleted_at: 'is.null',
     order: 'created_at.asc',
-  }, { fresh }) : [];
+  }, { fresh, accessToken }) : [];
   const shelfIds = shelves.map((shelf) => shelf.id);
   const memberships = shelfIds.length ? await supabaseSelect(query('shelf_media_items', {
     shelf_id: 'in.(' + shelfIds.join(',') + ')',
     select: 'shelf_id,media_item_id,position',
     order: 'position.asc',
-  }), { fresh }) : [];
+  }), { fresh, accessToken }) : [];
   const mediaIds = memberships.map((membership) => membership.media_item_id);
   const mediaItems = mediaIds.length ? await selectMediaItems({
     id: 'in.(' + mediaIds.join(',') + ')',
     deleted_at: 'is.null',
     order: 'created_at.asc',
-  }, { fresh }) : [];
+  }, { fresh, accessToken }) : [];
   const shelfById = new Map(shelves.map((shelf) => [shelf.id, shelf]));
   const mediaById = new Map(mediaItems.map((item) => [item.id, item]));
   const mirroredMemberships = memberships.filter((membership) => {
@@ -242,7 +251,6 @@ export async function loadMainWatchlistFromSupabase({ fresh = false } = {}) {
   const mirroredMediaItems = mediaItems.filter((item) => mirroredMediaIds.has(item.id));
   const allMediaItems = [...new Map([...mirroredMediaItems, ...candidateMediaItems].map((item) => [item.id, item])).values()];
   const interests = interestRows.filter((interest) => allMediaItems.some((item) => item.id === interest.media_item_id));
-  const publicProfiles = await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh });
   const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
   const collectionOrder = new Map(collections.map((collection, index) => [collection.id, index]));
   const mainPosition = (shelf) => {

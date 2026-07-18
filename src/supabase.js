@@ -33,9 +33,9 @@ export async function supabaseRequest(path, { fresh = false, headers = {}, metho
   return text ? JSON.parse(text) : null;
 }
 
-export function supabaseSelect(path, { fresh = false } = {}) {
+export function supabaseSelect(path, { fresh = false, accessToken } = {}) {
   return supabaseRequest('/rest/v1/' + path, {
     fresh,
-    headers: { Authorization: 'Bearer ' + SUPABASE_PUBLISHABLE_KEY },
+    headers: { Authorization: 'Bearer ' + (accessToken || SUPABASE_PUBLISHABLE_KEY) },
   });
 }

@@ -248,7 +248,7 @@ test('display-name updates rename the collection and refresh navigation and stam
   const app = await read('src/App.jsx');
   const migration = await read('supabase/migrations/20260715020000_reading_lists_and_display_names.sql');
   assert.match(migration, /set title = cleaned_name \|\| '’s Collection'/);
-  assert.match(app, /const nextCollections = await loadPublicCollections\(\{ fresh: true \}\)/);
+  assert.match(app, /const nextCollections = await loadPublicCollections\(\{ fresh: true, accessToken \}\)/);
   assert.match(app, /snapshotCache\.current\.clear\(\)/);
   assert.match(app, /await refresh\(\{ fresh: true, targetCollectionId: data\.collectionId \}\)/);
 });
@@ -389,6 +389,9 @@ test('owners can open a collection Bin and restore media or shelves', async () =
   assert.match(app, /CollectionBinDrawer[\s\S]*Delete forever/);
   assert.match(app, /onDeleteMedia[\s\S]*permanentlyDeleteMedia/);
   assert.match(app, /onDeleteShelf[\s\S]*deleteShelf/);
+  assert.match(app, /onDeleteMedia[\s\S]*optimistic: true[\s\S]*media: data\.media\.filter/);
+  assert.match(app, /onDeleteShelf[\s\S]*optimistic: true[\s\S]*mediaShelves: data\.mediaShelves\.filter/);
+  assert.match(app, /It has been restored to the Bin/);
   assert.doesNotMatch(app, /drawer-danger-zone[\s\S]{0,400}Delete permanently/);
   assert.match(styles, /\.collection-bin-drawer/);
   assert.match(styles, /\.bin-row-actions/);
@@ -485,9 +488,53 @@ test('active searches render one temporary deduplicated result grid above real s
   assert.match(app, /const searchResults = queryLower[\s\S]*new Map\(randomPool\.map/);
   assert.match(app, /queryLower && <SearchResultsSection[\s\S]*<div className=\{cls\('dynamic-shelves'/);
   assert.match(app, /function SearchResultsSection/);
-  assert.match(app, /Each matching title appears once\. Your shelves remain below\./);
+  assert.doesNotMatch(app, /Each matching title appears once\. Your shelves remain below\./);
   assert.doesNotMatch(app, /createShelf[\s\S]{0,120}Search Results/);
   assert.match(styles, /\.search-results-grid\{display:grid;grid-template-columns:repeat\(auto-fill,var\(--media-card-width\)\)/);
+});
+
+test('private clubs restrict collection visibility and stay admin-only', async () => {
+  const app = await read('src/App.jsx');
+  const admin = await read('src/admin.js');
+  const data = await read('src/data.js');
+  const supabaseData = await read('src/supabase-data.js');
+  const client = await read('src/supabase.js');
+  const migration = await read('supabase/migrations/20260718010000_private_clubs.sql');
+  const styles = await read('src/public.css');
+
+  assert.match(migration, /create table if not exists public\.clubs/);
+  assert.match(migration, /create table if not exists public\.club_memberships/);
+  assert.match(migration, /alter table public\.club_memberships enable row level security/);
+  assert.match(migration, /revoke all on public\.clubs from anon, authenticated/);
+  assert.match(migration, /revoke all on public\.club_memberships from anon, authenticated/);
+  assert.match(migration, /create or replace function public\.shares_club_with/);
+  assert.match(migration, /c\.slug = 'kits-collection'/);
+  assert.match(migration, /create or replace function public\.can_view_collection/);
+  assert.match(migration, /create or replace function public\.can_view_interest/);
+  assert.match(migration, /using \(public\.can_view_interest\(media_item_id, user_id\)\)/);
+  for (const policy of [
+    'Club members can read collections',
+    'Club members can read shelves',
+    'Club members can read media',
+    'Club members can read shelf membership',
+    'Club members can read interest markers',
+  ]) assert.match(migration, new RegExp(`create policy \\\"${policy}\\\"`));
+  assert.match(migration, /create or replace function public\.admin_set_user_clubs/);
+  assert.match(migration, /if not public\.is_admin\(\) then raise exception 'Admin access required'/);
+
+  assert.match(client, /Authorization: 'Bearer ' \+ \(accessToken \|\| SUPABASE_PUBLISHABLE_KEY\)/);
+  assert.match(data, /loadMediaSnapshot\(\{ fresh = false, collectionId, accessToken, mainWatchlistOwnerIds \}/);
+  assert.match(supabaseData, /loadMainWatchlistFromSupabase\(\{ fresh = false, accessToken, ownerIds \}/);
+  assert.match(supabaseData, /\.filter\(\(interest\) => scopedProfileIds\.has\(interest\.user_id\)\)/);
+  assert.match(supabaseData, /collection_id: 'in\.\(' \+ collectionIds\.join\(','\) \+ '\)'/);
+  assert.match(admin, /rpc\/admin_list_clubs/);
+  assert.match(admin, /rpc\/admin_set_user_clubs/);
+  assert.match(app, /const ADMIN_MAIN_CLUB_KEY = 'kits-media-admin-main-club'/);
+  assert.match(app, /window\.localStorage\.setItem\(ADMIN_MAIN_CLUB_KEY, clubId\)/);
+  assert.match(app, /const displayedCollections = account\?\.profile\?\.role === 'admin' && viewAsMember/);
+  assert.match(app, /function ClubMembershipDialog/);
+  assert.match(app, /function ClubEditorDialog/);
+  assert.match(styles, /\.admin-club-panel/);
 });
 
 test('enrichment requests are cached, server-rate-limited, and return retry timing to the UI', async () => {
