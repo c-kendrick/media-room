@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Check,
   Copy,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clapperboard,
@@ -37,7 +38,7 @@ import {
   X,
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
-import { consumeRecoverySessionFromUrl, loadAuthenticatedAccount, registerWithPassword, requestPasswordRecovery, signInWithPassword, signOut, signupRateLimitDetails, updateDisplayName, updatePassword } from './auth.js';
+import { appSiteUrl, consumeRecoverySessionFromUrl, loadAuthenticatedAccount, registerWithPassword, requestPasswordRecovery, signInWithPassword, signOut, signupRateLimitDetails, updateDisplayName, updatePassword } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
 import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchDetailCandidates, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, createClub, deactivateProfile, deleteClub, listClubs, listProfiles, rejectProfile, renameClub, restoreProfile, setUserClubs } from './admin.js';
@@ -48,7 +49,7 @@ import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from './ownership-filter.j
 import { BACKUP_IMPORT_LIMITS, parseCollectionBackup } from './backup-import.js';
 import { collectionSummaryStats } from './collection-stats.js';
 import { buildCollectionShareUrl, createCollectionShare, deleteCollectionShare, getCollectionShare, loadSharedCollection, readShareToken, setCollectionShareEnabled } from './collection-share.js';
-import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUserHub, requestFriend, requestFriendFromShare, respondClubInvitation, respondFriendRequest, transferClubOwnership, unfriend } from './social.js';
+import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUserHub, requestFriend, respondClubInvitation, respondFriendRequest, transferClubOwnership, unfriend } from './social.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -269,6 +270,7 @@ export default function App() {
   const [adminMainClubId, setAdminMainClubId] = useState(() => window.localStorage.getItem(ADMIN_MAIN_CLUB_KEY) || '');
   const [confirmation, setConfirmation] = useState(null);
   const [collections, setCollections] = useState([]);
+  const [ownCollection, setOwnCollection] = useState(null);
   const [draggedCollectionId, setDraggedCollectionId] = useState(null);
   const [collectionsLoading, setCollectionsLoading] = useState(() => !sharedMode);
   const [collectionId, setCollectionId] = useState(null);
@@ -280,6 +282,9 @@ export default function App() {
   const accessToken = account?.session?.access_token;
   const memberClubs = userHub?.clubs || [];
   const selectedMainWatchlistClub = memberClubs.find((club) => club.id === mainWatchlistClubId);
+  const mainWatchlistTitle = selectedMainWatchlistClub
+    ? `${selectedMainWatchlistClub.name} Watchlist`
+    : memberClubs[0] ? `${memberClubs[0].name} Watchlist` : 'Main Watchlist';
   const adminMemberClubs = adminClubs.filter((club) => club.member_ids.includes(account?.profile?.id));
   const memberViewOwnerIds = new Set(adminMemberClubs.flatMap((club) => club.member_ids));
   if (account?.profile?.id) memberViewOwnerIds.add(account.profile.id);
@@ -335,6 +340,14 @@ export default function App() {
     setMobileNav(false);
   };
 
+  const chooseMainWatchlist = (clubId) => {
+    if (clubId) window.localStorage.setItem(MAIN_WATCHLIST_CLUB_KEY, clubId);
+    else window.localStorage.removeItem(MAIN_WATCHLIST_CLUB_KEY);
+    snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+    setMainWatchlistClubId(clubId);
+    selectCollection(MAIN_WATCHLIST_ID);
+  };
+
   useEffect(() => {
     refresh();
   }, [collectionId, accessToken, mainWatchlistScopeKey, shareToken]);
@@ -357,6 +370,15 @@ export default function App() {
       .catch(() => setCollections([]))
       .finally(() => setCollectionsLoading(false));
   }, [accessToken, sharedMode]);
+
+  useEffect(() => {
+    if (!accessToken || !account?.profile?.approved_at || account.profile.deactivated_at) { setOwnCollection(null); return undefined; }
+    let cancelled = false;
+    loadPublicCollections({ fresh: true, accessToken })
+      .then((visibleCollections) => { if (!cancelled) setOwnCollection(visibleCollections.find((collection) => collection.owner_id === account.profile.id) || null); })
+      .catch(() => { if (!cancelled) setOwnCollection(null); });
+    return () => { cancelled = true; };
+  }, [accessToken, account?.profile?.id, account?.profile?.approved_at, account?.profile?.deactivated_at]);
 
   useEffect(() => {
     if (account?.profile?.role !== 'admin' || !accessToken) {
@@ -392,6 +414,14 @@ export default function App() {
     const timer = window.setInterval(() => refreshUserHub().catch(() => null), 45_000);
     return () => window.clearInterval(timer);
   }, [accessToken, account?.profile?.approved_at, account?.profile?.deactivated_at]);
+
+  useEffect(() => {
+    if (!account?.profile?.id || !memberClubs.length || selectedMainWatchlistClub) return;
+    const defaultClubId = memberClubs[0].id;
+    window.localStorage.setItem(MAIN_WATCHLIST_CLUB_KEY, defaultClubId);
+    snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+    setMainWatchlistClubId(defaultClubId);
+  }, [account?.profile?.id, memberClubs, selectedMainWatchlistClub]);
 
   useEffect(() => {
     if (sharedMode) return undefined;
@@ -494,23 +524,7 @@ export default function App() {
   );
   const isAdminAccount = account?.profile?.role === 'admin';
   const isAdmin = isAdminAccount && !viewAsMember && !sharedMode;
-  const canShareCollection = canEditCollection && !data.mainWatchlist;
-  const friendTarget = data.ownerId ? userHub?.users?.find((user) => user.id === data.ownerId) : null;
-  const canAddFriend = Boolean(account?.profile?.approved_at && !account.profile.deactivated_at && !data.mainWatchlist && !canEditCollection && (sharedMode || data.ownerId));
-  const addFriendFromCollection = async () => {
-    if (!canAddFriend || friendTarget?.friend || friendTarget?.outgoing || friendTarget?.incoming) { setUsersOpen(true); return; }
-    const previousHub = userHub;
-    if (friendTarget) setUserHub((current) => ({ ...current, users: current.users.map((user) => user.id === friendTarget.id ? { ...user, outgoing: true } : user) }));
-    try {
-      if (sharedMode) await requestFriendFromShare(accessToken, shareToken);
-      else await requestFriend(accessToken, data.ownerId);
-      setToast('Friend request sent.');
-      await refreshUserHub();
-    } catch (requestError) {
-      setUserHub(previousHub);
-      setToast('Friend request could not be sent. Previous state restored.');
-    }
-  };
+  const canShareCollection = Boolean(account?.profile?.approved_at && !account.profile.deactivated_at && ownCollection);
   const saveStarRating = async (databaseId, starRating) => {
     const previousData = data;
     const applyRating = (currentData, changes) => ({
@@ -563,9 +577,13 @@ export default function App() {
           <span><strong>Kit’s Media<br />Room</strong></span>
         </button>
         {!sharedMode && <nav>
-          {data?.storage === 'supabase' && <button className={data.mainWatchlist ? 'active' : ''} onClick={() => selectCollection(MAIN_WATCHLIST_ID)}>
-            <ListOrdered size={17} />Main Watchlist
-          </button>}
+          {data?.storage === 'supabase' && <details className={cls('main-watchlist-nav', data.mainWatchlist && 'active')}>
+            <summary><ListOrdered size={17} /><span>{mainWatchlistTitle}</span><ChevronDown size={14} /></summary>
+            <div className="main-watchlist-nav-menu">
+              {!memberClubs.length && <button className="selected" onClick={(event) => { event.currentTarget.closest('details').removeAttribute('open'); chooseMainWatchlist(''); }}>Main Watchlist</button>}
+              {memberClubs.map((club) => <button className={club.id === mainWatchlistClubId ? 'selected' : ''} key={club.id} onClick={(event) => { event.currentTarget.closest('details').removeAttribute('open'); chooseMainWatchlist(club.id); }}>{club.name} Watchlist</button>)}
+            </div>
+          </details>}
           <small className="collection-nav-label">COLLECTIONS</small>
           {data?.storage === 'supabase' && displayedCollections.map((collection) => <button key={collection.id} draggable={isAdmin} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)} onDragStart={(event) => { if (!isAdmin) return; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', collection.id); setDraggedCollectionId(collection.id); }} onDragEnd={() => setDraggedCollectionId(null)} onDragOver={(event) => { if (isAdmin && draggedCollectionId) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); dropCollection(collection.id); }}>
             <UserRound size={17} />{collection.title}
@@ -594,7 +612,6 @@ export default function App() {
             {sharedMode && <span className="shared-mode-badge"><Link2 size={14} />Shared Collection</span>}
             <span className="today"><CalendarDays size={14} />{new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}</span>
             {canShareCollection && <Button className="share-collection-button" icon={Share2} onClick={() => setShareOpen(true)}>Share Collection</Button>}
-            {canAddFriend && <Button className="topbar-action-button" icon={Users} onClick={addFriendFromCollection}>{friendTarget?.friend ? 'Friends' : friendTarget?.incoming ? 'Respond' : friendTarget?.outgoing ? 'Requested' : 'Add Friend'}</Button>}
             {account?.profile?.approved_at && !account.profile.deactivated_at && <Button className="users-button topbar-action-button" icon={Users} onClick={() => setUsersOpen(true)}>Users{userHub?.notification_count > 0 && <b>{userHub.notification_count}</b>}</Button>}
             {authLoading ? <span className="account-state">Checking account…</span> : (
               <Button className="account-button" icon={account ? UserRound : LogIn} onClick={() => setAccountOpen(true)}>
@@ -607,7 +624,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh' : 'The public collection could not refresh'}: {error}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} currentUserId={account?.profile?.id} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={(clubId) => { if (clubId) window.localStorage.setItem(MAIN_WATCHLIST_CLUB_KEY, clubId); else window.localStorage.removeItem(MAIN_WATCHLIST_CLUB_KEY); snapshotCache.current.delete(MAIN_WATCHLIST_ID); setMainWatchlistClubId(clubId); }} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
+          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} currentUserId={account?.profile?.id} refresh={refresh} requestConfirmation={setConfirmation} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
             const previousData = data;
             const optimisticData = {
               ...data,
@@ -776,9 +793,9 @@ export default function App() {
           notify={setToast}
         />
       )}
-      {recoveryOpen && <RecoveryPasswordDialog account={account} onClose={() => setRecoveryOpen(false)} onComplete={async () => { await signOut(); setAccount(null); setRecoveryOpen(false); setAccountOpen(true); window.history.replaceState({}, '', new URL(import.meta.env.BASE_URL, window.location.origin).toString()); setToast('Password updated. Sign in with your new password.'); }} />}
+      {recoveryOpen && <RecoveryPasswordDialog account={account} onClose={() => setRecoveryOpen(false)} onComplete={async () => { await signOut(); setAccount(null); setRecoveryOpen(false); setAccountOpen(true); window.history.replaceState({}, '', appSiteUrl()); setToast('Password updated. Sign in with your new password.'); }} />}
 
-      {shareOpen && <ShareCollectionDialog accessToken={accessToken} collectionId={data.collectionId} collectionTitle={data.collectionTitle} notify={setToast} onClose={() => setShareOpen(false)} />}
+      {shareOpen && ownCollection && <ShareCollectionDialog accessToken={accessToken} collectionId={ownCollection.id} collectionTitle={ownCollection.title} notify={setToast} onClose={() => setShareOpen(false)} />}
       {usersOpen && <UsersDialog accessToken={accessToken} currentUserId={account.profile.id} hub={userHub} setHub={setUserHub} refreshHub={refreshUserHub} notify={setToast} onClose={() => setUsersOpen(false)} onVisibilityChanged={async () => { const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); snapshotCache.current.clear(); }} />}
 
       {adminOpen && <AdminUsers accessToken={accessToken} clubs={adminClubs} onClubsChange={setAdminClubs} mainWatchlistClubId={adminMainClubId} onMainWatchlistClubChange={(clubId) => {
@@ -865,7 +882,7 @@ function EditableDescription({ value, canEdit, onSave, fallback = '', title = 'C
   return <textarea className="editable-description-input" aria-label="Collection note" autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value || fallback); setEditing(false); } if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') event.currentTarget.blur(); }} />;
 }
 
-function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, currentUserId, refresh, requestConfirmation, mainWatchlistClubs = [], mainWatchlistClubId = '', onMainWatchlistClubChange, onExport, onStarRatingChange, onDescriptionChange }) {
+function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, currentUserId, refresh, requestConfirmation, onExport, onStarRatingChange, onDescriptionChange }) {
   const [section, setSection] = useState('screen');
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -1075,7 +1092,6 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
 
   return (
     <div className="page media-page">
-      {data.mainWatchlist && <div className="main-watchlist-scope"><span><b>{mainWatchlistClubId ? mainWatchlistClubs.find((club) => club.id === mainWatchlistClubId)?.name || 'Club Main Watchlist' : 'My Main Watchlist'}</b><small>{mainWatchlistClubId ? 'Active Club members and their included shelves.' : 'Your included shelves, with your own priority stamps.'}</small></span><label>View<select value={mainWatchlistClubId} onChange={(event) => onMainWatchlistClubChange(event.target.value)}><option value="">My Watchlist</option>{mainWatchlistClubs.map((club) => <option value={club.id} key={club.id}>{club.name}</option>)}</select></label></div>}
       <PageHero
         eyebrow={data.shared ? 'SHARED COLLECTION · READ ONLY' : undefined}
         title={data.collectionTitle || 'The media room'}
