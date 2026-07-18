@@ -9,6 +9,7 @@ import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from '../src/ownership-fil
 import { parseCollectionBackup, validateCollectionBackup } from '../src/backup-import.js';
 import { supabaseRequest } from '../src/supabase.js';
 import { collectionSummaryStats } from '../src/collection-stats.js';
+import { signupRateLimitDetails } from '../src/auth.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -223,11 +224,11 @@ test('shelf title and subtitle saves close immediately and update optimistically
 test('Main Watchlist includes one virtual priority and shared-demand shelf', async () => {
   const data = await read('src/supabase-data.js');
   assert.match(data, /id: 'main-priority-watchlist'/);
-  assert.match(data, /mirroredShelfIdsByIdentity/);
-  assert.match(data, /mirroredShelfCount < 2/);
+  assert.match(data, /demand\.length < 2/);
   assert.match(data, /interestedIdentities\.has\(identity\)/);
-  assert.match(data, /allWatchlistShelves\.filter\(\(shelf\) => shelf\.is_required \|\| shelf\.is_queue_list\)/);
+  assert.match(data, /const candidateShelfIds = shelves\.map\(\(shelf\) => shelf\.id\)/);
   assert.doesNotMatch(data, /canonicalWatchlistShelves/);
+  assert.doesNotMatch(data, /mirroredShelfCount/);
   assert.match(data, /representativeByIdentity/);
   assert.match(data, /virtual: true/);
 });
@@ -705,4 +706,65 @@ test('TMDB safely searches Film and Television with review-only year fallbacks',
   assert.match(details, /TMDB Film/);
   assert.match(details, /TMDB Television/);
   assert.match(poster, /if \(strict\.length \|\| !item\.year\)/);
+});
+
+test('password recovery has a dedicated callback, private acknowledgement, and website signup redirect', async () => {
+  const auth = await read('src/auth.js');
+  const app = await read('src/App.jsx');
+
+  assert.match(auth, /signup\?redirect_to=' \+ encodeURIComponent\(appAuthUrl\('signin'\)\)/);
+  assert.match(auth, /recover\?redirect_to=' \+ encodeURIComponent\(appAuthUrl\('recovery'\)\)/);
+  assert.match(auth, /params\.get\('type'\) !== 'recovery'/);
+  assert.match(auth, /storeSession\(\{ access_token:/);
+  assert.match(auth, /window\.history\.replaceState\(\{\}, '', appAuthUrl\('recovery'\)\)/);
+  assert.match(app, />Forgot your password\?</);
+  assert.match(app, /function RecoveryPasswordDialog/);
+  assert.match(app, /updatePassword\(account\.session\.access_token,password\)/);
+  assert.match(app, /If an account exists for that email, a recovery link has been sent\./);
+  assert.doesNotMatch(app, /No account exists|email is not registered/i);
+});
+
+test('signup email rate limits are friendly and only count down reliable server timing', async () => {
+  const app = await read('src/App.jsx');
+  assert.deepEqual(signupRateLimitDetails({ status: 429, retryAfter: 12.1 }), { limited: true, retryAfter: 13 });
+  assert.deepEqual(signupRateLimitDetails({ code: 'over_email_send_rate_limit' }), { limited: true, retryAfter: 0 });
+  assert.deepEqual(signupRateLimitDetails({ message: 'Email rate limit exceeded', retryAfter: -5 }), { limited: true, retryAfter: 0 });
+  assert.deepEqual(signupRateLimitDetails({ status: 400, message: 'Username already exists' }), { limited: false, retryAfter: 0 });
+  assert.match(app, /Signups are temporarily unavailable because the authentication email limit has been reached/);
+  assert.match(app, /disabled=\{submitting \|\| \(registering && signupRetrySeconds > 0\)\}/);
+  assert.match(app, /Try again in \$\{signupRetrySeconds\}s/);
+  assert.doesNotMatch(app, /setSignupRetryUntil\(Date\.now\(\) \+ (?!retryAfter)/);
+});
+
+test('friend and Club access remains private, active-only, and RPC-managed', async () => {
+  const migration = await read('supabase/migrations/20260719030000_friends_and_member_clubs.sql');
+  const social = await read('src/social.js');
+  assert.match(migration, /create table public\.friend_requests/);
+  assert.match(migration, /create table public\.friendships/);
+  assert.match(migration, /revoke all on public\.friend_requests from public, anon, authenticated/);
+  assert.match(migration, /create or replace function public\.can_view_collection[\s\S]*public\.shares_club_with\(c\.owner_id\) or public\.are_friends\(c\.owner_id\)/);
+  assert.match(migration, /p\.approved_at is not null and p\.rejected_at is null and p\.deactivated_at is null/);
+  assert.match(migration, /mp\.approved_at is not null and mp\.rejected_at is null and mp\.deactivated_at is null/);
+  assert.match(migration, /create or replace function public\.request_friend_from_share/);
+  assert.match(migration, /l\.token=share_token and l\.enabled and public\.profile_is_active\(c\.owner_id\)/);
+  assert.match(migration, /grant execute on function public\.list_user_hub\(\)[\s\S]*to authenticated/);
+  assert.match(social, /rpc\(token, 'request_friend'/);
+  assert.match(social, /rpc\(token, 'respond_friend_request'/);
+  assert.match(social, /rpc\(token, 'unfriend'/);
+});
+
+test('each Club has an isolated Main Watchlist with personal fallback and distinct-person demand', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/supabase-data.js');
+  const migration = await read('supabase/migrations/20260719030000_friends_and_member_clubs.sql');
+  assert.match(app, /selectedMainWatchlistClub\?\.member_ids \|\| \[account\.profile\.id\]/);
+  assert.match(app, /loadMediaSnapshot\(\{ fresh, collectionId: targetCollectionId, accessToken, mainWatchlistOwnerIds \}\)/);
+  assert.match(app, /<option value="">My Watchlist<\/option>/);
+  assert.match(data, /allowedOwnerIds = Array\.isArray\(ownerIds\) \? new Set\(ownerIds\) : null/);
+  assert.match(data, /show_in_main_watchlist: 'eq\.true'/);
+  assert.match(data, /if \(!interestedIdentities\.has\(identity\) && demand\.length < 2\) continue/);
+  assert.doesNotMatch(data, /mirroredShelfCount/);
+  assert.match(migration, /create or replace function public\.transfer_club_ownership/);
+  assert.match(migration, /Transfer Club ownership before leaving/);
+  assert.match(migration, /lower\(p\.username\) = 'christopher'/);
 });

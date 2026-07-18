@@ -37,7 +37,7 @@ import {
   X,
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
-import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut, updateDisplayName, updatePassword } from './auth.js';
+import { consumeRecoverySessionFromUrl, loadAuthenticatedAccount, registerWithPassword, requestPasswordRecovery, signInWithPassword, signOut, signupRateLimitDetails, updateDisplayName, updatePassword } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
 import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchDetailCandidates, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, createClub, deactivateProfile, deleteClub, listClubs, listProfiles, rejectProfile, renameClub, restoreProfile, setUserClubs } from './admin.js';
@@ -48,6 +48,7 @@ import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from './ownership-filter.j
 import { BACKUP_IMPORT_LIMITS, parseCollectionBackup } from './backup-import.js';
 import { collectionSummaryStats } from './collection-stats.js';
 import { buildCollectionShareUrl, createCollectionShare, deleteCollectionShare, getCollectionShare, loadSharedCollection, readShareToken, setCollectionShareEnabled } from './collection-share.js';
+import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUserHub, requestFriend, requestFriendFromShare, respondClubInvitation, respondFriendRequest, transferClubOwnership, unfriend } from './social.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -138,6 +139,7 @@ function retryLabel(seconds) {
 }
 
 const ADMIN_MAIN_CLUB_KEY = 'kits-media-admin-main-club';
+const MAIN_WATCHLIST_CLUB_KEY = 'kits-media-main-watchlist-club';
 
 function mediaTagTone(value, isGame = false) {
   const tag = String(value || '').trim();
@@ -241,6 +243,7 @@ function MultiSelect({ label, values, options, onChange }) {
 }
 
 export default function App() {
+  const [recoveryOpen, setRecoveryOpen] = useState(() => consumeRecoverySessionFromUrl() || new URLSearchParams(window.location.search).get('auth') === 'recovery');
   const [shareToken] = useState(() => readShareToken());
   const sharedMode = Boolean(shareToken);
   const [data, setData] = useState(null);
@@ -255,8 +258,11 @@ export default function App() {
   const [selectedMediaId, setSelectedMediaId] = useState(null);
   const [account, setAccount] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(() => new URLSearchParams(window.location.search).get('auth') === 'signin');
   const [shareOpen, setShareOpen] = useState(false);
+  const [usersOpen, setUsersOpen] = useState(false);
+  const [userHub, setUserHub] = useState(null);
+  const [mainWatchlistClubId, setMainWatchlistClubId] = useState(() => window.localStorage.getItem(MAIN_WATCHLIST_CLUB_KEY) || '');
   const [viewAsMember, setViewAsMember] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [adminClubs, setAdminClubs] = useState([]);
@@ -272,17 +278,16 @@ export default function App() {
   const latestRequest = useRef(0);
   const userSelectedCollection = useRef(false);
   const accessToken = account?.session?.access_token;
-  const selectedAdminMainClub = adminClubs.find((club) => club.id === adminMainClubId);
+  const memberClubs = userHub?.clubs || [];
+  const selectedMainWatchlistClub = memberClubs.find((club) => club.id === mainWatchlistClubId);
   const adminMemberClubs = adminClubs.filter((club) => club.member_ids.includes(account?.profile?.id));
   const memberViewOwnerIds = new Set(adminMemberClubs.flatMap((club) => club.member_ids));
   if (account?.profile?.id) memberViewOwnerIds.add(account.profile.id);
   const displayedCollections = account?.profile?.role === 'admin' && viewAsMember
     ? collections.filter((collection) => collection.slug === 'kits-collection' || memberViewOwnerIds.has(collection.owner_id))
     : collections;
-  const mainWatchlistOwnerIds = account?.profile?.role === 'admin'
-    ? viewAsMember
-      ? [...memberViewOwnerIds]
-      : selectedAdminMainClub?.member_ids
+  const mainWatchlistOwnerIds = account?.profile?.id
+    ? (selectedMainWatchlistClub?.member_ids || [account.profile.id])
     : undefined;
   const mainWatchlistScopeKey = mainWatchlistOwnerIds ? [...mainWatchlistOwnerIds].sort().join(',') : 'all';
 
@@ -366,6 +371,27 @@ export default function App() {
       }
     }).catch(() => setAdminClubs([]));
   }, [accessToken, account?.profile?.role]);
+
+  const refreshUserHub = async () => {
+    if (!accessToken || !account?.profile?.approved_at || account.profile.deactivated_at) {
+      setUserHub(null);
+      return null;
+    }
+    const nextHub = await loadUserHub(accessToken);
+    setUserHub(nextHub);
+    if (mainWatchlistClubId && !(nextHub?.clubs || []).some((club) => club.id === mainWatchlistClubId)) {
+      window.localStorage.removeItem(MAIN_WATCHLIST_CLUB_KEY);
+      setMainWatchlistClubId('');
+    }
+    return nextHub;
+  };
+
+  useEffect(() => {
+    if (!accessToken || !account?.profile?.approved_at || account.profile.deactivated_at) { setUserHub(null); return undefined; }
+    refreshUserHub().catch(() => setUserHub(null));
+    const timer = window.setInterval(() => refreshUserHub().catch(() => null), 45_000);
+    return () => window.clearInterval(timer);
+  }, [accessToken, account?.profile?.approved_at, account?.profile?.deactivated_at]);
 
   useEffect(() => {
     if (sharedMode) return undefined;
@@ -469,6 +495,22 @@ export default function App() {
   const isAdminAccount = account?.profile?.role === 'admin';
   const isAdmin = isAdminAccount && !viewAsMember && !sharedMode;
   const canShareCollection = canEditCollection && !data.mainWatchlist;
+  const friendTarget = data.ownerId ? userHub?.users?.find((user) => user.id === data.ownerId) : null;
+  const canAddFriend = Boolean(account?.profile?.approved_at && !account.profile.deactivated_at && !data.mainWatchlist && !canEditCollection && (sharedMode || data.ownerId));
+  const addFriendFromCollection = async () => {
+    if (!canAddFriend || friendTarget?.friend || friendTarget?.outgoing || friendTarget?.incoming) { setUsersOpen(true); return; }
+    const previousHub = userHub;
+    if (friendTarget) setUserHub((current) => ({ ...current, users: current.users.map((user) => user.id === friendTarget.id ? { ...user, outgoing: true } : user) }));
+    try {
+      if (sharedMode) await requestFriendFromShare(accessToken, shareToken);
+      else await requestFriend(accessToken, data.ownerId);
+      setToast('Friend request sent.');
+      await refreshUserHub();
+    } catch (requestError) {
+      setUserHub(previousHub);
+      setToast('Friend request could not be sent. Previous state restored.');
+    }
+  };
   const saveStarRating = async (databaseId, starRating) => {
     const previousData = data;
     const applyRating = (currentData, changes) => ({
@@ -552,6 +594,8 @@ export default function App() {
             {sharedMode && <span className="shared-mode-badge"><Link2 size={14} />Shared Collection</span>}
             <span className="today"><CalendarDays size={14} />{new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}</span>
             {canShareCollection && <Button className="share-collection-button" icon={Share2} onClick={() => setShareOpen(true)}>Share Collection</Button>}
+            {canAddFriend && <Button className="topbar-action-button" icon={Users} onClick={addFriendFromCollection}>{friendTarget?.friend ? 'Friends' : friendTarget?.incoming ? 'Respond' : friendTarget?.outgoing ? 'Requested' : 'Add Friend'}</Button>}
+            {account?.profile?.approved_at && !account.profile.deactivated_at && <Button className="users-button topbar-action-button" icon={Users} onClick={() => setUsersOpen(true)}>Users{userHub?.notification_count > 0 && <b>{userHub.notification_count}</b>}</Button>}
             {authLoading ? <span className="account-state">Checking account…</span> : (
               <Button className="account-button" icon={account ? UserRound : LogIn} onClick={() => setAccountOpen(true)}>
                 {account ? `${account.profile?.display_name || account.profile?.username}${viewAsMember ? ' · Member view' : ''}` : 'Sign in'}
@@ -563,7 +607,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh' : 'The public collection could not refresh'}: {error}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} currentUserId={account?.profile?.id} refresh={refresh} requestConfirmation={setConfirmation} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
+          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} currentUserId={account?.profile?.id} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={(clubId) => { if (clubId) window.localStorage.setItem(MAIN_WATCHLIST_CLUB_KEY, clubId); else window.localStorage.removeItem(MAIN_WATCHLIST_CLUB_KEY); snapshotCache.current.delete(MAIN_WATCHLIST_ID); setMainWatchlistClubId(clubId); }} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
             const previousData = data;
             const optimisticData = {
               ...data,
@@ -729,10 +773,13 @@ export default function App() {
           viewAsMember={viewAsMember}
           onViewAsMemberChange={setViewAsMember}
           onAccountUpdated={async (profile) => { setAccount((current) => ({ ...current, profile })); const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); snapshotCache.current.clear(); await refresh({ fresh: true, targetCollectionId: data.collectionId }); setToast('Account settings saved.'); }}
+          notify={setToast}
         />
       )}
+      {recoveryOpen && <RecoveryPasswordDialog account={account} onClose={() => setRecoveryOpen(false)} onComplete={async () => { await signOut(); setAccount(null); setRecoveryOpen(false); setAccountOpen(true); window.history.replaceState({}, '', new URL(import.meta.env.BASE_URL, window.location.origin).toString()); setToast('Password updated. Sign in with your new password.'); }} />}
 
       {shareOpen && <ShareCollectionDialog accessToken={accessToken} collectionId={data.collectionId} collectionTitle={data.collectionTitle} notify={setToast} onClose={() => setShareOpen(false)} />}
+      {usersOpen && <UsersDialog accessToken={accessToken} currentUserId={account.profile.id} hub={userHub} setHub={setUserHub} refreshHub={refreshUserHub} notify={setToast} onClose={() => setUsersOpen(false)} onVisibilityChanged={async () => { const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); snapshotCache.current.clear(); }} />}
 
       {adminOpen && <AdminUsers accessToken={accessToken} clubs={adminClubs} onClubsChange={setAdminClubs} mainWatchlistClubId={adminMainClubId} onMainWatchlistClubChange={(clubId) => {
         if (clubId) window.localStorage.setItem(ADMIN_MAIN_CLUB_KEY, clubId);
@@ -818,7 +865,7 @@ function EditableDescription({ value, canEdit, onSave, fallback = '', title = 'C
   return <textarea className="editable-description-input" aria-label="Collection note" autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value || fallback); setEditing(false); } if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') event.currentTarget.blur(); }} />;
 }
 
-function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, currentUserId, refresh, requestConfirmation, onExport, onStarRatingChange, onDescriptionChange }) {
+function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, currentUserId, refresh, requestConfirmation, mainWatchlistClubs = [], mainWatchlistClubId = '', onMainWatchlistClubChange, onExport, onStarRatingChange, onDescriptionChange }) {
   const [section, setSection] = useState('screen');
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -1028,6 +1075,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
 
   return (
     <div className="page media-page">
+      {data.mainWatchlist && <div className="main-watchlist-scope"><span><b>{mainWatchlistClubId ? mainWatchlistClubs.find((club) => club.id === mainWatchlistClubId)?.name || 'Club Main Watchlist' : 'My Main Watchlist'}</b><small>{mainWatchlistClubId ? 'Active Club members and their included shelves.' : 'Your included shelves, with your own priority stamps.'}</small></span><label>View<select value={mainWatchlistClubId} onChange={(event) => onMainWatchlistClubChange(event.target.value)}><option value="">My Watchlist</option>{mainWatchlistClubs.map((club) => <option value={club.id} key={club.id}>{club.name}</option>)}</select></label></div>}
       <PageHero
         eyebrow={data.shared ? 'SHARED COLLECTION · READ ONLY' : undefined}
         title={data.collectionTitle || 'The media room'}
@@ -1450,6 +1498,76 @@ function ConfirmDialog({ title, message, confirmLabel = 'Confirm', tone = 'defau
   </section></div>;
 }
 
+function UsersDialog({ accessToken, currentUserId, hub, setHub, refreshHub, notify, onClose, onVisibilityChanged }) {
+  useEscape(onClose);
+  const [newClubName, setNewClubName] = useState('');
+  const [clubInvitees, setClubInvitees] = useState({});
+  const [clubTransfers, setClubTransfers] = useState({});
+  const users = hub?.users || [];
+  const clubs = hub?.clubs || [];
+  const invitations = hub?.club_invitations || [];
+  const updateUser = (id, changes) => setHub((current) => ({ ...current, users: current.users.map((user) => user.id === id ? { ...user, ...changes } : user) }));
+  const runUserAction = async (user, optimistic, request, success, visibility = false) => {
+    const previous = hub; updateUser(user.id, optimistic);
+    try { await request(); notify(success); await refreshHub(); if (visibility) await onVisibilityChanged(); }
+    catch { setHub(previous); notify('That change could not be saved. Previous state restored.'); }
+  };
+  const respondFriend = (user, accept) => runUserAction(user, { incoming: false, friend: accept }, () => respondFriendRequest(accessToken, user.incoming_request_id, accept), accept ? `${user.display_name} is now your friend.` : 'Friend request ignored.', accept);
+
+  return <div className="modal-layer editor-layer users-dialog-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog users-dialog" role="dialog" aria-modal="true" aria-labelledby="users-title">
+    <button className="close" onClick={onClose} aria-label="Close users"><X /></button><span className="eyebrow">PEOPLE & CLUBS</span><h2 id="users-title">Users</h2>
+    {!hub && <div className="share-loading">Loading users and Clubs…</div>}
+    {hub && <div className="users-dialog-content">
+      {(users.some((user) => user.incoming) || invitations.length > 0) && <section className="users-section notifications-section"><header><div><span className="eyebrow">NOTIFICATIONS</span><h3>Requests & invitations</h3></div><b className="notification-count">{hub.notification_count}</b></header>
+        {users.filter((user) => user.incoming).map((user) => <div className="user-hub-row" key={user.id}><span><strong>{user.display_name}</strong><small>@{user.username} wants to be friends.</small></span><div><Button onClick={() => respondFriend(user, true)}>Accept</Button><button className="text-button" onClick={() => respondFriend(user, false)}>Ignore</button></div></div>)}
+        {invitations.map((invite) => <div className="user-hub-row" key={invite.id}><span><strong>{invite.club_name}</strong><small>{invite.invited_by} invited you to join.</small></span><div><Button onClick={async () => { const previous=hub; setHub({...hub,club_invitations:invitations.filter((row)=>row.id!==invite.id),notification_count:Math.max(0,hub.notification_count-1)}); try{await respondClubInvitation(accessToken,invite.id,true);notify(`Joined ${invite.club_name}.`);await refreshHub();await onVisibilityChanged();}catch{setHub(previous);notify('Invitation could not be accepted. Previous state restored.');} }}>Accept</Button><button className="text-button" onClick={async () => { const previous=hub; setHub({...hub,club_invitations:invitations.filter((row)=>row.id!==invite.id),notification_count:Math.max(0,hub.notification_count-1)}); try{await respondClubInvitation(accessToken,invite.id,false);notify('Club invitation ignored.');await refreshHub();}catch{setHub(previous);notify('Invitation could not be ignored. Previous state restored.');} }}>Ignore</button></div></div>)}
+      </section>}
+      <section className="users-section"><header><div><span className="eyebrow">FRIENDS</span><h3>Your friends</h3></div></header>{users.filter((user)=>user.friend).map((user)=><div className="user-hub-row" key={user.id}><span><strong>{user.display_name}</strong><small>@{user.username}{user.shared_clubs?.length ? ` · ${user.shared_clubs.join(', ')}` : ''}</small></span><button className="text-button danger-text" onClick={() => runUserAction(user,{friend:false},()=>unfriend(accessToken,user.id),`${user.display_name} removed from friends.`,true)}>Unfriend</button></div>)}{!users.some((user)=>user.friend)&&<p className="hub-empty">Accepted friend requests will appear here.</p>}</section>
+      <section className="users-section"><header><div><span className="eyebrow">DIRECTORY</span><h3>Approved users</h3></div></header>{users.filter((user)=>!user.friend).map((user)=><div className="user-hub-row" key={user.id}><span><strong>{user.display_name}</strong><small>@{user.username}{user.shared_clubs?.length ? ` · ${user.shared_clubs.join(', ')}` : ''}</small></span>{user.incoming?<div><Button onClick={()=>respondFriend(user,true)}>Accept</Button><button className="text-button" onClick={()=>respondFriend(user,false)}>Ignore</button></div>:user.outgoing?<button className="text-button" onClick={()=>runUserAction(user,{outgoing:false},()=>cancelFriendRequest(accessToken,user.id),'Friend request cancelled.')}>Requested · Cancel</button>:<Button onClick={()=>runUserAction(user,{outgoing:true},()=>requestFriend(accessToken,user.id),'Friend request sent.')}>Add Friend</Button>}</div>)}</section>
+      <section className="users-section clubs-section"><header><div><span className="eyebrow">CLUBS</span><h3>Your Clubs</h3></div><form className="create-club-inline" onSubmit={async(event)=>{event.preventDefault();if(!newClubName.trim())return;const previous=hub;const temporary={id:`optimistic-${Date.now()}`,name:newClubName.trim(),owner_id:currentUserId,member_ids:[currentUserId],optimistic:true};setHub({...hub,clubs:[...clubs,temporary]});setNewClubName('');try{await createMemberClub(accessToken,temporary.name);notify(`${temporary.name} created.`);await refreshHub();}catch{setHub(previous);notify('Club could not be created. Previous state restored.');}}}><input value={newClubName} onChange={(event)=>setNewClubName(event.target.value)} placeholder="New Club name" maxLength="80"/><Button type="submit" disabled={!newClubName.trim()}>Create Club</Button></form></header>
+        {clubs.map((club) => <ClubHubCard
+          key={club.id} club={club} clubs={clubs} users={users} hub={hub} setHub={setHub}
+          accessToken={accessToken} currentUserId={currentUserId}
+          inviteeId={clubInvitees[club.id] || ''} transferId={clubTransfers[club.id] || ''}
+          setInviteeId={(value) => setClubInvitees((current) => ({ ...current, [club.id]: value }))}
+          setTransferId={(value) => setClubTransfers((current) => ({ ...current, [club.id]: value }))}
+          refreshHub={refreshHub} notify={notify} onVisibilityChanged={onVisibilityChanged}
+        />)}
+      </section>
+    </div>}
+  </section></div>;
+}
+
+function ClubHubCard({ club, clubs, users, hub, setHub, accessToken, currentUserId, inviteeId, transferId, setInviteeId, setTransferId, refreshHub, notify, onVisibilityChanged }) {
+  const isOwner = club.owner_id === currentUserId;
+  const memberCount = club.member_ids.length;
+  const handleLeave = async () => {
+    const previous = hub;
+    setHub({ ...hub, clubs: clubs.filter((row) => row.id !== club.id) });
+    try { await leaveClub(accessToken, club.id); notify(`Left ${club.name}.`); await refreshHub(); await onVisibilityChanged(); }
+    catch { setHub(previous); notify('You could not leave that Club. Transfer ownership first if other members remain.'); }
+  };
+  const handleInvite = async () => {
+    const selectedId = inviteeId;
+    setInviteeId('');
+    try { await inviteToClub(accessToken, club.id, selectedId); notify('Club invitation sent.'); }
+    catch { setInviteeId(selectedId); notify('Club invitation could not be sent. Selection restored.'); }
+  };
+  const handleTransfer = async () => {
+    const previous = hub;
+    setHub({ ...hub, clubs: clubs.map((row) => row.id === club.id ? { ...row, owner_id: transferId } : row) });
+    try { await transferClubOwnership(accessToken, club.id, transferId); notify('Club ownership transferred.'); await refreshHub(); }
+    catch { setHub(previous); notify('Ownership could not be transferred. Previous owner restored.'); }
+  };
+  return <div className="club-hub-card">
+    <div className="club-hub-title"><span><strong>{club.name}</strong><small>{memberCount} active member{memberCount === 1 ? '' : 's'} · {isOwner ? 'You own this Club' : 'Member'}</small></span><button className="text-button danger-text" disabled={club.optimistic} onClick={handleLeave}>{isOwner && memberCount === 1 ? 'Delete Club' : 'Leave Club'}</button></div>
+    {isOwner && !club.optimistic && <div className="club-owner-controls">
+      <label>Invite approved user<select value={inviteeId} onChange={(event) => setInviteeId(event.target.value)}><option value="">Choose user…</option>{users.filter((user) => !club.member_ids.includes(user.id)).map((user) => <option value={user.id} key={user.id}>{user.display_name} (@{user.username})</option>)}</select></label><Button disabled={!inviteeId} onClick={handleInvite}>Invite</Button>
+      {memberCount > 1 && <><label>Transfer ownership<select value={transferId} onChange={(event) => setTransferId(event.target.value)}><option value="">Choose member…</option>{users.filter((user) => club.member_ids.includes(user.id)).map((user) => <option value={user.id} key={user.id}>{user.display_name}</option>)}</select></label><Button disabled={!transferId} onClick={handleTransfer}>Transfer</Button></>}
+    </div>}
+  </div>;
+}
+
 function ShareCollectionDialog({ accessToken, collectionId, collectionTitle, notify, onClose }) {
   useEscape(onClose);
   const [share, setShare] = useState(undefined);
@@ -1569,18 +1687,38 @@ function CreateShelfDialog({ section, onClose, onSave }) {
   </form></div>;
 }
 
-function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers, viewAsMember, onViewAsMemberChange, onAccountUpdated }) {
+function RecoveryPasswordDialog({ account, onClose, onComplete }) {
+  useEscape(onClose);
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  return <div className="modal-layer recovery-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="account-dialog recovery-dialog" role="dialog" aria-modal="true" aria-labelledby="recovery-title"><button className="close" onClick={onClose} aria-label="Close password recovery"><X /></button><span className="eyebrow">PASSWORD RECOVERY</span><h2 id="recovery-title">Choose a new password</h2><p>Use at least eight characters. Your recovery link can only be used for this password change.</p>{account ? <form onSubmit={async(event)=>{event.preventDefault();if(password.length<8){setError('Use at least 8 characters.');return;}if(password!==confirmation){setError('The passwords do not match.');return;}setBusy(true);setError('');try{await updatePassword(account.session.access_token,password);await onComplete();}catch{setError('This recovery link is invalid or expired. Request a new link and try again.');setBusy(false);}}}><label>New password<input type="password" autoComplete="new-password" minLength="8" value={password} onChange={(event)=>setPassword(event.target.value)} required/></label><label>Confirm new password<input type="password" autoComplete="new-password" minLength="8" value={confirmation} onChange={(event)=>setConfirmation(event.target.value)} required/></label>{error&&<p className="auth-error">{error}</p>}<Button type="submit" disabled={busy}>{busy?'Saving…':'Set new password'}</Button></form>:<><p className="auth-error">This recovery link is invalid or expired.</p><Button onClick={onClose}>Return to sign in</Button></>}</section></div>;
+}
+
+function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers, viewAsMember, onViewAsMemberChange, onAccountUpdated, notify }) {
   useEscape(onClose);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [registering, setRegistering] = useState(false);
+  const [forgotten, setForgotten] = useState(false);
+  const [signupRetryUntil, setSignupRetryUntil] = useState(0);
+  const [signupRetrySeconds, setSignupRetrySeconds] = useState(0);
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [nextDisplayName, setNextDisplayName] = useState(account?.profile?.display_name || '');
   const [nextPassword, setNextPassword] = useState('');
+
+  useEffect(() => {
+    if (!signupRetryUntil) { setSignupRetrySeconds(0); return undefined; }
+    const update = () => { const seconds = Math.max(0, Math.ceil((signupRetryUntil - Date.now()) / 1000)); setSignupRetrySeconds(seconds); if (!seconds) setSignupRetryUntil(0); };
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [signupRetryUntil]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -1602,7 +1740,13 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
       const result = await registerWithPassword({ email: email.trim(), password, username: username.trim().toLowerCase(), displayName: displayName.trim() });
       if (result.session) onSignedIn(await loadAuthenticatedAccount());
       else { setRegistering(false); setPassword(''); setError('Registration received. Check your email if Supabase asks you to confirm it, then wait for approval.'); }
-    } catch { setError('We could not create that account. Try a different email or username.'); }
+    } catch (registrationError) {
+      const { limited, retryAfter } = signupRateLimitDetails(registrationError);
+      if (limited) {
+        if (retryAfter) setSignupRetryUntil(Date.now() + retryAfter * 1000);
+        setError('Signups are temporarily unavailable because the authentication email limit has been reached. Please try again later.');
+      } else setError('We could not create that account. Try a different email or username.');
+    }
     finally { setSubmitting(false); }
   };
 
@@ -1638,16 +1782,17 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
         ) : (
           <>
             <span className="eyebrow">ACCOUNT</span>
-            <h2>Sign in</h2>
-            <p>Use your Media Room email and password.</p>
-            <form onSubmit={registering ? register : submit}>
+            <h2>{forgotten ? 'Reset your password' : registering ? 'Create account' : 'Sign in'}</h2>
+            <p>{forgotten ? 'Enter your email and we’ll send a secure recovery link.' : 'Use your Media Room email and password.'}</p>
+            <form onSubmit={forgotten ? async (event) => { event.preventDefault(); setSubmitting(true); setError(''); await requestPasswordRecovery(email.trim()); setSubmitting(false); notify('If an account exists for that email, a recovery link has been sent.'); setForgotten(false); } : registering ? register : submit}>
               {registering && <><label>Recognisable name<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} pattern="[a-z0-9_-]{3,32}" required /></label></>}
               <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
-              <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} required /></label>
+              {!forgotten && <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} required /></label>}
               {registering && <p>Use a recognisable real name for this private group, and do not reuse an important password.</p>}
-              {error && <p className="auth-error">{error}</p>}
-              <Button type="submit" icon={LogIn} disabled={submitting}>{submitting ? 'Working…' : registering ? 'Create account' : 'Sign in'}</Button>
-              <button className="auth-switch" type="button" onClick={() => { setRegistering(!registering); setError(''); }}>{registering ? 'I already have an account' : 'Create an account'}</button>
+              {error && <p className="auth-error">{error}{signupRetrySeconds > 0 ? ` Try again in ${signupRetrySeconds}s.` : ''}</p>}
+              <Button type="submit" icon={LogIn} disabled={submitting || (registering && signupRetrySeconds > 0)}>{submitting ? 'Working…' : forgotten ? 'Send recovery email' : registering ? signupRetrySeconds > 0 ? `Try again in ${signupRetrySeconds}s` : 'Create account' : 'Sign in'}</Button>
+              {!registering && !forgotten && <button className="auth-switch" type="button" onClick={() => { setForgotten(true); setError(''); }}>Forgot your password?</button>}
+              <button className="auth-switch" type="button" onClick={() => { if (forgotten) setForgotten(false); else setRegistering(!registering); setError(''); }}>{forgotten || registering ? 'Back to sign in' : 'Create an account'}</button>
             </form>
           </>
         )}
