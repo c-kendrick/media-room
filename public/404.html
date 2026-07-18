@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Opening Media Room…</title>
+  </head>
+  <body>
+    <script>
+      (function () {
+        var parts = window.location.pathname.split('/').filter(Boolean);
+        var repositoryIndex = parts.indexOf('media-room');
+        var basePath = repositoryIndex >= 0 ? '/' + parts.slice(0, repositoryIndex + 1).join('/') + '/' : '/';
+        sessionStorage.setItem('media-room-public-route', window.location.pathname + window.location.search + window.location.hash);
+        window.location.replace(window.location.origin + basePath);
+      }());
+    </script>
+  </body>
+</html>

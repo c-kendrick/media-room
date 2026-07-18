@@ -580,8 +580,8 @@ test('shared collection routing is read-only and completely isolated from Main W
   const data = await read('src/data.js');
   const share = await read('src/collection-share.js');
 
-  assert.match(app, /const sharedMode = Boolean\(shareToken\)/);
-  assert.match(app, /sharedMode[\s\S]*await loadSharedCollection\(shareToken\)[\s\S]*await loadMediaSnapshot/);
+  assert.match(app, /const sharedMode = Boolean\(shareToken \|\| publicUsername\)/);
+  assert.match(app, /sharedMode[\s\S]*await loadPublicCollection\(publicUsername\)[\s\S]*await loadSharedCollection\(shareToken\)[\s\S]*await loadMediaSnapshot/);
   assert.match(app, /if \(!sharedMode\) \{[\s\S]*cacheSnapshot/);
   assert.match(app, /!sharedMode[\s\S]*account\?\.profile\?\.approved_at/);
   assert.match(app, /const isAdmin = isAdminAccount && !viewAsMember && !sharedMode/);
@@ -602,6 +602,31 @@ test('share URLs use a validated 256-bit token query route', async () => {
   assert.equal(readShareToken({ search: '?share=short' }), 'short');
   assert.equal(readShareToken({ search: '' }), '');
   assert.equal(buildCollectionShareUrl(token, { href: 'https://example.test/media-room/?old=1#section' }), `https://example.test/media-room/?share=${token}`);
+});
+
+test('Open accounts have stable username links that fail closed without affecting secure links', async () => {
+  const app = await read('src/App.jsx');
+  const share = await read('src/collection-share.js');
+  const migration = await read('supabase/migrations/20260719050000_open_public_collections.sql');
+  const fallback = await read('public/404.html');
+  assert.match(app, />Secure link<\/strong>/);
+  assert.match(app, />Short link<\/strong>/);
+  assert.match(app, /const optimistic = \{ \.\.\.publicStatus, enabled: !publicStatus\.enabled \}/);
+  assert.match(app, /setPublicStatus\(previous\)[\s\S]*Previous setting restored/);
+  assert.match(app, /Switch to Closed/);
+  assert.match(app, /Secure links are unchanged/);
+  assert.match(app, /This collection address is invalid, unavailable, Closed, disabled, deleted, or has been replaced/);
+  assert.doesNotMatch(app, /sharedMode \?[^\n]*: \{error\}/);
+  assert.match(share, /new URL\(`u\/\$\{encodeURIComponent\(username\)\}`, appSiteUrl\(\)\)/);
+  assert.match(share, /get_public_collection_by_username/);
+  assert.match(share, /Cache-Control': 'no-store'/);
+  assert.match(migration, /public_collection_enabled boolean not null default false/);
+  assert.match(migration, /p\.public_collection_enabled/);
+  assert.match(migration, /p\.approved_at is not null[\s\S]*p\.rejected_at is null[\s\S]*p\.deactivated_at is null/);
+  assert.match(migration, /s\.deleted_at is null/);
+  assert.match(migration, /m\.deleted_at is null/);
+  assert.doesNotMatch(migration, /club_memberships|media_interests|friendships/);
+  assert.match(fallback, /media-room-public-route/);
 });
 
 test('deactivated collections stay out of admin navigation and Main Watchlist reads', async () => {
@@ -800,4 +825,39 @@ test('each Club has an isolated Main Watchlist with personal fallback and distin
   assert.match(migration, /create or replace function public\.transfer_club_ownership/);
   assert.match(migration, /Transfer Club ownership before leaving/);
   assert.match(migration, /lower\(p\.username\) = 'christopher'/);
+});
+
+test('Users & Clubs uses accessible focused tabs, request states, search, and polished empty states', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /className="people-tabs" role="tablist"/);
+  assert.match(app, /role="tab" aria-selected=\{activeTab === 'friends'\}/);
+  assert.match(app, /role="tabpanel" className="people-panel"/);
+  assert.match(app, /placeholder="Search approved users"/);
+  assert.match(app, /Request sent<\/span><button className="secondary-button"/);
+  assert.match(app, /function InitialAvatar/);
+  assert.match(app, /function HubEmpty/);
+  assert.match(app, /dialog\.addEventListener\('keydown', trap\)/);
+  assert.match(styles, /\.users-dialog\{width:min\(940px/);
+  assert.match(styles, /@media\(max-width:760px\)[\s\S]*\.users-dialog\{width:100vw/);
+  assert.doesNotMatch(app, /Invite approved user|Requested · Cancel/);
+});
+
+test('Club cards hide management until requested and owner actions confirm with optimistic rollback', async () => {
+  const app = await read('src/App.jsx');
+  const social = await read('src/social.js');
+  const migration = await read('supabase/migrations/20260719040000_people_clubs_redesign.sql');
+  assert.match(app, /expandedClubId === club\.id/);
+  assert.match(app, /aria-expanded=\{expanded\}/);
+  assert.match(app, /eligibleFriends = users\.filter\(\(user\) => user\.friend/);
+  assert.match(app, /title: `Remove \$\{user\.display_name\} from \$\{club\.name\}\?`/);
+  assert.match(app, /Previous membership restored/);
+  assert.match(app, /title: `Transfer \$\{club\.name\} to \$\{target\?\.display_name\}\?`/);
+  assert.match(app, /Ownership must be transferred before leaving/);
+  assert.match(social, /rpc\(token, 'remove_club_member'/);
+  assert.match(migration, /create or replace function public\.remove_club_member/);
+  assert.match(migration, /Club owner access required/);
+  assert.match(migration, /target_user_id=auth\.uid\(\).*Transfer ownership before leaving/);
+  assert.match(migration, /not public\.are_friends\(target_user_id\)/);
+  assert.match(migration, /pending_invitee_ids/);
 });

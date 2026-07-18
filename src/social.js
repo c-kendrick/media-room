@@ -17,4 +17,5 @@ export const createMemberClub = (token, name) => rpc(token, 'create_member_club'
 export const inviteToClub = (token, clubId, userId) => rpc(token, 'invite_to_club', { target_club_id: clubId, target_user_id: userId });
 export const respondClubInvitation = (token, invitationId, accept) => rpc(token, 'respond_club_invitation', { invitation_id: invitationId, accept_invitation: accept });
 export const transferClubOwnership = (token, clubId, userId) => rpc(token, 'transfer_club_ownership', { target_club_id: clubId, target_user_id: userId });
+export const removeClubMember = (token, clubId, userId) => rpc(token, 'remove_club_member', { target_club_id: clubId, target_user_id: userId });
 export const leaveClub = (token, clubId) => rpc(token, 'leave_club', { target_club_id: clubId });
