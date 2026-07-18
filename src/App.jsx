@@ -30,13 +30,14 @@ import {
   ChevronsDown,
   ChevronsUp,
   UserRound,
+  Users,
   X,
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
 import { loadAuthenticatedAccount, registerWithPassword, signInWithPassword, signOut, updateDisplayName, updatePassword } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
 import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchDetailCandidates, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
-import { approveProfile, deactivateProfile, listProfiles, rejectProfile, restoreProfile } from './admin.js';
+import { approveProfile, createClub, deactivateProfile, deleteClub, listClubs, listProfiles, rejectProfile, renameClub, restoreProfile, setUserClubs } from './admin.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
 import { applyShelfMemberships } from './shelf-membership.js';
 import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from './section-notes.js';
@@ -131,6 +132,8 @@ function retryLabel(seconds) {
   const remainder = seconds % 60;
   return minutes ? `${minutes}m ${String(remainder).padStart(2, '0')}s` : `${remainder}s`;
 }
+
+const ADMIN_MAIN_CLUB_KEY = 'kits-media-admin-main-club';
 
 function mediaTagTone(value, isGame = false) {
   const tag = String(value || '').trim();
@@ -249,6 +252,8 @@ export default function App() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [viewAsMember, setViewAsMember] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [adminClubs, setAdminClubs] = useState([]);
+  const [adminMainClubId, setAdminMainClubId] = useState(() => window.localStorage.getItem(ADMIN_MAIN_CLUB_KEY) || '');
   const [confirmation, setConfirmation] = useState(null);
   const [collections, setCollections] = useState([]);
   const [draggedCollectionId, setDraggedCollectionId] = useState(null);
@@ -259,6 +264,20 @@ export default function App() {
   const snapshotCache = useRef(new Map());
   const latestRequest = useRef(0);
   const userSelectedCollection = useRef(false);
+  const accessToken = account?.session?.access_token;
+  const selectedAdminMainClub = adminClubs.find((club) => club.id === adminMainClubId);
+  const adminMemberClubs = adminClubs.filter((club) => club.member_ids.includes(account?.profile?.id));
+  const memberViewOwnerIds = new Set(adminMemberClubs.flatMap((club) => club.member_ids));
+  if (account?.profile?.id) memberViewOwnerIds.add(account.profile.id);
+  const displayedCollections = account?.profile?.role === 'admin' && viewAsMember
+    ? collections.filter((collection) => collection.slug === 'kits-collection' || memberViewOwnerIds.has(collection.owner_id))
+    : collections;
+  const mainWatchlistOwnerIds = account?.profile?.role === 'admin'
+    ? viewAsMember
+      ? [...memberViewOwnerIds]
+      : selectedAdminMainClub?.member_ids
+    : undefined;
+  const mainWatchlistScopeKey = mainWatchlistOwnerIds ? [...mainWatchlistOwnerIds].sort().join(',') : 'all';
 
   const cacheSnapshot = (snapshot, requestedCollectionId = null) => {
     if (snapshot?.collectionId) snapshotCache.current.set(snapshot.collectionId, snapshot);
@@ -269,7 +288,7 @@ export default function App() {
     const request = ++latestRequest.current;
     if (fresh) setRefreshing(true);
     try {
-      const snapshot = await loadMediaSnapshot({ fresh, collectionId: targetCollectionId });
+      const snapshot = await loadMediaSnapshot({ fresh, collectionId: targetCollectionId, accessToken, mainWatchlistOwnerIds });
       cacheSnapshot(snapshot, targetCollectionId);
       if (fresh && snapshot.collectionId !== MAIN_WATCHLIST_ID) snapshotCache.current.delete(MAIN_WATCHLIST_ID);
       if (request !== latestRequest.current) return;
@@ -302,23 +321,44 @@ export default function App() {
 
   useEffect(() => {
     refresh();
-  }, [collectionId]);
+  }, [collectionId, accessToken, mainWatchlistScopeKey]);
 
   useEffect(() => {
-    loadPublicCollections({ fresh: true })
-      .then(setCollections)
+    setCollectionsLoading(true);
+    loadPublicCollections({ fresh: true, accessToken })
+      .then((nextCollections) => {
+        setCollections(nextCollections);
+        if (data?.collectionId && data.collectionId !== MAIN_WATCHLIST_ID && !nextCollections.some((collection) => collection.id === data.collectionId)) {
+          const kit = nextCollections.find((collection) => collection.slug === 'kits-collection');
+          if (kit) selectCollection(kit.id, { userInitiated: false });
+        }
+      })
       .catch(() => setCollections([]))
       .finally(() => setCollectionsLoading(false));
-  }, []);
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (account?.profile?.role !== 'admin' || !accessToken) {
+      setAdminClubs([]);
+      return;
+    }
+    listClubs(accessToken).then((clubs) => {
+      setAdminClubs(clubs || []);
+      if (adminMainClubId && !(clubs || []).some((club) => club.id === adminMainClubId)) {
+        window.localStorage.removeItem(ADMIN_MAIN_CLUB_KEY);
+        setAdminMainClubId('');
+      }
+    }).catch(() => setAdminClubs([]));
+  }, [accessToken, account?.profile?.role]);
 
   useEffect(() => {
     if (!data?.collectionId || !collections.length) return undefined;
     let cancelled = false;
     const prefetch = async () => {
-      for (const collection of collections) {
+      for (const collection of displayedCollections) {
         if (cancelled || snapshotCache.current.has(collection.id)) continue;
         try {
-          const snapshot = await loadMediaSnapshot({ collectionId: collection.id });
+          const snapshot = await loadMediaSnapshot({ collectionId: collection.id, accessToken });
           if (!cancelled) cacheSnapshot(snapshot, collection.id);
         } catch {
           // Prefetch is best-effort; foreground navigation retains its own error state.
@@ -333,15 +373,23 @@ export default function App() {
       if (window.cancelIdleCallback) window.cancelIdleCallback(idle);
       else window.clearTimeout(idle);
     };
-  }, [collections, data?.collectionId]);
+  }, [collections, data?.collectionId, accessToken, viewAsMember, adminClubs]);
+
+  useEffect(() => {
+    if (!viewAsMember || account?.profile?.role !== 'admin' || !data?.collectionId || data.collectionId === MAIN_WATCHLIST_ID) return;
+    if (displayedCollections.some((collection) => collection.id === data.collectionId)) return;
+    const kit = displayedCollections.find((collection) => collection.slug === 'kits-collection');
+    if (kit) selectCollection(kit.id, { userInitiated: false });
+  }, [viewAsMember, adminClubs, collections, data?.collectionId]);
 
   useEffect(() => {
     if (authLoading || !collections.length || landingApplied || userSelectedCollection.current) return;
     const landingCollection = account?.profile?.approved_at && !account.profile.deactivated_at
       ? collections.find((collection) => collection.owner_id === account.profile.id)
       : collections.find((collection) => collection.slug === 'kits-collection');
+    if (!landingCollection) return;
     setLandingApplied(true);
-    if (landingCollection) selectCollection(landingCollection.id, { userInitiated: false });
+    selectCollection(landingCollection.id, { userInitiated: false });
   }, [account, authLoading, collections, landingApplied]);
 
   useEffect(() => {
@@ -456,7 +504,7 @@ export default function App() {
             <ListOrdered size={17} />Main Watchlist
           </button>}
           <small className="collection-nav-label">COLLECTIONS</small>
-          {data?.storage === 'supabase' && collections.map((collection) => <button key={collection.id} draggable={isAdmin} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)} onDragStart={(event) => { if (!isAdmin) return; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', collection.id); setDraggedCollectionId(collection.id); }} onDragEnd={() => setDraggedCollectionId(null)} onDragOver={(event) => { if (isAdmin && draggedCollectionId) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); dropCollection(collection.id); }}>
+          {data?.storage === 'supabase' && displayedCollections.map((collection) => <button key={collection.id} draggable={isAdmin} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)} onDragStart={(event) => { if (!isAdmin) return; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', collection.id); setDraggedCollectionId(collection.id); }} onDragEnd={() => setDraggedCollectionId(null)} onDragOver={(event) => { if (isAdmin && draggedCollectionId) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); dropCollection(collection.id); }}>
             <UserRound size={17} />{collection.title}
           </button>)}
         </nav>
@@ -637,6 +685,7 @@ export default function App() {
           account={account}
           onClose={() => setAccountOpen(false)}
           onSignedIn={(nextAccount) => {
+            snapshotCache.current.clear();
             setAccount(nextAccount);
             setViewAsMember(false);
             setAccountOpen(false);
@@ -645,6 +694,7 @@ export default function App() {
             setToast('Signed in securely.');
           }}
           onSignedOut={() => {
+            snapshotCache.current.clear();
             setAccount(null);
             setViewAsMember(false);
             setAccountOpen(false);
@@ -655,12 +705,17 @@ export default function App() {
           onManageUsers={() => { setAccountOpen(false); setAdminOpen(true); }}
           viewAsMember={viewAsMember}
           onViewAsMemberChange={setViewAsMember}
-          onAccountUpdated={async (profile) => { setAccount((current) => ({ ...current, profile })); const nextCollections = await loadPublicCollections({ fresh: true }); setCollections(nextCollections); snapshotCache.current.clear(); await refresh({ fresh: true, targetCollectionId: data.collectionId }); setToast('Account settings saved.'); }}
+          onAccountUpdated={async (profile) => { setAccount((current) => ({ ...current, profile })); const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); snapshotCache.current.clear(); await refresh({ fresh: true, targetCollectionId: data.collectionId }); setToast('Account settings saved.'); }}
         />
       )}
 
-      {adminOpen && <AdminUsers accessToken={account?.session?.access_token} onClose={() => setAdminOpen(false)} onUsersChanged={async () => {
-        const nextCollections = await loadPublicCollections({ fresh: true });
+      {adminOpen && <AdminUsers accessToken={accessToken} clubs={adminClubs} onClubsChange={setAdminClubs} mainWatchlistClubId={adminMainClubId} onMainWatchlistClubChange={(clubId) => {
+        if (clubId) window.localStorage.setItem(ADMIN_MAIN_CLUB_KEY, clubId);
+        else window.localStorage.removeItem(ADMIN_MAIN_CLUB_KEY);
+        snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+        setAdminMainClubId(clubId);
+      }} requestConfirmation={setConfirmation} onClose={() => setAdminOpen(false)} onUsersChanged={async () => {
+        const nextCollections = await loadPublicCollections({ fresh: true, accessToken });
         setCollections(nextCollections);
         snapshotCache.current.clear();
         if (data.collectionId === MAIN_WATCHLIST_ID) {
@@ -1016,7 +1071,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
       </section>}
       {creatingShelf && <CreateShelfDialog section={section} onClose={() => setCreatingShelf(false)} onSave={async (values) => { setCreatingShelf(false); try { await createShelf(accessToken, { collection_id: data.collectionId, section, ...values, position: (shelves.at(-1)?.position || 0) + 1000 }); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }} />}
       {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id, index) => [id, (index + 1) * 1000])), interests: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, collection_id: data.collectionId }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setInterest(accessToken, currentUserId, created[0].id, true); await refresh({ fresh: true }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('Media added.'); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('The media item could not be saved.'); }); }} />}
-      {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', onConfirm: async () => { await permanentlyDeleteMedia(accessToken, item.database_id); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', onConfirm: async () => { await deleteShelf(accessToken, shelf.shelf_id); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); } })} />}
+      {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); try { await permanentlyDeleteMedia(accessToken, item.database_id); snapshotCache.current.delete(MAIN_WATCHLIST_ID); notify(`${item.title} permanently deleted.`); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); try { await deleteShelf(accessToken, shelf.shelf_id); snapshotCache.current.delete(MAIN_WATCHLIST_ID); notify(`${shelf.name} permanently deleted.`); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })} />}
       {shelfEditor && <ShelfEditDialog shelf={shelfEditor} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
       {bulkImportOpen && <BulkImportDialog section={section} shelves={shelves} onClose={() => setBulkImportOpen(false)} onImport={async (shelfId, rows) => { const result = await bulkImportMedia(accessToken, data.collectionId, shelfId, section, rows); setBulkImportOpen(false); await refresh({ fresh: true }); notify(`${result?.imported || 0} imported${result?.skipped ? `; ${result.skipped} duplicates skipped` : ''}.`); }} />}
     </div>
@@ -1027,7 +1082,6 @@ function SearchResultsSection({ items, onOpen, canRate, onRate }) {
   return <section className="media-search-results" aria-live="polite">
     <div className="search-results-heading">
       <span><span className="eyebrow">CURRENT SEARCH</span><h2>Search Results <b>{items.length}</b></h2></span>
-      <p>Each matching title appears once. Your shelves remain below.</p>
     </div>
     {items.length > 0
       ? <div className="search-results-grid">{items.map((item) => <MediaCard key={item.database_id || item.item_id} item={item} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} />)}</div>
@@ -1629,11 +1683,37 @@ function EditMediaDialog({ item, onClose, onSave }) {
   </div>;
 }
 
-function AdminUsers({ accessToken, onClose, onUsersChanged }) {
+function ClubEditorDialog({ club, onClose, onSave }) {
   useEscape(onClose);
+  const [name, setName] = useState(club?.name || '');
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog club-editor-dialog" onSubmit={(event) => { event.preventDefault(); if (!name.trim()) return; onSave(name.trim()); onClose(); }}>
+    <button className="close" type="button" onClick={onClose} aria-label="Close club editor"><X /></button>
+    <span className="eyebrow">ADMIN ONLY</span><h2>{club ? 'Rename Club' : 'Create a Club'}</h2>
+    <label>Club name<input autoFocus value={name} maxLength="80" onChange={(event) => setName(event.target.value)} required /></label>
+    <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose}>Cancel</button><Button type="submit" icon={club ? Pencil : Plus} disabled={!name.trim()}>{club ? 'Save Club' : 'Create Club'}</Button></div>
+  </form></div>;
+}
+
+function ClubMembershipDialog({ user, clubs, onClose, onSave }) {
+  useEscape(onClose);
+  const [selected, setSelected] = useState(() => clubs.filter((club) => club.member_ids.includes(user.id)).map((club) => club.id));
+  const toggle = (clubId) => setSelected((current) => current.includes(clubId) ? current.filter((id) => id !== clubId) : [...current, clubId]);
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog club-membership-dialog">
+    <button className="close" onClick={onClose} aria-label="Close club membership"><X /></button>
+    <span className="eyebrow">ADMIN ONLY</span><h2>{user.display_name}</h2>
+    <p className="dialog-intro">Choose which private circles can share collections with this member.</p>
+    <div className="club-membership-list">{clubs.map((club) => <label key={club.id}><input type="checkbox" checked={selected.includes(club.id)} onChange={() => toggle(club.id)} /><span><b>{club.name}</b><small>{club.member_ids.length} member{club.member_ids.length === 1 ? '' : 's'}</small></span></label>)}{!clubs.length && <Empty>Create a club first.</Empty>}</div>
+    <div className="dialog-actions"><button className="text-button" onClick={onClose}>Cancel</button><Button icon={Check} onClick={() => { onSave(selected); onClose(); }}>Save Clubs</Button></div>
+  </section></div>;
+}
+
+function AdminUsers({ accessToken, clubs, onClubsChange, mainWatchlistClubId, onMainWatchlistClubChange, requestConfirmation, onClose, onUsersChanged }) {
   const [users, setUsers] = useState([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
+  const [clubEditor, setClubEditor] = useState(null);
+  const [membershipUser, setMembershipUser] = useState(null);
+  useEscape(onClose, !clubEditor && !membershipUser);
   const load = () => listProfiles(accessToken).then(setUsers).catch(() => setError('Could not load users.'));
   useEffect(() => { load(); }, []);
   const actions = { approve: approveProfile, reject: rejectProfile, deactivate: deactivateProfile, restore: restoreProfile };
@@ -1644,8 +1724,39 @@ function AdminUsers({ accessToken, onClose, onUsersChanged }) {
     catch { setError('That user could not be updated.'); }
     finally { setBusy(''); }
   };
-  return <div className="modal-layer"><section className="media-edit-dialog admin-users-dialog"><button className="close" onClick={onClose}><X /></button><span className="eyebrow">ADMIN</span><h2>User Management</h2><p className="dialog-intro">Approve new members or temporarily hide a member and their library without deleting anything.</p>{error && <p className="auth-error">{error}</p>}<div className="user-list">{users.map((user) => {
+  const saveClub = (name) => {
+    const existing = clubEditor?.id ? clubEditor : null;
+    const previous = [...clubs];
+    if (existing) {
+      onClubsChange(clubs.map((club) => club.id === existing.id ? { ...club, name } : club));
+      renameClub(accessToken, existing.id, name).then(() => onUsersChanged?.()).catch(() => { onClubsChange(previous); setError('That club name could not be saved.'); });
+      return;
+    }
+    const temporaryId = `optimistic-club-${Date.now()}`;
+    onClubsChange([...clubs, { id: temporaryId, name, member_ids: [], optimistic: true }]);
+    createClub(accessToken, name).then((created) => { onClubsChange([...previous, created]); }).catch(() => { onClubsChange(previous); setError('That club could not be created. Try a different name.'); });
+  };
+  const saveMemberships = (user, clubIds) => {
+    const previous = clubs.map((club) => ({ ...club, member_ids: [...club.member_ids] }));
+    const next = clubs.map((club) => ({ ...club, member_ids: clubIds.includes(club.id) ? unique([...club.member_ids, user.id]) : club.member_ids.filter((id) => id !== user.id) }));
+    onClubsChange(next);
+    setUserClubs(accessToken, user.id, clubIds).then(() => onUsersChanged?.()).catch(() => { onClubsChange(previous); setError(`${user.display_name}’s clubs could not be saved.`); });
+  };
+  const removeClub = (club) => requestConfirmation({ title: `Delete ${club.name}?`, message: 'Members will keep their collections, but this private circle will be removed.', confirmLabel: 'Delete Club', tone: 'danger', optimistic: true, onConfirm: async () => {
+    const previous = [...clubs];
+    onClubsChange(clubs.filter((row) => row.id !== club.id));
+    if (mainWatchlistClubId === club.id) onMainWatchlistClubChange('');
+    try { await deleteClub(accessToken, club.id); await onUsersChanged?.(); }
+    catch (deleteError) { onClubsChange(previous); setError(`${club.name} could not be deleted.`); throw deleteError; }
+  } });
+  return <div className="modal-layer"><section className="media-edit-dialog admin-users-dialog"><button className="close" onClick={onClose}><X /></button><span className="eyebrow">ADMIN</span><h2>User Management</h2><p className="dialog-intro">Approve members, manage private clubs and choose your Main Watchlist view.</p>{error && <p className="auth-error">{error}</p>}
+    <section className="admin-club-panel"><div className="admin-club-heading"><span><b>Clubs</b><small>Private sharing circles</small></span><Button className="quiet-button" icon={Plus} onClick={() => setClubEditor({})}>New Club</Button></div>
+      <label className="admin-main-club-view"><span><b>Main Watchlist View</b><small>Only changes what you see on this device.</small></span><select value={mainWatchlistClubId} onChange={(event) => onMainWatchlistClubChange(event.target.value)}><option value="">All clubs</option>{clubs.filter((club) => !club.optimistic).map((club) => <option value={club.id} key={club.id}>{club.name}</option>)}</select></label>
+      <div className="club-chip-list">{clubs.map((club) => <span className={cls('admin-club-chip', club.optimistic && 'is-optimistic')} key={club.id}><Users size={13} /><b>{club.name}</b><small>{club.member_ids.length}</small>{!club.optimistic && <><button onClick={() => setClubEditor(club)} aria-label={`Rename ${club.name}`}><Pencil size={12} /></button><button onClick={() => removeClub(club)} aria-label={`Delete ${club.name}`}><X size={12} /></button></>}</span>)}{!clubs.length && <small className="no-clubs">No clubs yet.</small>}</div>
+    </section>
+    <div className="user-list">{users.map((user) => {
     const status = user.deactivated_at ? 'Deactivated' : user.approved_at ? 'Approved' : user.rejected_at ? 'Rejected' : 'Pending';
-    return <div className={cls('user-row', user.deactivated_at && 'deactivated')} key={user.id}><span><b>{user.display_name}</b><small>@{user.username}</small></span><span className="user-status">{status}</span>{!user.approved_at && !user.rejected_at && <><Button disabled={busy === user.id} onClick={() => act('approve', user)}>Approve</Button><Button disabled={busy === user.id} onClick={() => act('reject', user)}>Reject</Button></>}{user.approved_at && user.role !== 'admin' && !user.deactivated_at && <Button className="quiet-button" disabled={busy === user.id} onClick={() => act('deactivate', user)}>Deactivate</Button>}{user.deactivated_at && <Button disabled={busy === user.id} onClick={() => act('restore', user)}>Restore library</Button>}</div>;
-  })}</div></section></div>;
+    const clubCount = clubs.filter((club) => club.member_ids.includes(user.id)).length;
+    return <div className={cls('user-row', user.deactivated_at && 'deactivated')} key={user.id}><span><b>{user.display_name}</b><small>@{user.username}</small></span><span className="user-status">{status}</span>{user.approved_at && !user.deactivated_at && <Button className="quiet-button user-clubs-button" icon={Users} onClick={() => setMembershipUser(user)}>Clubs{clubCount ? ` · ${clubCount}` : ''}</Button>}{!user.approved_at && !user.rejected_at && <><Button disabled={busy === user.id} onClick={() => act('approve', user)}>Approve</Button><Button disabled={busy === user.id} onClick={() => act('reject', user)}>Reject</Button></>}{user.approved_at && user.role !== 'admin' && !user.deactivated_at && <Button className="quiet-button" disabled={busy === user.id} onClick={() => act('deactivate', user)}>Deactivate</Button>}{user.deactivated_at && <Button disabled={busy === user.id} onClick={() => act('restore', user)}>Restore library</Button>}</div>;
+  })}</div></section>{clubEditor && <ClubEditorDialog club={clubEditor.id ? clubEditor : null} onClose={() => setClubEditor(null)} onSave={saveClub} />}{membershipUser && <ClubMembershipDialog user={membershipUser} clubs={clubs.filter((club) => !club.optimistic)} onClose={() => setMembershipUser(null)} onSave={(clubIds) => saveMemberships(membershipUser, clubIds)} />}</div>;
 }

@@ -116,8 +116,14 @@
 .drawer-owner-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .auth-switch { border: 0; background: transparent; color: #6b4333; padding: 3px 0; text-align:left; text-decoration: underline; font: inherit; font-size:12px; cursor:pointer; }
 
-.admin-users-dialog{width:min(780px,calc(100vw - 32px))!important}
+.admin-users-dialog{width:min(900px,calc(100vw - 32px))!important}
 .user-list{display:grid;gap:0;border-top:1px solid #d7cbbb}.user-row{display:flex;gap:10px;align-items:center;border-bottom:1px solid #d7cbbb;padding:12px 0}.user-row>span:first-child{margin-right:auto;display:grid;min-width:0}.user-row small{color:#837a6f}.user-row.deactivated{opacity:.72}.user-status{min-width:76px;color:#776d63;font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}.user-row.deactivated .user-status{color:#924d43}
+.admin-club-panel{margin:20px 0 26px;padding:16px;border:1px solid #d8cbbb;border-radius:8px;background:rgba(255,253,248,.58)}
+.admin-club-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.admin-club-heading>span{display:grid;gap:2px}.admin-club-heading b{font-family:var(--serif);font-size:17px}.admin-club-heading small,.admin-main-club-view small{color:#8b8175;font-size:9px}
+.admin-main-club-view{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,240px);align-items:center;gap:14px;margin:14px 0;padding:12px 0;border-top:1px solid #e1d6c9;border-bottom:1px solid #e1d6c9}.admin-main-club-view>span{display:grid;gap:2px}.admin-main-club-view select{height:38px;border:1px solid #c8b9a8;border-radius:5px;background:#fffaf2;color:#4d453e;padding:0 10px;font:inherit;font-size:10px;outline:none}.admin-main-club-view select:focus{border-color:#8e6655;box-shadow:0 0 0 3px rgba(142,102,85,.12)}
+.club-chip-list{display:flex;align-items:center;flex-wrap:wrap;gap:7px}.admin-club-chip{min-height:32px;padding:0 5px 0 9px;border:1px solid #d5c7b8;border-radius:999px;background:#fffaf2;color:#574f47;display:inline-flex;align-items:center;gap:6px;font-size:9px}.admin-club-chip>small{min-width:18px;height:18px;border-radius:50%;background:#e9dfd3;display:grid;place-items:center;color:#776c61}.admin-club-chip>button{width:24px;height:24px;border:0;border-radius:50%;background:transparent;color:#877b70;display:grid;place-items:center;cursor:pointer}.admin-club-chip>button:hover{background:#eee3d6;color:#6f302d}.admin-club-chip.is-optimistic{opacity:.58}.no-clubs{color:#958a7e;font-style:italic}
+.club-editor-dialog{width:min(430px,calc(100vw - 32px))!important}.club-editor-dialog>label{display:grid;gap:7px;color:#51473d;font-size:11px;font-weight:700}.club-editor-dialog input{height:42px;border:1px solid #bdae9d;background:#fffdf8;padding:0 12px;font:inherit;outline:none}.club-editor-dialog input:focus{border-color:#8e6655;box-shadow:0 0 0 3px rgba(142,102,85,.12)}
+.club-membership-dialog{width:min(520px,calc(100vw - 32px))!important}.club-membership-list{display:grid;border-top:1px solid #d8cbbb;margin-top:18px}.club-membership-list>label{min-height:52px;padding:7px 4px;border-bottom:1px solid #e2d8cc;display:flex;align-items:center;gap:11px;cursor:pointer}.club-membership-list input{accent-color:#763e35}.club-membership-list label>span{display:grid;gap:2px}.club-membership-list small{color:#8b8175;font-size:9px}.user-clubs-button{color:#6c5045!important}
 
 /* Clean owner interface --------------------------------------------------- */
 .collection-nav-label{display:block;margin:15px 10px 5px;color:#9b9185;font-size:8px;letter-spacing:.16em;font-weight:800}
@@ -130,7 +136,7 @@
 .media-command{border-bottom:1px solid var(--line);padding-bottom:14px}
 .media-action-row.public-actions{margin-top:8px}
 .media-search-results{margin:22px 0 44px;padding:20px;border:1px solid #d8c9bb;border-radius:10px;background:rgba(255,250,242,.72);box-shadow:0 12px 30px rgba(61,45,34,.05)}
-.search-results-heading{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.search-results-heading{display:flex;align-items:end;gap:20px;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--line)}
 .search-results-heading h2{display:flex;align-items:center;gap:9px;margin:3px 0 0;font-size:22px}
 .search-results-heading h2 b{border-radius:999px;background:var(--clay);color:#fff;padding:4px 7px;font-family:Inter,sans-serif;font-size:9px}
 .search-results-heading p{margin:0;color:#8a8176;font-size:10px}
@@ -462,4 +468,5 @@
   .user-row{flex-wrap:wrap}
   .user-row>span:first-child{flex:1 1 calc(100% - 90px)}
   .user-status{margin-left:auto;text-align:right}
+  .admin-main-club-view{grid-template-columns:1fr}
 }

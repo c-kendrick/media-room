@@ -18,11 +18,11 @@ function assertSnapshot(data) {
   return data;
 }
 
-export async function loadMediaSnapshot({ fresh = false, collectionId } = {}) {
+export async function loadMediaSnapshot({ fresh = false, collectionId, accessToken, mainWatchlistOwnerIds } = {}) {
   try {
     const supabaseSnapshot = collectionId === 'main-watchlist'
-      ? await loadMainWatchlistFromSupabase({ fresh })
-      : await loadCollectionFromSupabase({ fresh, collectionId });
+      ? await loadMainWatchlistFromSupabase({ fresh, accessToken, ownerIds: mainWatchlistOwnerIds })
+      : await loadCollectionFromSupabase({ fresh, collectionId, accessToken });
     if (supabaseSnapshot) return assertSnapshot(supabaseSnapshot);
   } catch (error) {
     // The static export keeps the public site available until the one-time
