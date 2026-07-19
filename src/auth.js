@@ -66,15 +66,28 @@ async function refreshSession(session) {
   return refreshed;
 }
 
-async function fetchProfile(accessToken) {
-  const options = { fresh: true, headers: { Authorization: 'Bearer ' + accessToken } };
-  let profiles;
-  try {
-    profiles = await supabaseRequest('/rest/v1/profiles?select=id,username,display_name,role,approved_at,deactivated_at&limit=1', options);
-  } catch {
-    profiles = await supabaseRequest('/rest/v1/profiles?select=id,username,display_name,role,approved_at&limit=1', options);
+const PROFILE_COLUMNS = 'id,username,display_name,role,approved_at,deactivated_at';
+
+export function authenticatedProfilePath(userId) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(userId || ''))) {
+    throw new Error('Supabase Auth did not return a valid user identity.');
   }
-  return profiles?.[0] || null;
+  return `/rest/v1/profiles?select=${PROFILE_COLUMNS}&id=eq.${encodeURIComponent(userId)}&limit=1`;
+}
+
+export function selectAuthenticatedProfile(authUser, profiles) {
+  const profile = profiles?.[0] || null;
+  if (!authUser?.id || !profile || profile.id !== authUser.id) {
+    throw new Error('The authenticated user profile could not be verified.');
+  }
+  return profile;
+}
+
+async function fetchProfile(accessToken) {
+  const authUser = await authRequest('user', { method: 'GET', accessToken });
+  const options = { fresh: true, headers: { Authorization: 'Bearer ' + accessToken } };
+  const profiles = await supabaseRequest(authenticatedProfilePath(authUser?.id), options);
+  return selectAuthenticatedProfile(authUser, profiles);
 }
 
 export async function loadAuthenticatedAccount() {
@@ -104,8 +117,14 @@ export async function signInWithPassword(email, password) {
   const session = await authRequest('token?grant_type=password', {
     body: { email, password },
   });
-  storeSession(session);
-  return { session, profile: await fetchProfile(session.access_token) };
+  try {
+    const profile = await fetchProfile(session.access_token);
+    storeSession(session);
+    return { session, profile };
+  } catch (error) {
+    storeSession(null);
+    throw error;
+  }
 }
 
 export async function signOut() {
