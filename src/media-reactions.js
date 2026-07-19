@@ -33,6 +33,21 @@ export function setMediaReaction(accessToken, mediaItemId, kind, enabled) {
   });
 }
 
+export function setMediaLoveBatch(accessToken, changes) {
+  const reactions = (changes || [])
+    .filter((change) => change?.mediaItemId)
+    .map((change) => ({ media_item_id: change.mediaItemId, enabled: Boolean(change.enabled) }));
+  if (!accessToken || !reactions.length) {
+    throw new Error('An approved signed-in account and at least one love are required.');
+  }
+  return supabaseRequest('/rest/v1/rpc/set_media_love_batch', {
+    method: 'POST',
+    fresh: true,
+    body: { reaction_changes: reactions },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+  });
+}
+
 export function applyReactionToSnapshot(snapshot, targetItem, kind, enabled, person) {
   const field = kind === 'like' ? 'likes' : 'priorities';
   const targetIdentity = mediaReactionIdentity(targetItem);
