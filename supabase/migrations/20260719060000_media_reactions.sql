@@ -17,7 +17,7 @@ returns text language sql immutable set search_path=public as $$
   );
 $$;
 
-create table public.media_reactions (
+create table if not exists public.media_reactions (
   user_id uuid not null references public.profiles(id) on delete cascade,
   kind text not null check (kind in ('like', 'priority')),
   work_key text not null,
@@ -28,7 +28,8 @@ create table public.media_reactions (
   updated_at timestamptz not null default now(),
   primary key (user_id, kind, work_key)
 );
-create index media_reactions_work_key_idx on public.media_reactions(work_key, kind);
+create index if not exists media_reactions_work_key_idx on public.media_reactions(work_key, kind);
+drop trigger if exists media_reactions_set_updated_at on public.media_reactions;
 create trigger media_reactions_set_updated_at before update on public.media_reactions
 for each row execute function public.set_updated_at();
 
@@ -48,13 +49,14 @@ returns boolean language sql stable security definer set search_path=public as $
     );
 $$;
 
+drop policy if exists "Signed-in viewers can read visible media reactions" on public.media_reactions;
 create policy "Signed-in viewers can read visible media reactions"
 on public.media_reactions for select to authenticated
 using (public.can_view_media_reaction(user_id));
 
 -- Preserve every existing Priority Watch stamp as a canonical reaction.
 insert into public.media_reactions(user_id, kind, work_key, media_type, media_title, media_year, created_at, updated_at)
-select i.user_id, 'priority', public.media_reaction_work_key(m.type, m.title, m.year), m.type, m.title, m.year, i.created_at, i.created_at
+select i.user_id, 'priority', public.media_reaction_work_key(m.type, m.title, m.year::integer), m.type, m.title, m.year, i.created_at, i.created_at
 from public.media_interest i
 join public.media_items m on m.id = i.media_item_id
 on conflict (user_id, kind, work_key) do nothing;
@@ -81,7 +83,7 @@ begin
     raise exception 'Priority Watch is only available for films and television';
   end if;
 
-  target_key := public.media_reaction_work_key(target.type, target.title, target.year);
+  target_key := public.media_reaction_work_key(target.type, target.title, target.year::integer);
   if reaction_enabled then
     insert into public.media_reactions(user_id, kind, work_key, media_type, media_title, media_year)
     values(auth.uid(), reaction_kind, target_key, target.type, target.title, target.year)
@@ -98,7 +100,7 @@ begin
   if reaction_kind = 'priority' then
     delete from public.media_interest i using public.media_items m
     where i.media_item_id=m.id and i.user_id=auth.uid()
-      and public.media_reaction_work_key(m.type, m.title, m.year)=target_key;
+      and public.media_reaction_work_key(m.type, m.title, m.year::integer)=target_key;
     if reaction_enabled then
       insert into public.media_interest(media_item_id, user_id)
       values(target_media_item_id, auth.uid()) on conflict do nothing;
