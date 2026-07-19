@@ -1648,7 +1648,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
               {canReviewPoster && <button onClick={() => setDetailReviewOpen(true)}><Search size={14} />Enrich details</button>}
               {item.deleted_at ? <button onClick={onRestore}>Restore from Bin</button> : <button onClick={onDelete}><Trash2 size={14} />Move to Bin</button>}
             </div>}
-            {canImport && <div className="drawer-import-actions"><Button className="drawer-import-button" icon={Download} disabled={importPreparing} onClick={onImport}>{importPreparing ? 'Preparing your collection…' : 'Import to Your Collection'}</Button></div>}
+            {canImport && <div className="drawer-import-actions"><Button className="drawer-import-button" icon={Download} disabled={importPreparing} onClick={onImport} aria-label="Import to your collection">{importPreparing ? 'Preparing…' : 'Import item'}</Button></div>}
           </div>
         </div>
       </aside>

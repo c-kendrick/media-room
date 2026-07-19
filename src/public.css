@@ -253,9 +253,11 @@
 .drawer-danger-zone button{border:0;background:transparent;padding:5px 0;color:#8a7f73;display:inline-flex;align-items:center;gap:5px;font-size:9px;cursor:pointer}
 .drawer-danger-zone button:hover{color:#8e3d35}
 .drawer-shelf-heading{line-height:1.45}
-.drawer-import-actions{margin-top:24px;padding-top:16px;border-top:1px solid #e0d5c7}
-.drawer-import-button{min-height:38px!important;border-radius:5px!important;background:#6f302d!important;border-color:#6f302d!important;color:#fff!important;box-shadow:none!important}
-.drawer-import-button:hover{background:#83423c!important;border-color:#83423c!important}
+.drawer-import-actions{margin-top:14px;display:flex;align-items:center}
+.drawer-import-button{min-height:32px!important;padding:0 10px!important;border-radius:4px!important;background:transparent!important;border-color:#cdbdac!important;color:#655a51!important;box-shadow:none!important;font-size:9px!important;font-weight:700}
+.drawer-import-button svg{width:14px;height:14px;color:#8a5543}
+.drawer-import-button:hover{background:#efe5d9!important;border-color:#a98c7b!important;color:#3f352f!important}
+.drawer-import-button:focus-visible{outline:2px solid #8a5543;outline-offset:2px}
 
 .media-edit-dialog{border-radius:6px!important;background:#fbf6ee!important;padding:34px!important}
 .add-media-layer{align-items:flex-start;overflow-y:auto;padding:12px}

@@ -815,7 +815,8 @@ test('visible foreign items can be copied into the signed-in user collection thr
   assert.match(app, /selectedMediaCollectionId !== ownCollection\.id/);
   assert.match(app, /loadMediaSnapshot\(\{ fresh: true, collectionId: ownCollection\.id, accessToken \}\)/);
   assert.match(app, /sourceCollectionTitle=\{selectedSourceCollectionTitle\}/);
-  assert.match(app, /Import to Your Collection/);
+  assert.match(app, /aria-label="Import to your collection"/);
+  assert.match(app, /Import item/);
   assert.match(app, /initialItem=\{importDraft\.item\}/);
   assert.match(app, /mediaForm\(initialItem \|\| \{\}, section === 'screen' \? 'film' : section\)/);
   assert.match(app, /if \(requireShelf && !shelfIds\.length\)/);
@@ -826,7 +827,8 @@ test('visible foreign items can be copied into the signed-in user collection thr
   assert.match(app, /permanentlyDeleteMedia\(accessToken, createdId\)/);
   assert.match(app, /currentDestination\.media\.filter\(\(entry\) => entry\.database_id !== temporaryId\)/);
   assert.match(app, /\{sourceCollectionTitle\} - SHELVES/);
-  assert.match(styles, /\.drawer-import-button/);
+  assert.match(styles, /\.drawer-import-button\{[^}]*min-height:32px[^}]*background:transparent/);
+  assert.doesNotMatch(styles, /\.drawer-import-button\{[^}]*background:#6f302d/);
   assert.doesNotMatch(importFlow, /setMediaReaction|media_interest|MAIN_WATCHLIST_ID.*createMediaItem/);
 });
 
