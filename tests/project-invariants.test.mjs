@@ -11,6 +11,7 @@ import { supabaseRequest } from '../src/supabase.js';
 import { collectionSummaryStats } from '../src/collection-stats.js';
 import { appSiteUrl, authenticatedProfilePath, selectAuthenticatedProfile, signupRateLimitDetails } from '../src/auth.js';
 import { applyReactionToSnapshot, mediaReactionIdentity } from '../src/media-reactions.js';
+import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from '../src/identity.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -811,15 +812,30 @@ test('Share Collection always manages the signed-in owner collection and no dupl
   assert.doesNotMatch(app, />Friends<\/Button>/);
 });
 
-test('mobile top-bar actions use centered icons and the signed-in initial', async () => {
+test('member identities use real names, stable themed avatars, and word-based Club initials', async () => {
   const app = await read('src/App.jsx');
   const styles = await read('src/public.css');
+  const christopher = { id: 'user-christopher', display_name: 'Christopher', username: 'c-kendrick' };
+  assert.equal(personDisplayName(christopher), 'Christopher');
+  assert.equal(personInitial(christopher), 'C');
+  assert.equal(clubInitials('The Boys'), 'TB');
+  assert.equal(clubInitials('Henchmen'), 'H');
+  assert.equal(clubInitials('A Very Long Club Name'), 'AV');
+  assert.equal(avatarToneClass(christopher), avatarToneClass({ ...christopher, display_name: 'Chris' }));
+  assert.match(avatarToneClass(christopher), /^avatar-tone-[0-9]$/);
+  assert.deepEqual(collectionOwnerIdentity({ owner_id: christopher.id, title: "Christopher's Collection" }, [], christopher), christopher);
+  assert.equal(collectionOwnerIdentity({ owner_id: 'kit', title: "Kit’s Collection" }).display_name, 'Kit');
+  assert.doesNotMatch(app, /display_name: 'You'/);
+  assert.match(app, /className="current-user-label"> — You/);
+  assert.match(app, /<ClubMonogram name=\{club\.name\}/);
+  assert.match(app, /collectionOwnerIdentity\(collection, userHub\?\.users, account\?\.profile\)/);
   assert.match(app, /className=\{cls\('account-button', account && 'signed-in-account'\)\}/);
-  assert.match(app, /className="account-mobile-initial"[\s\S]*slice\(0, 1\)\.toUpperCase\(\)/);
+  assert.match(app, /<UserAvatar person=\{account\.profile\} size="account"/);
+  assert.match(app, /className="account-identity"><UserAvatar person=\{account\.profile\} size="large"/);
   assert.match(styles, /@media\(max-width:760px\)\{\.share-collection-button,\.topbar-action-button,\.account-button\{width:40px!important;padding:0!important;justify-content:center!important\}/);
   assert.match(styles, /\.account-desktop-label\{display:none\}/);
-  assert.match(styles, /\.signed-in-account>svg\{display:none\}/);
-  assert.match(styles, /\.account-mobile-initial\{width:100%;height:100%;display:grid;place-items:center/);
+  assert.match(styles, /\.avatar-tone-9 \{ background: #d6cec9; color: #514b47; \}/);
+  assert.match(styles, /\.account-button \.user-avatar-account \{ width: 28px/);
 });
 
 test('all single-item additions require a shelf and foreign imports open and save optimistically', async () => {
@@ -908,7 +924,8 @@ test('Users & Clubs uses accessible focused tabs, request states, search, and po
   assert.match(app, /role="tabpanel" className="people-panel"/);
   assert.match(app, /placeholder="Search approved users"/);
   assert.match(app, /Request sent<\/span><button className="secondary-button"/);
-  assert.match(app, /function InitialAvatar/);
+  assert.match(app, /function UserAvatar/);
+  assert.match(app, /function ClubMonogram/);
   assert.match(app, /function HubEmpty/);
   assert.match(app, /dialog\.addEventListener\('keydown', trap\)/);
   assert.match(styles, /\.users-dialog\{width:min\(940px/);
