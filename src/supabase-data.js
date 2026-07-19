@@ -78,6 +78,7 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
       return {
         item_id: item.legacy_id || item.id,
         database_id: item.id,
+        collection_id: item.collection_id,
         title: item.title,
         type: item.type,
         year: item.year,

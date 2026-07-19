@@ -286,6 +286,8 @@ export default function App() {
   const [confirmation, setConfirmation] = useState(null);
   const [collections, setCollections] = useState([]);
   const [ownCollection, setOwnCollection] = useState(null);
+  const [importDraft, setImportDraft] = useState(null);
+  const [importPreparing, setImportPreparing] = useState(false);
   const [draggedCollectionId, setDraggedCollectionId] = useState(null);
   const [collectionsLoading, setCollectionsLoading] = useState(() => !sharedMode);
   const [collectionId, setCollectionId] = useState(null);
@@ -622,6 +624,32 @@ export default function App() {
   }
 
   const selectedMedia = data.media.find((item) => item.item_id === selectedMediaId);
+  const selectedMediaCollectionId = selectedMedia?.collection_id || (!data.mainWatchlist ? data.collectionId : null);
+  const selectedSourceCollection = collections.find((collection) => collection.id === selectedMediaCollectionId);
+  const selectedSourceCollectionTitle = selectedSourceCollection?.title || (!data.mainWatchlist ? data.collectionTitle : "Member's Collection");
+  const canImportSelectedMedia = Boolean(
+    selectedMedia
+    && !selectedMedia.deleted_at
+    && ownCollection
+    && selectedMediaCollectionId
+    && selectedMediaCollectionId !== ownCollection.id
+    && account?.profile?.approved_at
+    && !account.profile.deactivated_at,
+  );
+  const beginMediaImport = async () => {
+    if (!canImportSelectedMedia || importPreparing) return;
+    setImportPreparing(true);
+    try {
+      const destination = await loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, accessToken });
+      cacheSnapshot(destination, ownCollection.id);
+      setImportDraft({ item: selectedMedia, destination, sourceCollectionTitle: selectedSourceCollectionTitle });
+      setSelectedMediaId(null);
+    } catch {
+      setToast('Your collection could not be prepared for importing.');
+    } finally {
+      setImportPreparing(false);
+    }
+  };
   const canEditCollection = Boolean(
     !sharedMode
     &&
@@ -739,8 +767,8 @@ export default function App() {
             {canShareCollection && <Button className="share-collection-button" icon={Share2} onClick={() => setShareOpen(true)}>Share Collection</Button>}
             {account?.profile?.approved_at && !account.profile.deactivated_at && <Button className="users-button topbar-action-button" icon={Users} onClick={() => setUsersOpen(true)}>Users{userHub?.notification_count > 0 && <b>{userHub.notification_count}</b>}</Button>}
             {authLoading ? <span className="account-state">Checking account…</span> : (
-              <Button className="account-button" icon={account ? UserRound : LogIn} onClick={() => setAccountOpen(true)}>
-                {account ? `${account.profile?.display_name || account.profile?.username}${viewAsMember ? ' · Member view' : ''}` : 'Sign in'}
+              <Button className={cls('account-button', account && 'signed-in-account')} icon={account ? UserRound : LogIn} aria-label={account ? `Open account for ${account.profile?.display_name || account.profile?.username}` : 'Sign in'} onClick={() => setAccountOpen(true)}>
+                {account ? <><span className="account-mobile-initial" aria-hidden="true">{String(account.profile?.display_name || account.profile?.username || '?').slice(0, 1).toUpperCase()}</span><span className="account-desktop-label">{account.profile?.display_name || account.profile?.username}{viewAsMember ? ' · Member view' : ''}</span></> : <span className="account-desktop-label">Sign in</span>}
               </Button>
             )}
           </div>
@@ -851,10 +879,63 @@ export default function App() {
           canReact={canReact}
           currentUserId={account?.profile?.id}
           onReaction={(kind, enabled) => saveReaction(selectedMedia, kind, enabled)}
+          sourceCollectionTitle={selectedSourceCollectionTitle}
+          canImport={canImportSelectedMedia}
+          importPreparing={importPreparing}
+          onImport={beginMediaImport}
           onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const deletedAt = new Date().toISOString(); const optimisticData = { ...data, media: data.media.map((item) => item.database_id === selectedMedia.database_id ? { ...item, deleted_at: deletedAt } : item) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); setSelectedMediaId(null); try { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); snapshotCache.current.delete(MAIN_WATCHLIST_ID); setToast('Media moved to Bin.'); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); setToast('The item could not be moved to Bin.'); throw error; } } })}
           onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
         />
       )}
+
+      {importDraft && <AddMediaDialog
+        section={mediaSection(importDraft.item)}
+        shelves={mediaShelvesForSection(importDraft.destination, mediaSection(importDraft.item))}
+        initialItem={importDraft.item}
+        sourceCollectionTitle={importDraft.sourceCollectionTitle}
+        requireShelf
+        importMode
+        onClose={() => setImportDraft(null)}
+        onSave={(item, shelfIds) => {
+          const draft = importDraft;
+          const temporaryId = `import-${Date.now()}`;
+          const temporaryItem = {
+            ...item,
+            item_id: temporaryId,
+            database_id: temporaryId,
+            collection_id: draft.destination.collectionId,
+            lists: shelfIds,
+            list_positions: Object.fromEntries(shelfIds.map((id, index) => [id, (index + 1) * 1000])),
+            interests: [],
+            likes: draft.item.likes || [],
+            priorities: draft.item.priorities || [],
+            optimistic: true,
+            created_at: new Date().toISOString(),
+          };
+          const optimisticDestination = { ...draft.destination, media: [...draft.destination.media, temporaryItem] };
+          cacheSnapshot(optimisticDestination, draft.destination.collectionId);
+          if (dataRef.current?.collectionId === draft.destination.collectionId) setData(optimisticDestination);
+          setImportDraft(null);
+          setToast('Importing to your collection…');
+          let createdId = null;
+          createMediaItem(accessToken, { ...item, collection_id: draft.destination.collectionId }).then(async (created) => {
+            createdId = created[0].id;
+            await replaceMediaShelfMemberships(accessToken, createdId, [], shelfIds);
+            const confirmed = await loadMediaSnapshot({ fresh: true, collectionId: draft.destination.collectionId, accessToken });
+            cacheSnapshot(confirmed, draft.destination.collectionId);
+            snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+            if (dataRef.current?.collectionId === draft.destination.collectionId) setData(confirmed);
+            setToast(`${cleanImportedMediaTitle(item.title)} imported to your collection.`);
+          }).catch(async () => {
+            if (createdId) await permanentlyDeleteMedia(accessToken, createdId).catch(() => null);
+            const currentDestination = snapshotCache.current.get(draft.destination.collectionId) || draft.destination;
+            const rolledBackDestination = { ...currentDestination, media: currentDestination.media.filter((entry) => entry.database_id !== temporaryId) };
+            cacheSnapshot(rolledBackDestination, draft.destination.collectionId);
+            if (dataRef.current?.collectionId === draft.destination.collectionId) setData(rolledBackDestination);
+            setToast('The item could not be imported. Your collection was restored.');
+          });
+        }}
+      />}
 
       {searchOpen && (
         <SearchModal
@@ -1491,7 +1572,7 @@ function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDrag
   );
 }
 
-function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, onDelete, onRestore }) {
+function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, sourceCollectionTitle, canImport, importPreparing, onImport, onDelete, onRestore }) {
   const [editing, setEditing] = useState(false);
   const [optimisticShelves, setOptimisticShelves] = useState(item.lists || []);
   const optimisticShelvesRef = useRef(item.lists || []);
@@ -1555,7 +1636,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
             <p className="drawer-description">{item.description || item.notes || 'No description has been added yet.'}</p>
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-lists public-shelf-list">
-              <span className="eyebrow">SHELVES</span>
+              <span className="eyebrow drawer-shelf-heading">{sourceCollectionTitle} - SHELVES</span>
               {(canEdit ? shelves : shelves.filter((shelf) => optimisticShelves.includes(shelf.shelf_id))).length
                 ? (canEdit ? shelves : shelves.filter((shelf) => optimisticShelves.includes(shelf.shelf_id))).map((shelf) => canEdit
                   ? <button type="button" className={cls('public-shelf-chip', optimisticShelves.includes(shelf.shelf_id) && 'active')} aria-pressed={optimisticShelves.includes(shelf.shelf_id)} onClick={() => toggleShelf(shelf.shelf_id)} key={shelf.shelf_id}>{optimisticShelves.includes(shelf.shelf_id) ? <Check size={13} /> : <Plus size={13} />}{shelf.name}</button>
@@ -1567,6 +1648,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
               {canReviewPoster && <button onClick={() => setDetailReviewOpen(true)}><Search size={14} />Enrich details</button>}
               {item.deleted_at ? <button onClick={onRestore}>Restore from Bin</button> : <button onClick={onDelete}><Trash2 size={14} />Move to Bin</button>}
             </div>}
+            {canImport && <div className="drawer-import-actions"><Button className="drawer-import-button" icon={Download} disabled={importPreparing} onClick={onImport}>{importPreparing ? 'Preparing your collection…' : 'Import to Your Collection'}</Button></div>}
           </div>
         </div>
       </aside>
@@ -2121,9 +2203,9 @@ function MediaDetailFields({ form, setForm, section, compact = false }) {
   </div>;
 }
 
-function AddMediaDialog({ section, shelves, initialShelfIds = [], onClose, onSave }) {
+function AddMediaDialog({ section, shelves, initialShelfIds = [], initialItem = null, sourceCollectionTitle = '', requireShelf = false, importMode = false, onClose, onSave }) {
   useEscape(onClose);
-  const [form, setForm] = useState(() => mediaForm({}, section === 'screen' ? 'film' : section));
+  const [form, setForm] = useState(() => mediaForm(initialItem || {}, section === 'screen' ? 'film' : section));
   const [priorityWatch, setPriorityWatch] = useState(false);
   const [shelfIds, setShelfIds] = useState(initialShelfIds);
   const [saving, setSaving] = useState(false);
@@ -2134,24 +2216,25 @@ function AddMediaDialog({ section, shelves, initialShelfIds = [], onClose, onSav
     event.preventDefault();
     const item = mediaFormPayload(form);
     if (!item) { setError('Enter a name. If supplied, year must be 1000–3000 and runtime must be a positive whole number.'); return; }
+    if (requireShelf && !shelfIds.length) { setError('Choose at least one shelf for the imported item.'); return; }
     setSaving(true); setError('');
     try { await onSave(item, shelfIds, priorityWatch); }
     catch { setError('The media item could not be saved. Check the fields and try again.'); setSaving(false); }
   };
   return <div className="modal-layer editor-layer add-media-layer"><form className="media-edit-dialog add-media-dialog" onSubmit={submit}>
     <button className="close" type="button" onClick={onClose} aria-label="Close add item"><X /></button>
-    <span className="eyebrow">ADD TO {destination?.name?.toUpperCase() || 'COLLECTION'}</span><h2>Add an Item</h2><p className="dialog-intro">Only the name is required. Add as much or as little detail as you like.</p>
+    <span className="eyebrow">{importMode ? `IMPORT FROM ${sourceCollectionTitle.toUpperCase()}` : `ADD TO ${destination?.name?.toUpperCase() || 'COLLECTION'}`}</span><h2>{importMode ? 'Import to Your Collection' : 'Add an Item'}</h2><p className="dialog-intro">{importMode ? 'The source details are ready to use. Edit anything you like, then choose a shelf to save your own copy.' : 'Only the name is required. Add as much or as little detail as you like.'}</p>
     <label className="required-media-title">Name <span>Required</span><input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} placeholder={namePlaceholder} required /></label>
     <section className="optional-media-section">
-      <header><span className="eyebrow">OPTIONAL</span><p>Everything below can be left blank.</p></header>
+      <header>{importMode ? <span className="eyebrow">DETAILS & DESTINATION</span> : <span className="eyebrow">OPTIONAL</span>}<p>{importMode ? 'The copied details are editable. Choose at least one destination shelf.' : 'Everything below can be left blank.'}</p></header>
       <MediaDetailFields form={form} setForm={setForm} section={section} compact />
       <div className="add-status-options">
         <button type="button" className={cls('add-status-option owned', form.owned && 'active')} aria-pressed={form.owned} onClick={() => setForm((current) => ({ ...current, owned: !current.owned }))}><span>{form.owned ? <Check size={12} /> : <Plus size={12} />}</span><strong>{form.owned ? 'Owned' : 'Mark as Owned'}</strong></button>
         {section === 'screen' && <button type="button" className={cls('add-status-option priority', priorityWatch && 'active')} aria-pressed={priorityWatch} onClick={() => setPriorityWatch((current) => !current)}><span>{priorityWatch ? <Check size={12} /> : <Plus size={12} />}</span><strong>{priorityWatch ? 'Priority Watch' : 'Mark Priority Watch'}</strong></button>}
       </div>
-      <fieldset className="shelf-picker"><legend>Also add to</legend>{shelves.map((shelf) => <label className={shelfIds.includes(shelf.shelf_id) ? 'selected' : ''} key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} /><span>{shelf.name}</span></label>)}</fieldset>
+      <fieldset className="shelf-picker">{importMode ? <legend>Choose shelves</legend> : <legend>Also add to</legend>}{shelves.map((shelf) => <label className={shelfIds.includes(shelf.shelf_id) ? 'selected' : ''} key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} /><span>{shelf.name}</span></label>)}</fieldset>
     </section>
-    {error && <p className="auth-error">{error}</p>}<div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={saving}>{saving ? 'Adding…' : 'Add Item'}</Button></div>
+    {error && <p className="auth-error">{error}</p>}<div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={importMode ? Download : Plus} disabled={saving || (requireShelf && !shelfIds.length)}>{saving ? (importMode ? 'Importing…' : 'Adding…') : (importMode ? 'Import Item' : 'Add Item')}</Button></div>
   </form></div>;
 }
 
