@@ -905,7 +905,11 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   const secureShare = await read('supabase/migrations/20260719020000_revocable_collection_share_links.sql');
   const openShare = await read('supabase/migrations/20260719050000_open_public_collections.sql');
 
-  assert.match(migration, /create table public\.media_reactions/);
+  assert.match(migration, /create table if not exists public\.media_reactions/);
+  assert.match(migration, /drop trigger if exists media_reactions_set_updated_at/);
+  assert.match(migration, /drop policy if exists "Signed-in viewers can read visible media reactions"/);
+  assert.equal((migration.match(/m\.year::integer/g) || []).length, 2);
+  assert.match(migration, /target\.year::integer/);
   assert.match(migration, /primary key \(user_id, kind, work_key\)/);
   assert.match(migration, /reaction_kind not in \('like', 'priority'\)/);
   assert.match(migration, /not public\.profile_is_active\(auth\.uid\(\)\)/);
