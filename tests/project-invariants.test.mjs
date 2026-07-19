@@ -795,6 +795,41 @@ test('Share Collection always manages the signed-in owner collection and no dupl
   assert.doesNotMatch(app, />Friends<\/Button>/);
 });
 
+test('mobile top-bar actions use centered icons and the signed-in initial', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /className=\{cls\('account-button', account && 'signed-in-account'\)\}/);
+  assert.match(app, /className="account-mobile-initial"[\s\S]*slice\(0, 1\)\.toUpperCase\(\)/);
+  assert.match(styles, /@media\(max-width:760px\)\{\.share-collection-button,\.topbar-action-button,\.account-button\{width:40px!important;padding:0!important;justify-content:center!important\}/);
+  assert.match(styles, /\.account-desktop-label\{display:none\}/);
+  assert.match(styles, /\.signed-in-account>svg\{display:none\}/);
+  assert.match(styles, /\.account-mobile-initial\{width:100%;height:100%;display:grid;place-items:center/);
+});
+
+test('visible foreign items can be copied into the signed-in user collection through a prefilled Add Item dialog', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/supabase-data.js');
+  const styles = await read('src/public.css');
+  const importFlow = app.slice(app.indexOf('{importDraft &&'), app.indexOf('{searchOpen &&'));
+  assert.match(data, /collection_id: item\.collection_id/);
+  assert.match(app, /selectedMediaCollectionId !== ownCollection\.id/);
+  assert.match(app, /loadMediaSnapshot\(\{ fresh: true, collectionId: ownCollection\.id, accessToken \}\)/);
+  assert.match(app, /sourceCollectionTitle=\{selectedSourceCollectionTitle\}/);
+  assert.match(app, /Import to Your Collection/);
+  assert.match(app, /initialItem=\{importDraft\.item\}/);
+  assert.match(app, /mediaForm\(initialItem \|\| \{\}, section === 'screen' \? 'film' : section\)/);
+  assert.match(app, /if \(requireShelf && !shelfIds\.length\)/);
+  assert.match(app, /createMediaItem\(accessToken, \{ \.\.\.item, collection_id: draft\.destination\.collectionId \}\)/);
+  assert.match(app, /createdId = created\[0\]\.id;[\s\S]*replaceMediaShelfMemberships\(accessToken, createdId, \[\], shelfIds\)/);
+  assert.match(app, /cacheSnapshot\(optimisticDestination, draft\.destination\.collectionId\)/);
+  assert.match(app, /The item could not be imported\. Your collection was restored/);
+  assert.match(app, /permanentlyDeleteMedia\(accessToken, createdId\)/);
+  assert.match(app, /currentDestination\.media\.filter\(\(entry\) => entry\.database_id !== temporaryId\)/);
+  assert.match(app, /\{sourceCollectionTitle\} - SHELVES/);
+  assert.match(styles, /\.drawer-import-button/);
+  assert.doesNotMatch(importFlow, /setMediaReaction|media_interest|MAIN_WATCHLIST_ID.*createMediaItem/);
+});
+
 test('signup email rate limits are friendly and only count down reliable server timing', async () => {
   const app = await read('src/App.jsx');
   assert.deepEqual(signupRateLimitDetails({ status: 429, retryAfter: 12.1 }), { limited: true, retryAfter: 13 });

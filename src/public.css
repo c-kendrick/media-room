@@ -49,6 +49,8 @@
   white-space: nowrap;
 }
 
+.account-mobile-initial { display: none; }
+
 .account-state {
   color: #837a6f;
   font-size: 11px;
@@ -250,6 +252,10 @@
 .drawer-danger-zone{margin-top:30px;padding-top:12px;border-top:1px solid #e0d5c7;display:flex;align-items:center;gap:14px}
 .drawer-danger-zone button{border:0;background:transparent;padding:5px 0;color:#8a7f73;display:inline-flex;align-items:center;gap:5px;font-size:9px;cursor:pointer}
 .drawer-danger-zone button:hover{color:#8e3d35}
+.drawer-shelf-heading{line-height:1.45}
+.drawer-import-actions{margin-top:24px;padding-top:16px;border-top:1px solid #e0d5c7}
+.drawer-import-button{min-height:38px!important;border-radius:5px!important;background:#6f302d!important;border-color:#6f302d!important;color:#fff!important;box-shadow:none!important}
+.drawer-import-button:hover{background:#83423c!important;border-color:#83423c!important}
 
 .media-edit-dialog{border-radius:6px!important;background:#fbf6ee!important;padding:34px!important}
 .add-media-layer{align-items:flex-start;overflow-y:auto;padding:12px}
@@ -468,7 +474,7 @@
   .account-button{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
 
-@media(max-width:760px){.share-collection-button,.topbar-action-button{width:40px;padding:0!important;font-size:0!important}.share-collection-button svg,.topbar-action-button svg{margin:0}.users-button>b{font-size:8px}.shared-mode-badge{display:none}.share-danger-zone{grid-template-columns:1fr}.share-danger-zone>span{justify-content:flex-start}.users-dialog-layer{padding:0}.users-dialog{width:100vw!important;height:100vh;border-radius:0!important}.people-dialog-header{padding:24px 20px 0}.people-dialog-body{padding:22px 20px 30px}.people-tabs{gap:22px}.user-hub-row,.club-invitation-row{grid-template-columns:auto minmax(0,1fr)}.user-hub-actions,.club-invitation-row>div{grid-column:2;justify-content:flex-start;flex-wrap:wrap}.club-card-summary{grid-template-columns:minmax(0,1fr) auto}.club-card-members{display:none}.club-management-panel{padding:4px 14px 16px}.club-member-row{grid-template-columns:auto minmax(0,1fr) auto}.member-menu-action{grid-column:2/-1;justify-self:start}.create-club-panel,.club-invite-control{grid-template-columns:1fr}.create-club-panel>span{justify-content:flex-end}.club-danger-section{align-items:flex-start;flex-direction:column}.danger-outline-button{width:100%}}
+@media(max-width:760px){.share-collection-button,.topbar-action-button,.account-button{width:40px!important;padding:0!important;justify-content:center!important}.share-collection-button,.topbar-action-button{font-size:0!important}.share-collection-button svg,.topbar-action-button svg,.account-button svg{margin:0}.signed-in-account>svg{display:none}.account-desktop-label{display:none}.account-mobile-initial{width:100%;height:100%;display:grid;place-items:center;font-family:Georgia,serif;font-size:13px;font-weight:800;line-height:1}.users-button>b{font-size:8px}.shared-mode-badge{display:none}.share-danger-zone{grid-template-columns:1fr}.share-danger-zone>span{justify-content:flex-start}.users-dialog-layer{padding:0}.users-dialog{width:100vw!important;height:100vh;border-radius:0!important}.people-dialog-header{padding:24px 20px 0}.people-dialog-body{padding:22px 20px 30px}.people-tabs{gap:22px}.user-hub-row,.club-invitation-row{grid-template-columns:auto minmax(0,1fr)}.user-hub-actions,.club-invitation-row>div{grid-column:2;justify-content:flex-start;flex-wrap:wrap}.club-card-summary{grid-template-columns:minmax(0,1fr) auto}.club-card-members{display:none}.club-management-panel{padding:4px 14px 16px}.club-member-row{grid-template-columns:auto minmax(0,1fr) auto}.member-menu-action{grid-column:2/-1;justify-self:start}.create-club-panel,.club-invite-control{grid-template-columns:1fr}.create-club-panel>span{justify-content:flex-end}.club-danger-section{align-items:flex-start;flex-direction:column}.danger-outline-button{width:100%}}
 
 @media(max-width:520px){.share-url-row{grid-template-columns:1fr}.share-url-row .button{justify-self:start}.share-danger-zone>span{flex-wrap:wrap}.share-mode-tabs{grid-template-columns:1fr}.public-privacy-action{grid-template-columns:1fr}.public-privacy-action .button{justify-self:start}}
 
@@ -485,7 +491,7 @@
 }
 
 @media(max-width:560px){
-  .account-button{width:36px;padding:0!important;font-size:0}
+  .account-button{width:40px!important;padding:0!important}
   .account-button svg{margin:0}
   .collection-note-preview{display:block}
   .open-note-button{margin-top:5px}
