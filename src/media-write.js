@@ -113,7 +113,7 @@ export function createMediaItem(accessToken, item) {
 export function permanentlyDeleteMedia(accessToken, databaseId) {
   return supabaseRequest('/rest/v1/media_items?id=eq.' + encodeURIComponent(databaseId), {
     method: 'DELETE', fresh: true,
-    headers: { Authorization: 'Bearer ' + accessToken },
+    headers: { Authorization: 'Bearer ' + accessToken, Prefer: 'return=representation' },
   });
 }
 
@@ -134,7 +134,7 @@ export function updateCollection(accessToken, collectionId, changes) {
 
 export function deleteShelf(accessToken, shelfId) {
   return supabaseRequest('/rest/v1/shelves?id=eq.' + encodeURIComponent(shelfId), { method: 'DELETE', fresh: true,
-    headers: { Authorization: 'Bearer ' + accessToken } });
+    headers: { Authorization: 'Bearer ' + accessToken, Prefer: 'return=representation' } });
 }
 
 export async function reorderShelfMedia(accessToken, shelfId, orderedMediaIds) {
