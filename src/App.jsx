@@ -287,7 +287,6 @@ export default function App() {
   const [collections, setCollections] = useState([]);
   const [ownCollection, setOwnCollection] = useState(null);
   const [importDraft, setImportDraft] = useState(null);
-  const [importPreparing, setImportPreparing] = useState(false);
   const [draggedCollectionId, setDraggedCollectionId] = useState(null);
   const [collectionsLoading, setCollectionsLoading] = useState(() => !sharedMode);
   const [collectionId, setCollectionId] = useState(null);
@@ -636,19 +635,35 @@ export default function App() {
     && account?.profile?.approved_at
     && !account.profile.deactivated_at,
   );
-  const beginMediaImport = async () => {
-    if (!canImportSelectedMedia || importPreparing) return;
-    setImportPreparing(true);
+  const loadImportDestination = async (draftKey, destinationCollectionId, fallbackDestination = null) => {
     try {
-      const destination = await loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, accessToken });
-      cacheSnapshot(destination, ownCollection.id);
-      setImportDraft({ item: selectedMedia, destination, sourceCollectionTitle: selectedSourceCollectionTitle });
-      setSelectedMediaId(null);
+      const destination = await loadMediaSnapshot({ fresh: true, collectionId: destinationCollectionId, accessToken });
+      cacheSnapshot(destination, destinationCollectionId);
+      setImportDraft((current) => current?.key === draftKey
+        ? { ...current, destination, shelvesLoading: false, shelvesError: '' }
+        : current);
     } catch {
-      setToast('Your collection could not be prepared for importing.');
-    } finally {
-      setImportPreparing(false);
+      setImportDraft((current) => current?.key === draftKey
+        ? { ...current, destination: current.destination || fallbackDestination, shelvesLoading: false, shelvesError: current.destination || fallbackDestination ? '' : 'Your shelves could not be loaded.' }
+        : current);
+      if (!fallbackDestination) setToast('Your collection shelves could not be loaded.');
     }
+  };
+  const beginMediaImport = () => {
+    if (!canImportSelectedMedia) return;
+    const draftKey = `${selectedMedia.database_id}-${Date.now()}`;
+    const cachedDestination = snapshotCache.current.get(ownCollection.id) || null;
+    setImportDraft({
+      key: draftKey,
+      item: selectedMedia,
+      destinationCollectionId: ownCollection.id,
+      destination: cachedDestination,
+      sourceCollectionTitle: selectedSourceCollectionTitle,
+      shelvesLoading: !cachedDestination,
+      shelvesError: '',
+    });
+    setSelectedMediaId(null);
+    if (!cachedDestination) loadImportDestination(draftKey, ownCollection.id);
   };
   const canEditCollection = Boolean(
     !sharedMode
@@ -707,7 +722,6 @@ export default function App() {
       throw error;
     }
   };
-  const generatedAt = data.generatedAt ? new Date(data.generatedAt) : null;
   const dropCollection = async (targetCollectionId) => {
     if (!isAdmin || !draggedCollectionId || draggedCollectionId === targetCollectionId) return;
     const previous = [...collections];
@@ -742,14 +756,14 @@ export default function App() {
             <UserRound size={17} />{collection.title}
           </button>)}
         </nav>}
-        <div className="sidebar-bottom">
+        {sharedMode && <div className="sidebar-bottom">
           <div className="drive-state">
             <span>
-              <strong>{sharedMode ? 'Shared Collection' : 'Public collection'}</strong>
-              <small>{sharedMode ? 'Read-only link' : generatedAt ? `Published ${generatedAt.toLocaleDateString('en-AU')}` : 'Static snapshot'}</small>
+              <strong>Shared Collection</strong>
+              <small>Read-only link</small>
             </span>
           </div>
-        </div>
+        </div>}
       </aside>
 
       {mobileNav && <button className="scrim" onClick={() => setMobileNav(false)} aria-label="Close menu" />}
@@ -777,7 +791,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
+          <MediaView key={data.collectionId} data={data} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
             const previousData = data;
             const optimisticData = {
               ...data,
@@ -881,7 +895,6 @@ export default function App() {
           onReaction={(kind, enabled) => saveReaction(selectedMedia, kind, enabled)}
           sourceCollectionTitle={selectedSourceCollectionTitle}
           canImport={canImportSelectedMedia}
-          importPreparing={importPreparing}
           onImport={beginMediaImport}
           onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const deletedAt = new Date().toISOString(); const optimisticData = { ...data, media: data.media.map((item) => item.database_id === selectedMedia.database_id ? { ...item, deleted_at: deletedAt } : item) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); setSelectedMediaId(null); try { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); snapshotCache.current.delete(MAIN_WATCHLIST_ID); setToast('Media moved to Bin.'); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); setToast('The item could not be moved to Bin.'); throw error; } } })}
           onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
@@ -890,11 +903,13 @@ export default function App() {
 
       {importDraft && <AddMediaDialog
         section={mediaSection(importDraft.item)}
-        shelves={mediaShelvesForSection(importDraft.destination, mediaSection(importDraft.item))}
+        shelves={importDraft.destination ? mediaShelvesForSection(importDraft.destination, mediaSection(importDraft.item)) : []}
         initialItem={importDraft.item}
         sourceCollectionTitle={importDraft.sourceCollectionTitle}
-        requireShelf
         importMode
+        shelvesLoading={importDraft.shelvesLoading}
+        shelvesError={importDraft.shelvesError}
+        onRetryShelves={() => loadImportDestination(importDraft.key, importDraft.destinationCollectionId)}
         onClose={() => setImportDraft(null)}
         onSave={(item, shelfIds) => {
           const draft = importDraft;
@@ -916,7 +931,7 @@ export default function App() {
           cacheSnapshot(optimisticDestination, draft.destination.collectionId);
           if (dataRef.current?.collectionId === draft.destination.collectionId) setData(optimisticDestination);
           setImportDraft(null);
-          setToast('Importing to your collection…');
+          setToast(`${cleanImportedMediaTitle(item.title)} added to your collection.`);
           let createdId = null;
           createMediaItem(accessToken, { ...item, collection_id: draft.destination.collectionId }).then(async (created) => {
             createdId = created[0].id;
@@ -1068,7 +1083,7 @@ function EditableDescription({ value, canEdit, onSave, fallback = '', title = 'C
   return <textarea className="editable-description-input" aria-label="Collection note" autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value || fallback); setEditing(false); } if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') event.currentTarget.blur(); }} />;
 }
 
-function MediaView({ data, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, onDescriptionChange }) {
+function MediaView({ data, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, onDescriptionChange }) {
   const [section, setSection] = useState('screen');
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -1337,9 +1352,9 @@ function MediaView({ data, notify, openMedia, canEdit, canReact, currentUserId, 
 
       {!randomPool.length && <Empty>No media matches those filters.</Empty>}
       {!data.mainWatchlist && (canEdit || isAdmin) && <section className="collection-tools">
-        <div><span className="eyebrow">COLLECTION TOOLS</span><p>{canEdit ? 'Manage this section without cluttering the shelves.' : 'Administrative backup and artwork tools.'}</p></div>
-        {canEdit && <Button className="quiet-button create-shelf-button" icon={Plus} onClick={() => setCreatingShelf(true)}>Create Shelf</Button>}
+        <div className="collection-tools-intro"><span className="eyebrow">COLLECTION TOOLS</span><p>{canEdit ? 'Manage this section without cluttering the shelves.' : 'Administrative backup and artwork tools.'}</p></div>
         <div className="collection-tool-actions">
+          {canEdit && <Button className="quiet-button create-shelf-button" icon={Plus} onClick={() => setCreatingShelf(true)}>Create Shelf</Button>}
           <Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters || posterRetryAfter > 0} onClick={enrichCurrentSection}>{enrichingPosters ? 'Finding posters…' : posterRetryAfter ? `Find posters in ${retryLabel(posterRetryAfter)}` : 'Find posters'}</Button>
           <Button className="quiet-button" icon={Search} disabled={enrichingDetails || detailsRetryAfter > 0} onClick={enrichDetailsInCurrentSection}>{enrichingDetails ? 'Enriching details…' : detailsRetryAfter ? `Enrich details in ${retryLabel(detailsRetryAfter)}` : 'Enrich details'}</Button>
           <Button className="quiet-button" icon={Download} onClick={onExport}>Export backup</Button>
@@ -1352,7 +1367,7 @@ function MediaView({ data, notify, openMedia, canEdit, canReact, currentUserId, 
       </section>}
       {creatingShelf && <CreateShelfDialog section={section} onClose={() => setCreatingShelf(false)} onSave={async (values) => { setCreatingShelf(false); try { await createShelf(accessToken, { collection_id: data.collectionId, section, ...values, position: (shelves.at(-1)?.position || 0) + 1000 }); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }} />}
       {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id, index) => [id, (index + 1) * 1000])), interests: [], likes: [], priorities: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, collection_id: data.collectionId }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setMediaReaction(accessToken, created[0].id, 'priority', true); await refresh({ fresh: true }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('Media added.'); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('The media item could not be saved.'); }); }} />}
-      {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); try { await permanentlyDeleteMedia(accessToken, item.database_id); snapshotCache.current.delete(MAIN_WATCHLIST_ID); notify(`${item.title} permanently deleted.`); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); try { await deleteShelf(accessToken, shelf.shelf_id); snapshotCache.current.delete(MAIN_WATCHLIST_ID); notify(`${shelf.name} permanently deleted.`); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })} />}
+      {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; onDataChange(optimisticData); try { const deleted = await permanentlyDeleteMedia(accessToken, item.database_id); if (!deleted?.length) throw new Error('Supabase did not delete the media item.'); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; onDataChange(optimisticData); try { const deleted = await deleteShelf(accessToken, shelf.shelf_id); if (!deleted?.length) throw new Error('Supabase did not delete the shelf.'); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })} />}
       {shelfEditor && <ShelfEditDialog shelf={shelfEditor} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
       {bulkImportType && <BulkImportDialog type={bulkImportType} shelves={shelves} onClose={() => setBulkImportType(null)} onImport={(shelfIds, rows) => {
         const temporaryBatch = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1572,7 +1587,7 @@ function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDrag
   );
 }
 
-function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, sourceCollectionTitle, canImport, importPreparing, onImport, onDelete, onRestore }) {
+function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, sourceCollectionTitle, canImport, onImport, onDelete, onRestore }) {
   const [editing, setEditing] = useState(false);
   const [optimisticShelves, setOptimisticShelves] = useState(item.lists || []);
   const optimisticShelvesRef = useRef(item.lists || []);
@@ -1648,7 +1663,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
               {canReviewPoster && <button onClick={() => setDetailReviewOpen(true)}><Search size={14} />Enrich details</button>}
               {item.deleted_at ? <button onClick={onRestore}>Restore from Bin</button> : <button onClick={onDelete}><Trash2 size={14} />Move to Bin</button>}
             </div>}
-            {canImport && <div className="drawer-import-actions"><Button className="drawer-import-button" icon={Download} disabled={importPreparing} onClick={onImport} aria-label="Import to your collection">{importPreparing ? 'Preparing…' : 'Import item'}</Button></div>}
+            {canImport && <div className="drawer-import-actions"><Button className="drawer-import-button" icon={Download} onClick={onImport}>Import to Your Collection</Button></div>}
           </div>
         </div>
       </aside>
@@ -2203,7 +2218,7 @@ function MediaDetailFields({ form, setForm, section, compact = false }) {
   </div>;
 }
 
-function AddMediaDialog({ section, shelves, initialShelfIds = [], initialItem = null, sourceCollectionTitle = '', requireShelf = false, importMode = false, onClose, onSave }) {
+function AddMediaDialog({ section, shelves, initialShelfIds = [], initialItem = null, sourceCollectionTitle = '', importMode = false, shelvesLoading = false, shelvesError = '', onRetryShelves, onClose, onSave }) {
   useEscape(onClose);
   const [form, setForm] = useState(() => mediaForm(initialItem || {}, section === 'screen' ? 'film' : section));
   const [priorityWatch, setPriorityWatch] = useState(false);
@@ -2216,14 +2231,14 @@ function AddMediaDialog({ section, shelves, initialShelfIds = [], initialItem = 
     event.preventDefault();
     const item = mediaFormPayload(form);
     if (!item) { setError('Enter a name. If supplied, year must be 1000–3000 and runtime must be a positive whole number.'); return; }
-    if (requireShelf && !shelfIds.length) { setError('Choose at least one shelf for the imported item.'); return; }
+    if (!shelfIds.length) { setError('Choose at least one shelf.'); return; }
     setSaving(true); setError('');
     try { await onSave(item, shelfIds, priorityWatch); }
     catch { setError('The media item could not be saved. Check the fields and try again.'); setSaving(false); }
   };
   return <div className="modal-layer editor-layer add-media-layer"><form className="media-edit-dialog add-media-dialog" onSubmit={submit}>
     <button className="close" type="button" onClick={onClose} aria-label="Close add item"><X /></button>
-    <span className="eyebrow">{importMode ? `IMPORT FROM ${sourceCollectionTitle.toUpperCase()}` : `ADD TO ${destination?.name?.toUpperCase() || 'COLLECTION'}`}</span><h2>{importMode ? 'Import to Your Collection' : 'Add an Item'}</h2><p className="dialog-intro">{importMode ? 'The source details are ready to use. Edit anything you like, then choose a shelf to save your own copy.' : 'Only the name is required. Add as much or as little detail as you like.'}</p>
+    <span className="eyebrow">{importMode ? `IMPORT FROM ${sourceCollectionTitle.toUpperCase()}` : `ADD TO ${destination?.name?.toUpperCase() || 'COLLECTION'}`}</span><h2>{importMode ? 'Import to Your Collection' : 'Add an Item'}</h2><p className="dialog-intro">{importMode ? 'The source details are ready to use. Edit anything you like, then choose a shelf to save your own copy.' : 'Add as much or as little detail as you like, then choose at least one shelf.'}</p>
     <label className="required-media-title">Name <span>Required</span><input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} placeholder={namePlaceholder} required /></label>
     <section className="optional-media-section">
       <header>{importMode ? <span className="eyebrow">DETAILS & DESTINATION</span> : <span className="eyebrow">OPTIONAL</span>}<p>{importMode ? 'The copied details are editable. Choose at least one destination shelf.' : 'Everything below can be left blank.'}</p></header>
@@ -2232,9 +2247,13 @@ function AddMediaDialog({ section, shelves, initialShelfIds = [], initialItem = 
         <button type="button" className={cls('add-status-option owned', form.owned && 'active')} aria-pressed={form.owned} onClick={() => setForm((current) => ({ ...current, owned: !current.owned }))}><span>{form.owned ? <Check size={12} /> : <Plus size={12} />}</span><strong>{form.owned ? 'Owned' : 'Mark as Owned'}</strong></button>
         {section === 'screen' && <button type="button" className={cls('add-status-option priority', priorityWatch && 'active')} aria-pressed={priorityWatch} onClick={() => setPriorityWatch((current) => !current)}><span>{priorityWatch ? <Check size={12} /> : <Plus size={12} />}</span><strong>{priorityWatch ? 'Priority Watch' : 'Mark Priority Watch'}</strong></button>}
       </div>
-      <fieldset className="shelf-picker">{importMode ? <legend>Choose shelves</legend> : <legend>Also add to</legend>}{shelves.map((shelf) => <label className={shelfIds.includes(shelf.shelf_id) ? 'selected' : ''} key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} /><span>{shelf.name}</span></label>)}</fieldset>
     </section>
-    {error && <p className="auth-error">{error}</p>}<div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={importMode ? Download : Plus} disabled={saving || (requireShelf && !shelfIds.length)}>{saving ? (importMode ? 'Importing…' : 'Adding…') : (importMode ? 'Import Item' : 'Add Item')}</Button></div>
+    <fieldset className="shelf-picker" disabled={shelvesLoading}><legend>Choose at least one shelf <span>Required</span></legend>{shelvesLoading
+      ? <p className="shelf-picker-state">Loading your shelves…</p>
+      : shelvesError
+        ? <div className="shelf-picker-state error"><span>{shelvesError}</span><Button type="button" onClick={onRetryShelves}>Try Again</Button></div>
+        : shelves.map((shelf) => <label className={shelfIds.includes(shelf.shelf_id) ? 'selected' : ''} key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} /><span>{shelf.name}</span></label>)}</fieldset>
+    {error && <p className="auth-error">{error}</p>}<div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={importMode ? Download : Plus} disabled={saving || shelvesLoading || Boolean(shelvesError) || !shelfIds.length}>{saving ? (importMode ? 'Importing…' : 'Adding…') : (importMode ? 'Import to Your Collection' : 'Add Item')}</Button></div>
   </form></div>;
 }
 

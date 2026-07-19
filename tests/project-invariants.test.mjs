@@ -283,6 +283,17 @@ test('navigation and metadata refinements remain present', async () => {
   assert.match(app, /Save Changes/);
 });
 
+test('the public sidebar footer is removed and collection tools remain horizontal when space allows', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.doesNotMatch(app, /Public collection|Published \$\{generatedAt/);
+  assert.match(app, /\{sharedMode && <div className="sidebar-bottom">/);
+  assert.match(app, /collection-tools-intro[\s\S]*collection-tool-actions[\s\S]*create-shelf-button/);
+  assert.match(styles, /\.collection-tools\{[^}]*display:flex[^}]*align-items:center/);
+  assert.match(styles, /\.collection-tool-actions\{[^}]*flex-wrap:nowrap/);
+  assert.match(styles, /@media\(max-width:1100px\) and \(min-width:761px\)\{\.collection-tools\{[^}]*flex-direction:column/);
+});
+
 test('owned status is owner-controlled, optimistic, and displayed as a muted card tag', async () => {
   const app = await read('src/App.jsx');
   const data = await read('src/supabase-data.js');
@@ -383,6 +394,7 @@ test('backup import repairs older schemas missing provider metadata', async () =
 
 test('owners can open a collection Bin and restore media or shelves', async () => {
   const app = await read('src/App.jsx');
+  const writes = await read('src/media-write.js');
   const styles = await read('src/public.css');
   assert.match(app, /Bin\{binCount \? ` \(\$\{binCount\}\)` : ''\}/);
   assert.match(app, /function CollectionBinDrawer/);
@@ -391,19 +403,23 @@ test('owners can open a collection Bin and restore media or shelves', async () =
   assert.match(app, /CollectionBinDrawer[\s\S]*Delete forever/);
   assert.match(app, /onDeleteMedia[\s\S]*permanentlyDeleteMedia/);
   assert.match(app, /onDeleteShelf[\s\S]*deleteShelf/);
-  assert.match(app, /onDeleteMedia[\s\S]*optimistic: true[\s\S]*media: data\.media\.filter/);
-  assert.match(app, /onDeleteShelf[\s\S]*optimistic: true[\s\S]*mediaShelves: data\.mediaShelves\.filter/);
+  assert.match(app, /onDeleteMedia[\s\S]*optimistic: true[\s\S]*media: data\.media\.filter[\s\S]*onDataChange\(optimisticData\)/);
+  assert.match(app, /onDeleteShelf[\s\S]*optimistic: true[\s\S]*mediaShelves: data\.mediaShelves\.filter[\s\S]*onDataChange\(optimisticData\)/);
+  assert.match(app, /if \(!deleted\?\.length\) throw new Error\('Supabase did not delete the media item\.'/);
+  assert.match(app, /catch \(error\) \{ onDataChange\(previousData\); notify\(`\$\{item\.title\} could not be deleted/);
+  assert.match(writes, /permanentlyDeleteMedia[\s\S]*Prefer: 'return=representation'/);
+  assert.match(writes, /deleteShelf[\s\S]*Prefer: 'return=representation'/);
   assert.match(app, /It has been restored to the Bin/);
   assert.doesNotMatch(app, /drawer-danger-zone[\s\S]{0,400}Delete permanently/);
   assert.match(styles, /\.collection-bin-drawer/);
   assert.match(styles, /\.bin-row-actions/);
 });
 
-test('add and edit share contextual media details and keep all non-name fields optional', async () => {
+test('add and edit share contextual media details while only shelf placement is additionally required', async () => {
   const app = await read('src/App.jsx');
   const styles = await read('src/public.css');
   assert.match(app, /function MediaDetailFields/);
-  assert.match(app, /Only the name is required/);
+  assert.match(app, /Add as much or as little detail as you like, then choose at least one shelf/);
   assert.match(app, />OPTIONAL</);
   for (const label of ['Director', 'Format', 'Platforms', 'Genres', 'Runtime', 'Poster URL', 'Description', 'Notes']) assert.match(app, new RegExp(`>${label}`));
   assert.match(app, /section === 'book' && <label>Author<input value=\{form\.creator\}/);
@@ -412,7 +428,7 @@ test('add and edit share contextual media details and keep all non-name fields o
   assert.match(app, /Mark as Owned/);
   assert.match(app, /section === 'screen'[\s\S]*Mark Priority Watch/);
   assert.match(app, /if \(priorityWatch && currentUserId\) await setMediaReaction\(accessToken, created\[0\]\.id, 'priority', true\)/);
-  assert.match(app, /<legend>Also add to<\/legend>/);
+  assert.match(app, /<legend>Choose at least one shelf <span>Required<\/span><\/legend>/);
   assert.match(app, /section === 'game'[\s\S]*Platforms \(comma separated\)[\s\S]*: <label>Format/);
   assert.match(app, /section === 'screen' && <label>Runtime \(minutes\)/);
   assert.doesNotMatch(app, /!compact && <label>Runtime/);
@@ -588,7 +604,7 @@ test('shared collection routing is read-only and completely isolated from Main W
   assert.match(app, /const isAdmin = isAdminAccount && !viewAsMember && !sharedMode/);
   assert.match(app, /const canReact = Boolean\(!sharedMode/);
   assert.match(app, /data\.shared \? 'SHARED COLLECTION · READ ONLY'/);
-  assert.match(app, /sharedMode \? 'Read-only link'/);
+  assert.match(app, /\{sharedMode && <div className="sidebar-bottom">[\s\S]*<small>Read-only link<\/small>/);
   assert.match(share, /share link is unavailable or has been revoked/i);
   assert.doesNotMatch(data, /loadSharedCollection|get_shared_collection/);
   assert.match(share, /mapSnapshot\(payload\.collection, payload\.shelves \|\| \[\], payload\.media \|\| \[\], payload\.memberships \|\| \[\]\)/);
@@ -806,23 +822,27 @@ test('mobile top-bar actions use centered icons and the signed-in initial', asyn
   assert.match(styles, /\.account-mobile-initial\{width:100%;height:100%;display:grid;place-items:center/);
 });
 
-test('visible foreign items can be copied into the signed-in user collection through a prefilled Add Item dialog', async () => {
+test('all single-item additions require a shelf and foreign imports open and save optimistically', async () => {
   const app = await read('src/App.jsx');
   const data = await read('src/supabase-data.js');
   const styles = await read('src/public.css');
   const importFlow = app.slice(app.indexOf('{importDraft &&'), app.indexOf('{searchOpen &&'));
   assert.match(data, /collection_id: item\.collection_id/);
   assert.match(app, /selectedMediaCollectionId !== ownCollection\.id/);
-  assert.match(app, /loadMediaSnapshot\(\{ fresh: true, collectionId: ownCollection\.id, accessToken \}\)/);
+  assert.match(app, /loadMediaSnapshot\(\{ fresh: true, collectionId: destinationCollectionId, accessToken \}\)/);
   assert.match(app, /sourceCollectionTitle=\{selectedSourceCollectionTitle\}/);
-  assert.match(app, /aria-label="Import to your collection"/);
-  assert.match(app, /Import item/);
+  assert.match(app, />Import to Your Collection<\/Button>/);
+  assert.match(app, /setImportDraft\(\{[\s\S]*destination: cachedDestination[\s\S]*shelvesLoading: !cachedDestination/);
+  assert.match(app, /setSelectedMediaId\(null\);[\s\S]*if \(!cachedDestination\) loadImportDestination\(draftKey, ownCollection\.id\)/);
   assert.match(app, /initialItem=\{importDraft\.item\}/);
   assert.match(app, /mediaForm\(initialItem \|\| \{\}, section === 'screen' \? 'film' : section\)/);
-  assert.match(app, /if \(requireShelf && !shelfIds\.length\)/);
+  assert.match(app, /if \(!shelfIds\.length\) \{ setError\('Choose at least one shelf\.'/);
+  assert.match(app, /disabled=\{saving \|\| shelvesLoading \|\| Boolean\(shelvesError\) \|\| !shelfIds\.length\}/);
+  assert.match(app, /Choose at least one shelf <span>Required<\/span>/);
   assert.match(app, /createMediaItem\(accessToken, \{ \.\.\.item, collection_id: draft\.destination\.collectionId \}\)/);
   assert.match(app, /createdId = created\[0\]\.id;[\s\S]*replaceMediaShelfMemberships\(accessToken, createdId, \[\], shelfIds\)/);
   assert.match(app, /cacheSnapshot\(optimisticDestination, draft\.destination\.collectionId\)/);
+  assert.match(app, /added to your collection\.`\);[\s\S]*createMediaItem/);
   assert.match(app, /The item could not be imported\. Your collection was restored/);
   assert.match(app, /permanentlyDeleteMedia\(accessToken, createdId\)/);
   assert.match(app, /currentDestination\.media\.filter\(\(entry\) => entry\.database_id !== temporaryId\)/);
