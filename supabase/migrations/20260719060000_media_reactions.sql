@@ -56,7 +56,7 @@ using (public.can_view_media_reaction(user_id));
 
 -- Preserve every existing Priority Watch stamp as a canonical reaction.
 insert into public.media_reactions(user_id, kind, work_key, media_type, media_title, media_year, created_at, updated_at)
-select i.user_id, 'priority', public.media_reaction_work_key(m.type, m.title, m.year::integer), m.type, m.title, m.year, i.created_at, i.created_at
+select i.user_id, 'priority', public.media_reaction_work_key(m.type::text, m.title, m.year::integer), m.type::text, m.title, m.year, i.created_at, i.created_at
 from public.media_interest i
 join public.media_items m on m.id = i.media_item_id
 on conflict (user_id, kind, work_key) do nothing;
@@ -83,10 +83,10 @@ begin
     raise exception 'Priority Watch is only available for films and television';
   end if;
 
-  target_key := public.media_reaction_work_key(target.type, target.title, target.year::integer);
+  target_key := public.media_reaction_work_key(target.type::text, target.title, target.year::integer);
   if reaction_enabled then
     insert into public.media_reactions(user_id, kind, work_key, media_type, media_title, media_year)
-    values(auth.uid(), reaction_kind, target_key, target.type, target.title, target.year)
+    values(auth.uid(), reaction_kind, target_key, target.type::text, target.title, target.year)
     on conflict (user_id, kind, work_key) do update set
       media_type=excluded.media_type, media_title=excluded.media_title,
       media_year=excluded.media_year, updated_at=now();
@@ -100,7 +100,7 @@ begin
   if reaction_kind = 'priority' then
     delete from public.media_interest i using public.media_items m
     where i.media_item_id=m.id and i.user_id=auth.uid()
-      and public.media_reaction_work_key(m.type, m.title, m.year::integer)=target_key;
+      and public.media_reaction_work_key(m.type::text, m.title, m.year::integer)=target_key;
     if reaction_enabled then
       insert into public.media_interest(media_item_id, user_id)
       values(target_media_item_id, auth.uid()) on conflict do nothing;
