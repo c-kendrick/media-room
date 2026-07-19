@@ -1008,7 +1008,7 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.match(data, /reactions\.filter\(\(reaction\) => scopedProfileIds\.has\(reaction\.user_id\)\)/);
   assert.match(app, /function ReactionButton/);
   assert.match(app, /const Icon = isLike \? Heart : Stamp/);
-  assert.match(app, /const tooltip = isLike \? summary : 'Priority Watch Stamp'/);
+  assert.match(app, /const tooltip = isLike \? summary : \['Priority Watch Stamp', \.\.\.names\]\.join\('\\n'\)/);
   assert.match(app, /`\$\{isLike \? 'Loved' : 'Priority Watch'\} by/);
   assert.doesNotMatch(app, /\bLiked\b|No likes yet|Added to your likes/);
   assert.match(app, /item\.priorities\?\.map\(\(person\) => <span className="card-interest"/);
@@ -1024,6 +1024,9 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.match(cardReactionCount, /position: static;[\s\S]*background: transparent;[\s\S]*color: #c43c3c;[\s\S]*font-size: 9px;/);
   assert.doesNotMatch(cardReactionCount, /position: absolute|top:|right:|border-radius: 6px/);
   assert.match(styles, /content: attr\(data-tooltip\)/);
+  assert.match(styles, /white-space: pre-line;/);
+  assert.match(styles, /\.drawer-status-actions \.reaction-controls\.labelled\{[^}]*justify-content:flex-start;[^}]*margin-left:0;/);
+  assert.match(styles, /\.drawer-status-actions \.reaction-button\.labelled small\{[^}]*position:static;[^}]*height:auto;[^}]*border-radius:0;[^}]*background:transparent;[^}]*font-size:inherit;/);
 });
 
 test('Love changes debounce into an atomic last-state-wins batch with scoped rollback', async () => {
