@@ -516,12 +516,15 @@
 .reaction-controls {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  margin-left: auto;
   gap: 3px;
 }
 
 .reaction-button {
   position: relative;
   width: 24px;
+  min-width: 24px;
   height: 24px;
   border: 1px solid transparent;
   border-radius: 3px;
@@ -535,6 +538,12 @@
   transition: color .14s ease, border-color .14s ease, background .14s ease, transform .14s ease;
 }
 
+.reaction-button.has-count:not(.labelled) {
+  width: auto;
+  padding: 0 3px;
+  gap: 2px;
+}
+
 .reaction-button:hover:not(:disabled),
 .reaction-button:focus-visible {
   border-color: #d4c6b7;
@@ -546,24 +555,17 @@
 .reaction-button:disabled { cursor: default; }
 .reaction-button.priority-reaction.active { color: #7f302d; }
 .reaction-button.like-reaction.active { color: #c43c3c; }
-.reaction-button small {
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  min-width: 12px;
-  height: 12px;
-  border-radius: 6px;
-  background: #f7eee3;
-  color: #766a60;
-  display: grid;
-  place-items: center;
-  font-size: 7px;
-  font-weight: 800;
-}
-
-.media-card-rating-row .reaction-button.like-reaction small {
+.reaction-button:not(.labelled) small {
+  position: static;
+  min-width: 0;
+  height: auto;
   border-radius: 0;
   background: transparent;
+  color: #c43c3c;
+  display: inline;
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 800;
 }
 
 .reaction-button[data-tooltip]:hover::after,
