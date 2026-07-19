@@ -1538,7 +1538,7 @@ function ReactionButton({ kind, people = [], canReact, currentUserId, onChange, 
   const Icon = isLike ? Heart : Stamp;
   return <button
     type="button"
-    className={cls('reaction-button', isLike ? 'like-reaction' : 'priority-reaction', active && 'active', labelled && 'labelled')}
+    className={cls('reaction-button', isLike ? 'like-reaction' : 'priority-reaction', active && 'active', labelled && 'labelled', people.length > 0 && 'has-count')}
     aria-label={`${label}. ${summary}`}
     aria-pressed={active}
     title={tooltip}
