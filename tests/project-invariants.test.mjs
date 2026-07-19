@@ -9,7 +9,7 @@ import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from '../src/ownership-fil
 import { parseCollectionBackup, validateCollectionBackup } from '../src/backup-import.js';
 import { supabaseRequest } from '../src/supabase.js';
 import { collectionSummaryStats } from '../src/collection-stats.js';
-import { appSiteUrl, signupRateLimitDetails } from '../src/auth.js';
+import { appSiteUrl, authenticatedProfilePath, selectAuthenticatedProfile, signupRateLimitDetails } from '../src/auth.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -750,6 +750,21 @@ test('password recovery has a dedicated callback, private acknowledgement, and w
   assert.match(app, /updatePassword\(account\.session\.access_token,password\)/);
   assert.match(app, /If an account exists for that email, a recovery link has been sent\./);
   assert.doesNotMatch(app, /No account exists|email is not registered/i);
+});
+
+test('authenticated sessions can only attach the profile matching the Supabase Auth user', async () => {
+  const auth = await read('src/auth.js');
+  const kitId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const eddieId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  assert.equal(authenticatedProfilePath(kitId), `/rest/v1/profiles?select=id,username,display_name,role,approved_at,deactivated_at&id=eq.${kitId}&limit=1`);
+  assert.deepEqual(selectAuthenticatedProfile({ id: kitId }, [{ id: kitId, username: 'kit' }]), { id: kitId, username: 'kit' });
+  assert.throws(() => selectAuthenticatedProfile({ id: kitId }, [{ id: eddieId, username: 'eddie' }]), /could not be verified/);
+  assert.throws(() => selectAuthenticatedProfile({ id: kitId }, []), /could not be verified/);
+  assert.throws(() => authenticatedProfilePath('not-a-user-id'), /valid user identity/);
+  assert.match(auth, /authRequest\('user', \{ method: 'GET', accessToken \}\)/);
+  assert.doesNotMatch(auth, /profiles\?select=id,username,display_name,role,approved_at,deactivated_at&limit=1/);
+  assert.match(auth, /const profile = await fetchProfile\(session\.access_token\);[\s\S]*storeSession\(session\)/);
+  assert.match(auth, /catch \(error\) \{[\s\S]*storeSession\(null\);[\s\S]*throw error/);
 });
 
 test('Main Watchlist selection lives in the hero title without an extra content box', async () => {
