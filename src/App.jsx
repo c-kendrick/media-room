@@ -280,7 +280,7 @@ export default function App() {
   const [usersOpen, setUsersOpen] = useState(false);
   const [userHub, setUserHub] = useState(null);
   const [mainWatchlistClubId, setMainWatchlistClubId] = useState(() => window.localStorage.getItem(MAIN_WATCHLIST_CLUB_KEY) || '');
-  const [viewAsMember, setViewAsMember] = useState(true);
+  const [viewAsAdmin, setViewAsAdmin] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [adminClubs, setAdminClubs] = useState([]);
   const [adminMainClubId, setAdminMainClubId] = useState(() => window.localStorage.getItem(ADMIN_MAIN_CLUB_KEY) || '');
@@ -312,7 +312,7 @@ export default function App() {
   const adminMemberClubs = adminClubs.filter((club) => club.member_ids.includes(account?.profile?.id));
   const memberViewOwnerIds = new Set(adminMemberClubs.flatMap((club) => club.member_ids));
   if (account?.profile?.id) memberViewOwnerIds.add(account.profile.id);
-  const displayedCollections = account?.profile?.role === 'admin' && viewAsMember
+  const displayedCollections = account?.profile?.role === 'admin' && !viewAsAdmin
     ? collections.filter((collection) => collection.slug === 'kits-collection' || memberViewOwnerIds.has(collection.owner_id))
     : collections;
   const mainWatchlistOwnerIds = account?.profile?.id
@@ -556,14 +556,14 @@ export default function App() {
       if (window.cancelIdleCallback) window.cancelIdleCallback(idle);
       else window.clearTimeout(idle);
     };
-  }, [collections, data?.collectionId, accessToken, viewAsMember, adminClubs, sharedMode]);
+  }, [collections, data?.collectionId, accessToken, viewAsAdmin, adminClubs, sharedMode]);
 
   useEffect(() => {
-    if (!viewAsMember || account?.profile?.role !== 'admin' || !data?.collectionId || data.collectionId === MAIN_WATCHLIST_ID) return;
+    if (viewAsAdmin || account?.profile?.role !== 'admin' || !data?.collectionId || data.collectionId === MAIN_WATCHLIST_ID) return;
     if (displayedCollections.some((collection) => collection.id === data.collectionId)) return;
     const kit = displayedCollections.find((collection) => collection.slug === 'kits-collection');
     if (kit) selectCollection(kit.id, { userInitiated: false });
-  }, [viewAsMember, adminClubs, collections, data?.collectionId]);
+  }, [viewAsAdmin, adminClubs, collections, data?.collectionId]);
 
   useEffect(() => {
     if (authLoading || !collections.length || landingApplied || userSelectedCollection.current) return;
@@ -675,7 +675,7 @@ export default function App() {
     && account.profile.id === data.ownerId,
   );
   const isAdminAccount = account?.profile?.role === 'admin';
-  const isAdmin = isAdminAccount && !viewAsMember && !sharedMode;
+  const isAdmin = isAdminAccount && viewAsAdmin && !sharedMode;
   const canReact = Boolean(!sharedMode && account?.profile?.approved_at && !account.profile.deactivated_at);
   const canShareCollection = Boolean(account?.profile?.approved_at && !account.profile.deactivated_at && ownCollection);
   const saveStarRating = async (databaseId, starRating) => {
@@ -783,7 +783,7 @@ export default function App() {
             {account?.profile?.approved_at && !account.profile.deactivated_at && <Button className="users-button topbar-action-button" icon={Users} onClick={() => setUsersOpen(true)}>Users{userHub?.notification_count > 0 && <b>{userHub.notification_count}</b>}</Button>}
             {authLoading ? <span className="account-state">Checking account…</span> : (
               <Button className={cls('account-button', account && 'signed-in-account')} icon={account ? undefined : LogIn} aria-label={account ? `Open account for ${personDisplayName(account.profile)}` : 'Sign in'} onClick={() => setAccountOpen(true)}>
-                {account ? <><UserAvatar person={account.profile} size="account" /><span className="account-desktop-label">{personDisplayName(account.profile)}{viewAsMember ? ' · Member view' : ''}</span></> : <span className="account-desktop-label">Sign in</span>}
+                {account ? <><UserAvatar person={account.profile} size="account" /><span className="account-desktop-label">{personDisplayName(account.profile)}{viewAsAdmin ? ' - Admin view' : ''}</span></> : <span className="account-desktop-label">Sign in</span>}
               </Button>
             )}
           </div>
@@ -973,7 +973,7 @@ export default function App() {
           onSignedIn={(nextAccount) => {
             snapshotCache.current.clear();
             setAccount(nextAccount);
-            setViewAsMember(true);
+            setViewAsAdmin(false);
             setAccountOpen(false);
             setLandingApplied(false);
             userSelectedCollection.current = false;
@@ -982,15 +982,15 @@ export default function App() {
           onSignedOut={() => {
             snapshotCache.current.clear();
             setAccount(null);
-            setViewAsMember(true);
+            setViewAsAdmin(false);
             setAccountOpen(false);
             setLandingApplied(false);
             userSelectedCollection.current = false;
             setToast('Signed out.');
           }}
           onManageUsers={() => { setAccountOpen(false); setAdminOpen(true); }}
-          viewAsMember={viewAsMember}
-          onViewAsMemberChange={setViewAsMember}
+          viewAsAdmin={viewAsAdmin}
+          onViewAsAdminChange={setViewAsAdmin}
           onAccountUpdated={async (profile) => { setAccount((current) => ({ ...current, profile })); const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); snapshotCache.current.clear(); await refresh({ fresh: true, targetCollectionId: data.collectionId }); setToast('Account settings saved.'); }}
           notify={setToast}
         />
@@ -2069,7 +2069,7 @@ function RecoveryPasswordDialog({ account, onClose, onComplete }) {
   return <div className="modal-layer recovery-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="account-dialog recovery-dialog" role="dialog" aria-modal="true" aria-labelledby="recovery-title"><button className="close" onClick={onClose} aria-label="Close password recovery"><X /></button><span className="eyebrow">PASSWORD RECOVERY</span><h2 id="recovery-title">Choose a new password</h2><p>Use at least eight characters. Your recovery link can only be used for this password change.</p>{account ? <form onSubmit={async(event)=>{event.preventDefault();if(password.length<8){setError('Use at least 8 characters.');return;}if(password!==confirmation){setError('The passwords do not match.');return;}setBusy(true);setError('');try{await updatePassword(account.session.access_token,password);await onComplete();}catch{setError('This recovery link is invalid or expired. Request a new link and try again.');setBusy(false);}}}><label>New password<input type="password" autoComplete="new-password" minLength="8" value={password} onChange={(event)=>setPassword(event.target.value)} required/></label><label>Confirm new password<input type="password" autoComplete="new-password" minLength="8" value={confirmation} onChange={(event)=>setConfirmation(event.target.value)} required/></label>{error&&<p className="auth-error">{error}</p>}<Button type="submit" disabled={busy}>{busy?'Saving…':'Set new password'}</Button></form>:<><p className="auth-error">This recovery link is invalid or expired.</p><Button onClick={onClose}>Return to sign in</Button></>}</section></div>;
 }
 
-function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers, viewAsMember, onViewAsMemberChange, onAccountUpdated, notify }) {
+function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers, viewAsAdmin, onViewAsAdminChange, onAccountUpdated, notify }) {
   useEscape(onClose);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -2140,8 +2140,8 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
         {account ? (
           <>
             <span className="eyebrow">SIGNED IN</span>
-            <div className="account-identity"><UserAvatar person={account.profile} size="large" /><div><h2>{personDisplayName(account.profile, 'Media Room member')}</h2><p>{account.profile?.role === 'admin' ? 'Administrator account' : account.profile?.deactivated_at ? 'Account deactivated — your library is safely stored.' : account.profile?.approved_at ? 'Approved member' : 'Pending approval'}</p></div></div>
-            {account.profile?.role === 'admin' && <label className="admin-view-toggle"><input type="checkbox" checked={viewAsMember} onChange={(event) => onViewAsMemberChange(event.target.checked)} /><span><b>View as non-Admin</b><small>You will still be the owner of your own collection.</small></span></label>}
+            <div className="account-identity"><UserAvatar person={account.profile} size="large" /><div><h2>{personDisplayName(account.profile, 'Media Room member')}</h2><p>{account.profile?.role === 'admin' && viewAsAdmin ? 'Administrator account' : account.profile?.deactivated_at ? 'Account deactivated — your library is safely stored.' : account.profile?.approved_at ? 'Approved member' : 'Pending approval'}</p></div></div>
+            {account.profile?.role === 'admin' && <label className="admin-view-toggle"><input type="checkbox" checked={viewAsAdmin} onChange={(event) => onViewAsAdminChange(event.target.checked)} /><span><b>View as Admin</b><small>Turn on administrator controls and the full collection view.</small></span></label>}
             <button className="account-settings-toggle" type="button" onClick={() => { setSettingsOpen((current) => !current); setError(''); }}>{settingsOpen ? 'Hide account settings' : 'Display name & password'}</button>
             {settingsOpen && <form className="account-settings" onSubmit={async (event) => { event.preventDefault(); setSubmitting(true); setError(''); try { let profile = account.profile; if (nextDisplayName.trim() !== account.profile.display_name) profile = await updateDisplayName(account.session.access_token, nextDisplayName.trim()); if (nextPassword) { if (nextPassword.length < 8) throw new Error('short-password'); await updatePassword(account.session.access_token, nextPassword); setNextPassword(''); } await onAccountUpdated(profile); } catch (settingsError) { setError(settingsError?.message === 'short-password' ? 'Use at least 8 characters for the new password.' : 'Those account settings could not be saved. Apply the latest Supabase migration and try again.'); } finally { setSubmitting(false); } }}>
               <label>Display name<input value={nextDisplayName} minLength="2" maxLength="80" onChange={(event) => setNextDisplayName(event.target.value)} required /></label>
@@ -2149,7 +2149,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
               <Button type="submit" disabled={submitting}>{submitting ? 'Saving…' : 'Save Account Settings'}</Button>
             </form>}
             {error && <p className="auth-error">{error}</p>}
-            <div className="account-actions">{account.profile?.role === 'admin' && <Button onClick={onManageUsers}>User Management</Button>}<Button icon={LogOut} onClick={leave} disabled={submitting}>Sign Out</Button></div>
+            <div className="account-actions">{account.profile?.role === 'admin' && viewAsAdmin && <Button onClick={onManageUsers}>User Management</Button>}<Button icon={LogOut} onClick={leave} disabled={submitting}>Sign Out</Button></div>
           </>
         ) : (
           <>

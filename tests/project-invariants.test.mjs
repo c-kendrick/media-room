@@ -235,12 +235,12 @@ test('Main Watchlist includes one virtual priority and shared-demand shelf', asy
   assert.match(data, /virtual: true/);
 });
 
-test('account settings support display name, password, and admin member preview', async () => {
+test('account settings support display name, password, and opt-in admin view', async () => {
   const app = await read('src/App.jsx');
   const auth = await read('src/auth.js');
   const migration = await read('supabase/migrations/20260715010000_shelf_subtitles_and_profile_settings.sql');
-  assert.match(app, /View as non-Admin/);
-  assert.match(app, /const isAdmin = isAdminAccount && !viewAsMember/);
+  assert.match(app, /View as Admin/);
+  assert.match(app, /const isAdmin = isAdminAccount && viewAsAdmin/);
   assert.match(app, /Save Account Settings/);
   assert.match(auth, /rpc\/update_own_display_name/);
   assert.match(auth, /method: 'PUT'[\s\S]*body: \{ password \}/);
@@ -550,7 +550,7 @@ test('private clubs restrict collection visibility and stay admin-only', async (
   assert.match(admin, /rpc\/admin_set_user_clubs/);
   assert.match(app, /const ADMIN_MAIN_CLUB_KEY = 'kits-media-admin-main-club'/);
   assert.match(app, /window\.localStorage\.setItem\(ADMIN_MAIN_CLUB_KEY, clubId\)/);
-  assert.match(app, /const displayedCollections = account\?\.profile\?\.role === 'admin' && viewAsMember/);
+  assert.match(app, /const displayedCollections = account\?\.profile\?\.role === 'admin' && !viewAsAdmin/);
   assert.match(app, /function ClubMembershipDialog/);
   assert.match(app, /function ClubEditorDialog/);
   assert.match(styles, /\.admin-club-panel/);
@@ -602,7 +602,7 @@ test('shared collection routing is read-only and completely isolated from Main W
   assert.match(app, /sharedMode[\s\S]*await loadPublicCollection\(publicUsername\)[\s\S]*await loadSharedCollection\(shareToken\)[\s\S]*await loadMediaSnapshot/);
   assert.match(app, /if \(!sharedMode\) \{[\s\S]*cacheSnapshot/);
   assert.match(app, /!sharedMode[\s\S]*account\?\.profile\?\.approved_at/);
-  assert.match(app, /const isAdmin = isAdminAccount && !viewAsMember && !sharedMode/);
+  assert.match(app, /const isAdmin = isAdminAccount && viewAsAdmin && !sharedMode/);
   assert.match(app, /const canReact = Boolean\(!sharedMode/);
   assert.match(app, /data\.shared \? 'SHARED COLLECTION · READ ONLY'/);
   assert.match(app, /\{sharedMode && <div className="sidebar-bottom">[\s\S]*<small>Read-only link<\/small>/);
@@ -1038,11 +1038,15 @@ test('Love changes debounce into an atomic last-state-wins batch with scoped rol
   assert.match(reactions, /body: \{ reaction_changes: reactions \}/);
 });
 
-test('the user directory leads the Friends tab and admins start in non-Admin view', async () => {
+test('the user directory leads the Friends tab and admins opt in to Admin view', async () => {
   const app = await read('src/App.jsx');
   const friendsPanel = app.slice(app.indexOf('id="friends-panel"'), app.indexOf('id="clubs-panel"'));
   assert.ok(friendsPanel.indexOf('DIRECTORY') < friendsPanel.indexOf('REQUESTS'));
-  assert.match(app, /const \[viewAsMember, setViewAsMember\] = useState\(true\)/);
-  assert.match(app, /onSignedIn=\{\(nextAccount\) => \{[\s\S]*setViewAsMember\(true\)/);
-  assert.match(app, /View as non-Admin/);
+  assert.match(app, /const \[viewAsAdmin, setViewAsAdmin\] = useState\(false\)/);
+  assert.match(app, /onSignedIn=\{\(nextAccount\) => \{[\s\S]*setViewAsAdmin\(false\)/);
+  assert.match(app, /View as Admin/);
+  assert.match(app, /personDisplayName\(account\.profile\)\}\{viewAsAdmin \? ' - Admin view' : ''\}/);
+  assert.match(app, /account\.profile\?\.role === 'admin' && viewAsAdmin && <Button onClick=\{onManageUsers\}>User Management<\/Button>/);
+  assert.match(app, /account\.profile\?\.role === 'admin' && viewAsAdmin \? 'Administrator account'/);
+  assert.doesNotMatch(app, /Member view/);
 });
