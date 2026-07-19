@@ -45,6 +45,48 @@
   .search-results-heading{align-items:flex-start;flex-direction:column;gap:6px}
 }
 
+/* Shared member identity markers */
+.user-avatar {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border: 1px solid rgba(83, 68, 56, .18);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--serif);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+.user-avatar-nav { width: 22px; height: 22px; flex-basis: 22px; font-size: 8px; }
+.user-avatar-account { width: 25px; height: 25px; flex-basis: 25px; font-size: 9px; }
+.user-avatar-large { width: 48px; height: 48px; flex-basis: 48px; font-size: 15px; }
+.avatar-tone-0 { background: #ded2c5; color: #594c43; }
+.avatar-tone-1 { background: #e5d0c1; color: #71483e; }
+.avatar-tone-2 { background: #d5dbd1; color: #4e5b4c; }
+.avatar-tone-3 { background: #d8d1ca; color: #564e48; }
+.avatar-tone-4 { background: #e3d9c2; color: #66593e; }
+.avatar-tone-5 { background: #dfcbc7; color: #6c4844; }
+.avatar-tone-6 { background: #d7d6c5; color: #595944; }
+.avatar-tone-7 { background: #d0d5d3; color: #475654; }
+.avatar-tone-8 { background: #dacfc5; color: #645044; }
+.avatar-tone-9 { background: #d6cec9; color: #514b47; }
+.club-card-members .user-avatar { width: 29px; height: 29px; flex-basis: 29px; margin-left: -8px; border: 2px solid #fffaf2; font-size: 8px; }
+.club-member-row .user-avatar { width: 32px; height: 32px; flex-basis: 32px; font-size: 9px; }
+.current-user-label { color: #81766b; font-family: var(--sans); font-size: 8px; font-weight: 700; }
+.account-button.signed-in-account { gap: 7px; }
+.account-identity { margin: 10px 0 22px; display: flex; align-items: center; gap: 13px; }
+.account-identity > div { min-width: 0; }
+.account-dialog .account-identity h2 { margin: 0 0 4px; padding-right: 52px; }
+.account-dialog .account-identity p { margin: 0; }
+
+@media (max-width: 760px) {
+  .signed-in-account .account-desktop-label { display: none; }
+  .account-button.signed-in-account { padding: 0 !important; }
+  .account-button .user-avatar-account { width: 28px; height: 28px; flex-basis: 28px; font-size: 10px; }
+}
+
 .account-button {
   white-space: nowrap;
 }
