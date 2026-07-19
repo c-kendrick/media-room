@@ -902,6 +902,7 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   const data = await read('src/supabase-data.js');
   const styles = `${await read('src/media-layout.css')}\n${await read('src/public.css')}`;
   const migration = await read('supabase/migrations/20260719060000_media_reactions.sql');
+  const loveBatchMigration = await read('supabase/migrations/20260719070000_batched_media_loves.sql');
   const secureShare = await read('supabase/migrations/20260719020000_revocable_collection_share_links.sql');
   const openShare = await read('supabase/migrations/20260719050000_open_public_collections.sql');
 
@@ -925,15 +926,40 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.doesNotMatch(migration, /on public\.(collections|shelves|media_items|club_memberships) for/);
   assert.doesNotMatch(secureShare, /media_reactions/);
   assert.doesNotMatch(openShare, /media_reactions/);
+  assert.match(loveBatchMigration, /create or replace function public\.set_media_love_batch\(reaction_changes jsonb\)/);
+  assert.match(loveBatchMigration, /perform public\.set_media_reaction\([\s\S]*'like'/);
+  assert.match(loveBatchMigration, /grant execute on function public\.set_media_love_batch\(jsonb\) to authenticated/);
+  assert.match(loveBatchMigration, /revoke all on function public\.set_media_love_batch\(jsonb\) from public, anon/);
 
   assert.match(data, /reactions\.filter\(\(reaction\) => scopedProfileIds\.has\(reaction\.user_id\)\)/);
   assert.match(app, /function ReactionButton/);
   assert.match(app, /const Icon = isLike \? Heart : Stamp/);
+  assert.match(app, /const tooltip = isLike \? summary : 'Priority Watch Stamp'/);
+  assert.match(app, /`\$\{isLike \? 'Loved' : 'Priority Watch'\} by/);
+  assert.doesNotMatch(app, /\bLiked\b|No likes yet|Added to your likes/);
+  assert.match(app, /item\.priorities\?\.map\(\(person\) => <span className="card-interest"/);
+  assert.match(app, /item\.priorities\?\.map\(\(person\) => <span className="interest-initial"/);
   assert.match(app, /applyReactionToSnapshot\(data, item, kind, enabled, person\)/);
   assert.match(app, /Previous state restored/);
   assert.match(styles, /\.media-card-rating-row/);
   assert.match(styles, /\.reaction-button\.like-reaction\.active/);
+  assert.match(styles, /\.media-card-rating-row \.reaction-button\.like-reaction small[\s\S]*background: transparent/);
   assert.match(styles, /content: attr\(data-tooltip\)/);
+});
+
+test('Love changes debounce into an atomic last-state-wins batch with scoped rollback', async () => {
+  const app = await read('src/App.jsx');
+  const reactions = await read('src/media-reactions.js');
+  assert.match(app, /const pendingLoves = useRef\(new Map\(\)\)/);
+  assert.match(app, /pendingLoves\.current\.set\(identity/);
+  assert.match(app, /const delay = Math\.min\(700 \+ \(loveActivityCount\.current \* 180\), 2_200\)/);
+  assert.match(app, /window\.setTimeout\(\(\) => flushPendingLovesRef\.current\(\), delay\)/);
+  assert.match(app, /setMediaLoveBatch\(accessToken, batch\)/);
+  assert.match(app, /loveFlushChain\.current = loveFlushChain\.current[\s\S]*\.then\(\(\) => setMediaLoveBatch\(accessToken, batch\)\)/);
+  assert.match(app, /loveVersions\.current\.get\(change\.identity\) !== change\.version/);
+  assert.match(app, /updateLoveSnapshots\(change\.item, change\.initialEnabled, person\)/);
+  assert.match(app, /document\.visibilityState === 'hidden'/);
+  assert.match(reactions, /body: \{ reaction_changes: reactions \}/);
 });
 
 test('the user directory leads the Friends tab and admins start in non-Admin view', async () => {

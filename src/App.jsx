@@ -52,7 +52,7 @@ import { BACKUP_IMPORT_LIMITS, parseCollectionBackup } from './backup-import.js'
 import { collectionSummaryStats } from './collection-stats.js';
 import { buildCollectionShareUrl, buildPublicCollectionUrl, createCollectionShare, deleteCollectionShare, getCollectionShare, getPublicCollectionStatus, loadPublicCollection, loadSharedCollection, readPublicCollectionUsername, readShareToken, restorePublicCollectionRoute, setCollectionShareEnabled, setPublicCollectionOpen } from './collection-share.js';
 import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUserHub, removeClubMember, requestFriend, respondClubInvitation, respondFriendRequest, transferClubOwnership, unfriend } from './social.js';
-import { applyReactionToSnapshot, setMediaReaction } from './media-reactions.js';
+import { applyReactionToSnapshot, mediaReactionIdentity, setMediaLoveBatch, setMediaReaction } from './media-reactions.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -292,6 +292,13 @@ export default function App() {
   const [collectionLoading, setCollectionLoading] = useState(false);
   const [landingApplied, setLandingApplied] = useState(() => sharedMode);
   const snapshotCache = useRef(new Map());
+  const dataRef = useRef(null);
+  const pendingLoves = useRef(new Map());
+  const loveVersions = useRef(new Map());
+  const loveFlushTimer = useRef(null);
+  const loveActivityCount = useRef(0);
+  const loveFlushChain = useRef(Promise.resolve());
+  const flushPendingLovesRef = useRef(() => Promise.resolve());
   const latestRequest = useRef(0);
   const userSelectedCollection = useRef(false);
   const accessToken = account?.session?.access_token;
@@ -316,13 +323,88 @@ export default function App() {
     if (!requestedCollectionId) snapshotCache.current.set('default', snapshot);
   };
 
+  dataRef.current = data;
+
+  const applyPendingLoves = (snapshot) => {
+    if (!snapshot?.media?.length || !account?.profile) return snapshot;
+    const person = { id: account.profile.id, username: account.profile.username, display_name: account.profile.display_name };
+    return [...pendingLoves.current.values()].reduce(
+      (next, change) => applyReactionToSnapshot(next, change.item, 'like', change.enabled, person),
+      snapshot,
+    );
+  };
+
+  const updateLoveSnapshots = (item, enabled, person) => {
+    const current = dataRef.current;
+    if (current?.media) {
+      const optimistic = applyReactionToSnapshot(current, item, 'like', enabled, person);
+      dataRef.current = optimistic;
+      setData(optimistic);
+    }
+    for (const [key, snapshot] of snapshotCache.current) {
+      if (snapshot?.media) snapshotCache.current.set(key, applyReactionToSnapshot(snapshot, item, 'like', enabled, person));
+    }
+  };
+
+  const flushPendingLoves = async () => {
+    if (loveFlushTimer.current) window.clearTimeout(loveFlushTimer.current);
+    loveFlushTimer.current = null;
+    loveActivityCount.current = 0;
+    const batch = [...pendingLoves.current.values()];
+    if (!batch.length || !accessToken || !account?.profile) return;
+    pendingLoves.current.clear();
+    loveFlushChain.current = loveFlushChain.current
+      .catch(() => undefined)
+      .then(() => setMediaLoveBatch(accessToken, batch))
+      .catch(() => {
+        const person = { id: account.profile.id, username: account.profile.username, display_name: account.profile.display_name };
+        for (const change of batch) {
+          if (loveVersions.current.get(change.identity) !== change.version) continue;
+          updateLoveSnapshots(change.item, change.initialEnabled, person);
+        }
+        setToast(batch.length === 1
+          ? 'Love could not be saved. Previous state restored.'
+          : `${batch.length} loves could not be saved. Previous states restored.`);
+        throw new Error('Love batch could not be saved.');
+      });
+    try {
+      await loveFlushChain.current;
+    } catch {
+      // The queued rollback above already restored only still-current changes.
+    }
+  };
+  flushPendingLovesRef.current = flushPendingLoves;
+
+  const queueLove = (item, enabled) => {
+    const person = { id: account.profile.id, username: account.profile.username, display_name: account.profile.display_name };
+    const identity = mediaReactionIdentity(item);
+    const existing = pendingLoves.current.get(identity);
+    const version = (loveVersions.current.get(identity) || 0) + 1;
+    loveVersions.current.set(identity, version);
+    pendingLoves.current.set(identity, {
+      identity,
+      item,
+      mediaItemId: item.database_id,
+      enabled,
+      initialEnabled: existing?.initialEnabled ?? (item.likes || []).some((entry) => entry.id === account.profile.id),
+      version,
+    });
+    updateLoveSnapshots(item, enabled, person);
+    setToast(enabled ? 'Loved.' : 'Love removed.');
+    loveActivityCount.current += 1;
+    if (loveFlushTimer.current) window.clearTimeout(loveFlushTimer.current);
+    const delay = Math.min(700 + (loveActivityCount.current * 180), 2_200);
+    loveFlushTimer.current = window.setTimeout(() => flushPendingLovesRef.current(), delay);
+  };
+
   const refresh = async ({ fresh = false, notify = false, targetCollectionId = collectionId } = {}) => {
     const request = ++latestRequest.current;
     if (fresh) setRefreshing(true);
     try {
-      const snapshot = sharedMode
+      const loadedSnapshot = sharedMode
         ? (publicUsername ? await loadPublicCollection(publicUsername) : await loadSharedCollection(shareToken))
         : await loadMediaSnapshot({ fresh, collectionId: targetCollectionId, accessToken, mainWatchlistOwnerIds });
+      const snapshot = applyPendingLoves(loadedSnapshot);
       if (!sharedMode) {
         cacheSnapshot(snapshot, targetCollectionId);
         if (fresh && snapshot.collectionId !== MAIN_WATCHLIST_ID) snapshotCache.current.delete(MAIN_WATCHLIST_ID);
@@ -366,6 +448,17 @@ export default function App() {
   useEffect(() => {
     refresh();
   }, [collectionId, accessToken, mainWatchlistScopeKey, shareToken, publicUsername]);
+
+  useEffect(() => {
+    const flushWhenHidden = () => {
+      if (document.visibilityState === 'hidden') flushPendingLovesRef.current();
+    };
+    document.addEventListener('visibilitychange', flushWhenHidden);
+    return () => {
+      document.removeEventListener('visibilitychange', flushWhenHidden);
+      flushPendingLovesRef.current();
+    };
+  }, [accessToken]);
 
   useEffect(() => {
     if (sharedMode) {
@@ -565,6 +658,10 @@ export default function App() {
     }
   };
   const saveReaction = async (item, kind, enabled) => {
+    if (kind === 'like') {
+      queueLove(item, enabled);
+      return;
+    }
     const previousData = data;
     const person = { id: account.profile.id, username: account.profile.username, display_name: account.profile.display_name };
     const optimisticData = applyReactionToSnapshot(data, item, kind, enabled, person);
@@ -573,14 +670,12 @@ export default function App() {
     cacheSnapshot(optimisticData, data.collectionId);
     try {
       await setMediaReaction(account.session.access_token, item.database_id, kind, enabled);
-      setToast(kind === 'like'
-        ? (enabled ? 'Added to your likes.' : 'Removed from your likes.')
-        : (enabled ? 'Priority Watch added.' : 'Priority Watch removed.'));
+      setToast(enabled ? 'Priority Watch added.' : 'Priority Watch removed.');
     } catch (error) {
       setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
       snapshotCache.current.clear();
       cacheSnapshot(previousData, previousData.collectionId);
-      setToast(kind === 'like' ? 'Like could not be updated. Previous state restored.' : 'Priority Watch could not be updated. Previous state restored.');
+      setToast('Priority Watch could not be updated. Previous state restored.');
       throw error;
     }
   };
@@ -1338,18 +1433,19 @@ function ReactionButton({ kind, people = [], canReact, currentUserId, onChange, 
   const active = people.some((person) => person.id === currentUserId);
   const names = people.map((person) => person.display_name || person.username).filter(Boolean);
   const isLike = kind === 'like';
-  const label = isLike ? (active ? 'Liked' : 'Like') : (active ? 'Priority Watch' : 'Mark Priority Watch');
+  const label = isLike ? (active ? 'Loved' : 'Love') : (active ? 'Priority Watch' : 'Mark Priority Watch');
   const summary = names.length
-    ? `${isLike ? 'Liked' : 'Priority Watch'} by ${names.join(', ')}`
-    : (isLike ? 'No likes yet' : 'No Priority Stamps yet');
+    ? `${isLike ? 'Loved' : 'Priority Watch'} by ${names.join(', ')}`
+    : (isLike ? 'No loves yet' : 'No Priority Stamps yet');
+  const tooltip = isLike ? summary : 'Priority Watch Stamp';
   const Icon = isLike ? Heart : Stamp;
   return <button
     type="button"
     className={cls('reaction-button', isLike ? 'like-reaction' : 'priority-reaction', active && 'active', labelled && 'labelled')}
     aria-label={`${label}. ${summary}`}
     aria-pressed={active}
-    title={summary}
-    data-tooltip={summary}
+    title={tooltip}
+    data-tooltip={tooltip}
     disabled={!canReact || saving}
     onPointerDown={(event) => event.stopPropagation()}
     onClick={async (event) => {
@@ -1388,6 +1484,7 @@ function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDrag
         )}
         {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
         {item.year && <span className="media-year">{item.year}</span>}
+        {item.priorities?.map((person) => <span className="card-interest" title={person.display_name || person.username} key={person.id || person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
         {item.owned && <span className="media-owned-tag">Owned</span>}
       </button>
     </article>
@@ -1445,6 +1542,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
               )}
               {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
               {item.year && <span className="drawer-year">{item.year}</span>}
+              {item.priorities?.map((person) => <span className="interest-initial" title={person.display_name || person.username} key={person.id || person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
             </div>
             <p className="creator">{item.director || item.creator}</p>
             <div className="drawer-status-actions">
