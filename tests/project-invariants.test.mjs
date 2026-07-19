@@ -910,6 +910,9 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.match(migration, /drop policy if exists "Signed-in viewers can read visible media reactions"/);
   assert.equal((migration.match(/m\.year::integer/g) || []).length, 2);
   assert.match(migration, /target\.year::integer/);
+  assert.equal((migration.match(/media_reaction_work_key\(m\.type::text, m\.title, m\.year::integer\)/g) || []).length, 2);
+  assert.match(migration, /media_reaction_work_key\(target\.type::text, target\.title, target\.year::integer\)/);
+  assert.match(migration, /target_key, target\.type::text, target\.title, target\.year/);
   assert.match(migration, /primary key \(user_id, kind, work_key\)/);
   assert.match(migration, /reaction_kind not in \('like', 'priority'\)/);
   assert.match(migration, /not public\.profile_is_active\(auth\.uid\(\)\)/);
