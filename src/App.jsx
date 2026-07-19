@@ -15,6 +15,7 @@ import {
   Download,
   Gamepad2,
   GripVertical,
+  Heart,
   ListOrdered,
   Link2,
   LogIn,
@@ -29,6 +30,7 @@ import {
   Share2,
   Shuffle,
   SlidersHorizontal,
+  Stamp,
   Trash2,
   Upload,
   ChevronsDown,
@@ -40,7 +42,7 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { appSiteUrl, consumeRecoverySessionFromUrl, loadAuthenticatedAccount, registerWithPassword, requestPasswordRecovery, signInWithPassword, signOut, signupRateLimitDetails, updateDisplayName, updatePassword } from './auth.js';
 import { loadPublicCollections } from './supabase-data.js';
-import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchDetailCandidates, searchPosterCandidates, setInterest, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
+import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchDetailCandidates, searchPosterCandidates, setMediaDeleted, setMediaStarRating, updateCollection, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, createClub, deactivateProfile, deleteClub, listClubs, listProfiles, rejectProfile, renameClub, restoreProfile, setUserClubs } from './admin.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
 import { applyShelfMemberships } from './shelf-membership.js';
@@ -50,6 +52,7 @@ import { BACKUP_IMPORT_LIMITS, parseCollectionBackup } from './backup-import.js'
 import { collectionSummaryStats } from './collection-stats.js';
 import { buildCollectionShareUrl, buildPublicCollectionUrl, createCollectionShare, deleteCollectionShare, getCollectionShare, getPublicCollectionStatus, loadPublicCollection, loadSharedCollection, readPublicCollectionUsername, readShareToken, restorePublicCollectionRoute, setCollectionShareEnabled, setPublicCollectionOpen } from './collection-share.js';
 import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUserHub, removeClubMember, requestFriend, respondClubInvitation, respondFriendRequest, transferClubOwnership, unfriend } from './social.js';
+import { applyReactionToSnapshot, setMediaReaction } from './media-reactions.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -276,7 +279,7 @@ export default function App() {
   const [usersOpen, setUsersOpen] = useState(false);
   const [userHub, setUserHub] = useState(null);
   const [mainWatchlistClubId, setMainWatchlistClubId] = useState(() => window.localStorage.getItem(MAIN_WATCHLIST_CLUB_KEY) || '');
-  const [viewAsMember, setViewAsMember] = useState(false);
+  const [viewAsMember, setViewAsMember] = useState(true);
   const [adminOpen, setAdminOpen] = useState(false);
   const [adminClubs, setAdminClubs] = useState([]);
   const [adminMainClubId, setAdminMainClubId] = useState(() => window.localStorage.getItem(ADMIN_MAIN_CLUB_KEY) || '');
@@ -536,6 +539,7 @@ export default function App() {
   );
   const isAdminAccount = account?.profile?.role === 'admin';
   const isAdmin = isAdminAccount && !viewAsMember && !sharedMode;
+  const canReact = Boolean(!sharedMode && account?.profile?.approved_at && !account.profile.deactivated_at);
   const canShareCollection = Boolean(account?.profile?.approved_at && !account.profile.deactivated_at && ownCollection);
   const saveStarRating = async (databaseId, starRating) => {
     const previousData = data;
@@ -557,6 +561,26 @@ export default function App() {
       setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
       cacheSnapshot(previousData, previousData.collectionId);
       setToast('Star rating could not be saved.');
+      throw error;
+    }
+  };
+  const saveReaction = async (item, kind, enabled) => {
+    const previousData = data;
+    const person = { id: account.profile.id, username: account.profile.username, display_name: account.profile.display_name };
+    const optimisticData = applyReactionToSnapshot(data, item, kind, enabled, person);
+    setData(optimisticData);
+    snapshotCache.current.clear();
+    cacheSnapshot(optimisticData, data.collectionId);
+    try {
+      await setMediaReaction(account.session.access_token, item.database_id, kind, enabled);
+      setToast(kind === 'like'
+        ? (enabled ? 'Added to your likes.' : 'Removed from your likes.')
+        : (enabled ? 'Priority Watch added.' : 'Priority Watch removed.'));
+    } catch (error) {
+      setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
+      snapshotCache.current.clear();
+      cacheSnapshot(previousData, previousData.collectionId);
+      setToast(kind === 'like' ? 'Like could not be updated. Previous state restored.' : 'Priority Watch could not be updated. Previous state restored.');
       throw error;
     }
   };
@@ -630,7 +654,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} isAdmin={isAdmin} accessToken={account?.session?.access_token} currentUserId={account?.profile?.id} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
+          <MediaView key={data.collectionId} data={data} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
             const previousData = data;
             const optimisticData = {
               ...data,
@@ -729,29 +753,9 @@ export default function App() {
               throw error;
             }
           }}
-          canInterest={Boolean(!sharedMode && account?.profile?.approved_at && !account.profile.deactivated_at && ['film', 'television'].includes(selectedMedia.type))}
-          interested={Boolean(selectedMedia.interests?.some((person) => person?.username === account?.profile?.username))}
-          onInterest={async (enabled) => {
-            const previousData = data;
-            const person = { id: account.profile.id, username: account.profile.username, display_name: account.profile.display_name };
-            const optimisticData = {
-              ...data,
-              media: data.media.map((item) => item.database_id === selectedMedia.database_id
-                ? { ...item, interests: enabled ? [...(item.interests || []).filter((entry) => entry.id !== person.id), person] : (item.interests || []).filter((entry) => entry.id !== person.id) }
-                : item),
-            };
-            setData(optimisticData);
-            cacheSnapshot(optimisticData, data.collectionId);
-            try {
-              await setInterest(account.session.access_token, account.profile.id, selectedMedia.database_id, enabled);
-              setToast(enabled ? 'Priority Watch added.' : 'Priority Watch removed.');
-            } catch (error) {
-              cacheSnapshot(previousData, previousData.collectionId);
-              setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
-              setToast('Priority Watch could not be updated. Please try again.');
-              throw error;
-            }
-          }}
+          canReact={canReact}
+          currentUserId={account?.profile?.id}
+          onReaction={(kind, enabled) => saveReaction(selectedMedia, kind, enabled)}
           onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const deletedAt = new Date().toISOString(); const optimisticData = { ...data, media: data.media.map((item) => item.database_id === selectedMedia.database_id ? { ...item, deleted_at: deletedAt } : item) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); setSelectedMediaId(null); try { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); snapshotCache.current.delete(MAIN_WATCHLIST_ID); setToast('Media moved to Bin.'); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); setToast('The item could not be moved to Bin.'); throw error; } } })}
           onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
         />
@@ -777,7 +781,7 @@ export default function App() {
           onSignedIn={(nextAccount) => {
             snapshotCache.current.clear();
             setAccount(nextAccount);
-            setViewAsMember(false);
+            setViewAsMember(true);
             setAccountOpen(false);
             setLandingApplied(false);
             userSelectedCollection.current = false;
@@ -786,7 +790,7 @@ export default function App() {
           onSignedOut={() => {
             snapshotCache.current.clear();
             setAccount(null);
-            setViewAsMember(false);
+            setViewAsMember(true);
             setAccountOpen(false);
             setLandingApplied(false);
             userSelectedCollection.current = false;
@@ -888,7 +892,7 @@ function EditableDescription({ value, canEdit, onSave, fallback = '', title = 'C
   return <textarea className="editable-description-input" aria-label="Collection note" autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value || fallback); setEditing(false); } if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') event.currentTarget.blur(); }} />;
 }
 
-function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, currentUserId, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, onDescriptionChange }) {
+function MediaView({ data, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, onDescriptionChange }) {
   const [section, setSection] = useState('screen');
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -932,7 +936,9 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
   useEffect(() => { setOptimisticMainShelfIds(data.mediaShelves.filter((shelf) => shelf.section === 'screen' && shelf.showInMainWatchlist).map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves]);
   const shelfIndex = new Map(optimisticShelfIds.map((id, index) => [id, index]));
   const shelves = sourceShelves.map((shelf) => ({ ...shelf, ...(optimisticShelfDetails[shelf.shelf_id] || {}) })).sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
-  const items = [...active(data.media), ...optimisticMediaItems].filter((item) => data.mainWatchlist || mediaSection(item) === section);
+  const items = [...active(data.media), ...optimisticMediaItems]
+    .filter((item) => data.mainWatchlist || mediaSection(item) === section)
+    .map((item) => ({ ...item, reactionControl: { canReact, currentUserId, onReaction } }));
   const deletedMedia = (data.media || []).filter((item) => item.deleted_at);
   const deletedShelves = (data.mediaShelves || []).filter((shelf) => shelf.deleted_at);
   const binCount = deletedMedia.length + deletedShelves.length;
@@ -956,7 +962,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
       && matchesAny(genreFilters, item.genres || [])
       && (!data.mainWatchlist || !stampFilters.length || stampFilters.some((count) => (
         count === '1'
-          ? (item.interests?.length || 0) === 1
+          ? (item.priorities?.length || 0) === 1
           : count === String(Math.min(item.demandCount || 0, 4))
       )));
   });
@@ -1138,7 +1144,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
         </div>
       </div>
 
-      {queryLower && <SearchResultsSection items={searchResults} onOpen={openMedia} canRate={canEdit} onRate={onStarRatingChange} />}
+      {queryLower && <SearchResultsSection items={searchResults} onOpen={openMedia} canRate={canEdit} onRate={onStarRatingChange} canReact={canReact} currentUserId={currentUserId} onReaction={onReaction} />}
 
       <div className={cls('dynamic-shelves', queryLower && 'has-search-results')}>
         {visibleShelves.map((shelf) => {
@@ -1169,7 +1175,7 @@ function MediaView({ data, notify, openMedia, canEdit, isAdmin, accessToken, cur
         </div>
       </section>}
       {creatingShelf && <CreateShelfDialog section={section} onClose={() => setCreatingShelf(false)} onSave={async (values) => { setCreatingShelf(false); try { await createShelf(accessToken, { collection_id: data.collectionId, section, ...values, position: (shelves.at(-1)?.position || 0) + 1000 }); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }} />}
-      {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id, index) => [id, (index + 1) * 1000])), interests: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, collection_id: data.collectionId }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setInterest(accessToken, currentUserId, created[0].id, true); await refresh({ fresh: true }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('Media added.'); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('The media item could not be saved.'); }); }} />}
+      {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id, index) => [id, (index + 1) * 1000])), interests: [], likes: [], priorities: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, collection_id: data.collectionId }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setMediaReaction(accessToken, created[0].id, 'priority', true); await refresh({ fresh: true }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('Media added.'); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('The media item could not be saved.'); }); }} />}
       {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); try { await permanentlyDeleteMedia(accessToken, item.database_id); snapshotCache.current.delete(MAIN_WATCHLIST_ID); notify(`${item.title} permanently deleted.`); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); try { await deleteShelf(accessToken, shelf.shelf_id); snapshotCache.current.delete(MAIN_WATCHLIST_ID); notify(`${shelf.name} permanently deleted.`); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })} />}
       {shelfEditor && <ShelfEditDialog shelf={shelfEditor} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
       {bulkImportType && <BulkImportDialog type={bulkImportType} shelves={shelves} onClose={() => setBulkImportType(null)} onImport={(shelfIds, rows) => {
@@ -1207,7 +1213,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
   const [displayItems, setDisplayItems] = useState(items);
   const [arranging, setArranging] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
-  const serverOrderKey = items.map((item) => `${item.database_id}:${item.updated_at || ''}:${item.star_rating ?? ''}:${item.list_positions?.[shelf.shelf_id] ?? ''}:${(item.interests || []).map((person) => person.id || person.username).sort().join(',')}`).join('|');
+  const serverOrderKey = items.map((item) => `${item.database_id}:${item.updated_at || ''}:${item.star_rating ?? ''}:${item.list_positions?.[shelf.shelf_id] ?? ''}:${(item.interests || []).map((person) => person.id || person.username).sort().join(',')}:${(item.likes || []).map((person) => person.id).sort().join(',')}:${(item.priorities || []).map((person) => person.id).sort().join(',')}`).join('|');
   useEffect(() => { setDisplayItems(items); }, [serverOrderKey]);
   const rowBreak = Math.ceil(displayItems.length / 2);
   const displayRows = [displayItems.slice(0, rowBreak), displayItems.slice(rowBreak)];
@@ -1327,6 +1333,41 @@ function CollectionBinDrawer({ media, shelves, onClose, onError, onOpenMedia, on
   </div>, document.body);
 }
 
+function ReactionButton({ kind, people = [], canReact, currentUserId, onChange, labelled = false }) {
+  const [saving, setSaving] = useState(false);
+  const active = people.some((person) => person.id === currentUserId);
+  const names = people.map((person) => person.display_name || person.username).filter(Boolean);
+  const isLike = kind === 'like';
+  const label = isLike ? (active ? 'Liked' : 'Like') : (active ? 'Priority Watch' : 'Mark Priority Watch');
+  const summary = names.length
+    ? `${isLike ? 'Liked' : 'Priority Watch'} by ${names.join(', ')}`
+    : (isLike ? 'No likes yet' : 'No Priority Stamps yet');
+  const Icon = isLike ? Heart : Stamp;
+  return <button
+    type="button"
+    className={cls('reaction-button', isLike ? 'like-reaction' : 'priority-reaction', active && 'active', labelled && 'labelled')}
+    aria-label={`${label}. ${summary}`}
+    aria-pressed={active}
+    title={summary}
+    data-tooltip={summary}
+    disabled={!canReact || saving}
+    onPointerDown={(event) => event.stopPropagation()}
+    onClick={async (event) => {
+      event.stopPropagation();
+      setSaving(true);
+      try { await onChange(kind, !active); } finally { setSaving(false); }
+    }}
+  ><Icon size={labelled ? 15 : 14} fill={isLike && active ? 'currentColor' : 'none'} />{labelled && <span>{label}</span>}{people.length > 0 && <small>{people.length}</small>}</button>;
+}
+
+function ReactionControls({ item, canReact, currentUserId, onReaction, labelled = false }) {
+  const priorityAvailable = ['film', 'television'].includes(item.type);
+  return <span className={cls('reaction-controls', labelled && 'labelled')}>
+    {priorityAvailable && <ReactionButton kind="priority" people={item.priorities || []} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />}
+    <ReactionButton kind="like" people={item.likes || []} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />
+  </span>;
+}
+
 function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDragStart, onDragEnd, onDrop }) {
   const tags = mediaCardDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
@@ -1338,7 +1379,7 @@ function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDrag
           : <span className="poster-fallback"><Clapperboard /><span>{title}</span></span>}
         <span className="media-card-title">{title}</span>
       </button>
-      <StarRating value={item.star_rating} editable={canRate} onChange={onRate} label={`${title} rating`} />
+      <div className="media-card-rating-row"><StarRating value={item.star_rating} editable={canRate} onChange={onRate} label={`${title} rating`} /><ReactionControls item={item} {...item.reactionControl} /></div>
       <button className="media-card-meta media-card-open-meta" type="button" title="Open item">
         {tags.length > 0 && (
           <span className="media-format-list">
@@ -1347,25 +1388,22 @@ function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDrag
         )}
         {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
         {item.year && <span className="media-year">{item.year}</span>}
-        {item.interests?.map((person) => <span className="card-interest" title={person.display_name || person.username} key={person.id || person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
         {item.owned && <span className="media-owned-tag">Owned</span>}
       </button>
     </article>
   );
 }
 
-function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canInterest, interested, onInterest, onDelete, onRestore }) {
+function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, onDelete, onRestore }) {
   const [editing, setEditing] = useState(false);
   const [optimisticShelves, setOptimisticShelves] = useState(item.lists || []);
   const optimisticShelvesRef = useRef(item.lists || []);
-  const [optimisticInterest, setOptimisticInterest] = useState(interested);
   const [optimisticOwned, setOptimisticOwned] = useState(Boolean(item.owned));
   const [posterCandidates, setPosterCandidates] = useState(null);
   const [posterReviewBusy, setPosterReviewBusy] = useState(false);
   const [posterReviewError, setPosterReviewError] = useState('');
   const [posterReviewOpen, setPosterReviewOpen] = useState(false);
   const [detailReviewOpen, setDetailReviewOpen] = useState(false);
-  useEffect(() => { setOptimisticInterest(interested); }, [interested, item.database_id]);
   useEffect(() => { setOptimisticOwned(Boolean(item.owned)); }, [item.owned, item.database_id]);
   useEffect(() => { optimisticShelvesRef.current = item.lists || []; setOptimisticShelves(item.lists || []); }, [item.lists, item.database_id]);
   const tags = mediaDisplayTags(item);
@@ -1407,11 +1445,10 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
               )}
               {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
               {item.year && <span className="drawer-year">{item.year}</span>}
-              {item.interests?.map((person) => <span className="interest-initial" title={person.display_name || person.username} key={person.id || person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
             </div>
             <p className="creator">{item.director || item.creator}</p>
             <div className="drawer-status-actions">
-              {canInterest && <button className={cls('priority-watch', optimisticInterest && 'active')} onClick={async () => { const previous = optimisticInterest; const next = !previous; setOptimisticInterest(next); try { await onInterest(next); } catch { setOptimisticInterest(previous); } }}><span>{optimisticInterest ? '✓' : '+'}</span>{optimisticInterest ? 'Priority Watch' : 'Mark Priority Watch'}</button>}
+              <ReactionControls item={item} canReact={canReact} currentUserId={currentUserId} onReaction={(_item, kind, enabled) => onReaction(kind, enabled)} labelled />
               {canEdit && <button className={cls('owned-toggle', optimisticOwned && 'active')} onClick={async () => { const previous = optimisticOwned; const next = !previous; setOptimisticOwned(next); try { await onUpdate({ owned: next }, { success: next ? 'Marked as owned.' : 'Owned tag removed.', failure: 'Owned status could not be saved.' }); } catch { setOptimisticOwned(previous); } }}><span>{optimisticOwned ? <Check size={12} /> : '+'}</span>{optimisticOwned ? 'Owned' : 'Mark as Owned'}</button>}
             </div>
             {canEdit && <div className="drawer-owner-actions">
@@ -1616,6 +1653,10 @@ function UsersDialog({ accessToken, currentUser, hub, setHub, refreshHub, notify
       {!hub && <div className="people-loading" aria-live="polite"><span /><span /><span />Loading friends and Clubs…</div>}
       {hub && activeTab === 'friends' && <div id="friends-panel" role="tabpanel" className="people-panel">
         <label className="people-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search approved users" aria-label="Search approved users" />{query && <button onClick={() => setQuery('')} aria-label="Clear user search"><X size={14} /></button>}</label>
+        <section className="people-section"><div className="section-heading"><div><span className="eyebrow">DIRECTORY</span><h3>Approved users</h3></div>{!normalizedQuery && directory.length > visibleDirectory.length && <small>Showing first {visibleDirectory.length}</small>}</div>
+          {!visibleDirectory.length && <HubEmpty title="No approved users found">Try another display name or username.</HubEmpty>}
+          {visibleDirectory.map((user) => <UserHubRow user={user} meta={user.shared_clubs?.length ? user.shared_clubs.join(', ') : ''} key={user.id}><Button disabled={busy(`friend-${user.id}`)} onClick={() => runUserAction(`friend-${user.id}`, user, { outgoing: true }, () => requestFriend(accessToken, user.id), 'Friend request sent.')}>Add friend</Button></UserHubRow>)}
+        </section>
         <section className="people-section"><div className="section-heading"><div><span className="eyebrow">REQUESTS</span><h3>Friend requests</h3></div>{incoming.length + sent.length > 0 && <span>{incoming.length + sent.length}</span>}</div>
           {!incoming.length && !sent.length && <HubEmpty title="No friend requests">Incoming and sent requests will appear here.</HubEmpty>}
           {incoming.map((user) => <UserHubRow user={user} meta="Wants to be friends" key={user.id}><Button disabled={busy(`friend-${user.id}`)} onClick={() => respondFriend(user, true)}>Accept</Button><button className="secondary-button" disabled={busy(`friend-${user.id}`)} onClick={() => respondFriend(user, false)}>Decline</button></UserHubRow>)}
@@ -1624,10 +1665,6 @@ function UsersDialog({ accessToken, currentUser, hub, setHub, refreshHub, notify
         <section className="people-section"><div className="section-heading"><div><span className="eyebrow">FRIENDS</span><h3>Your friends</h3></div><span>{friends.length}</span></div>
           {!friends.length && <HubEmpty title="No friends yet">Search the approved-user directory to send a request.</HubEmpty>}
           {friends.map((user) => <UserHubRow user={user} meta={user.shared_clubs?.length ? user.shared_clubs.join(', ') : ''} key={user.id}><button className="secondary-button danger-text" disabled={busy(`friend-${user.id}`)} onClick={() => setConfirmation({ title: `Unfriend ${user.display_name}?`, message: 'You will immediately lose friend-only collection access. Shared Club access is unchanged.', confirmLabel: 'Unfriend', tone: 'danger', optimistic: true, onConfirm: () => runUserAction(`friend-${user.id}`, user, { friend: false }, () => unfriend(accessToken, user.id), `${user.display_name} removed from friends.`, true) })}>Unfriend</button></UserHubRow>)}
-        </section>
-        <section className="people-section"><div className="section-heading"><div><span className="eyebrow">DIRECTORY</span><h3>Approved users</h3></div>{!normalizedQuery && directory.length > visibleDirectory.length && <small>Showing first {visibleDirectory.length}</small>}</div>
-          {!visibleDirectory.length && <HubEmpty title="No approved users found">Try another display name or username.</HubEmpty>}
-          {visibleDirectory.map((user) => <UserHubRow user={user} meta={user.shared_clubs?.length ? user.shared_clubs.join(', ') : ''} key={user.id}><Button disabled={busy(`friend-${user.id}`)} onClick={() => runUserAction(`friend-${user.id}`, user, { outgoing: true }, () => requestFriend(accessToken, user.id), 'Friend request sent.')}>Add friend</Button></UserHubRow>)}
         </section>
       </div>}
       {hub && activeTab === 'clubs' && <div id="clubs-panel" role="tabpanel" className="people-panel">
