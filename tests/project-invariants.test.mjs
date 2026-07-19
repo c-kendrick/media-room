@@ -832,7 +832,7 @@ test('member identities use real names, stable themed avatars, and word-based Cl
   assert.match(app, /className=\{cls\('account-button', account && 'signed-in-account'\)\}/);
   assert.match(app, /<UserAvatar person=\{account\.profile\} size="account"/);
   assert.match(app, /className="account-identity"><UserAvatar person=\{account\.profile\} size="large"/);
-  assert.match(styles, /@media\(max-width:760px\)\{\.share-collection-button,\.topbar-action-button,\.account-button\{width:40px!important;padding:0!important;justify-content:center!important\}/);
+  assert.match(styles, /@media\(max-width:760px\)\{[\s\S]*?\.share-collection-button,\.topbar-action-button,\.account-button\{width:40px!important;padding:0!important;justify-content:center!important\}/);
   assert.match(styles, /\.account-desktop-label\{display:none\}/);
   assert.match(styles, /\.avatar-tone-9 \{ background: #d6cec9; color: #514b47; \}/);
   assert.match(styles, /\.account-button \.user-avatar-account \{ width: 28px/);
@@ -929,7 +929,7 @@ test('Users & Clubs uses accessible focused tabs, request states, search, and po
   assert.match(app, /function HubEmpty/);
   assert.match(app, /dialog\.addEventListener\('keydown', trap\)/);
   assert.match(styles, /\.users-dialog\{width:min\(940px/);
-  assert.match(styles, /@media\(max-width:760px\)[\s\S]*\.users-dialog\{width:100vw/);
+  assert.match(styles, /@media\(max-width:760px\)[\s\S]*\.users-dialog\{width:100%!important;height:100dvh/);
   assert.doesNotMatch(app, /Invite approved user|Requested · Cancel/);
 });
 
@@ -1052,4 +1052,21 @@ test('the user directory leads the Friends tab and admins opt in to Admin view',
   assert.match(app, /account\.profile\?\.role === 'admin' && viewAsAdmin && <Button onClick=\{onManageUsers\}>User Management<\/Button>/);
   assert.match(app, /account\.profile\?\.role === 'admin' && viewAsAdmin \? 'Administrator account'/);
   assert.doesNotMatch(app, /Member view/);
+});
+
+test('mobile page width is constrained while poster shelves keep their own horizontal scrolling', async () => {
+  const globalStyles = await read('src/styles.css');
+  const publicStyles = await read('src/public.css');
+  const mediaStyles = await read('src/media-layout.css');
+
+  assert.match(globalStyles, /html\{max-width:100%;overflow-x:clip/);
+  assert.match(globalStyles, /body,#root\{width:100%;max-width:100%;overflow-x:clip\}/);
+  assert.match(globalStyles, /\.app-shell\{width:100%;max-width:100%;[\s\S]*overflow-x:clip/);
+  assert.match(publicStyles, /\.collection-tools\{min-width:0;align-items:stretch;flex-direction:column\}/);
+  assert.match(publicStyles, /\.modal-layer\{padding:12px;overflow-y:auto\}/);
+  assert.match(publicStyles, /\.modal-layer>\.media-edit-dialog,[\s\S]*width:100%!important;max-width:100%!important;max-height:calc\(100dvh - 24px\)/);
+  assert.match(publicStyles, /\.users-dialog\{width:100%!important;height:100dvh/);
+  assert.match(mediaStyles, /\.poster-track \{[\s\S]*overflow-x: auto;/);
+  assert.match(mediaStyles, /@media \(max-width: 760px\)[\s\S]*\.media-drawer \{[\s\S]*width: 100%;/);
+  assert.doesNotMatch(mediaStyles, /@media \(max-width: 760px\)[\s\S]*\.media-drawer \{[\s\S]*width: 100vw;/);
 });
