@@ -1,6 +1,7 @@
 import { supabaseSelect } from './supabase.js';
 import { buildWatchDemand, buildWatchGroupIdentities } from './watch-demand.js';
 import { SECTION_NOTE_DEFAULTS } from './section-notes.js';
+import { mediaReactionIdentity } from './media-reactions.js';
 
 const MEDIA_SELECT = 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,owned,runtime,deleted_at,created_at,updated_at';
 const PRE_OWNED_MEDIA_SELECT = MEDIA_SELECT.replace(',owned', '');
@@ -22,13 +23,22 @@ async function selectMediaItems(parameters, options) {
   }
 }
 
-export function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [], publicProfiles = []) {
+export function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [], publicProfiles = [], reactions = []) {
   const membershipsByItem = new Map();
+  const profileById = new Map(publicProfiles.map((profile) => [profile.id, profile]));
+  const reactionsByWork = new Map();
 
   for (const membership of memberships) {
     const current = membershipsByItem.get(membership.media_item_id) || [];
     current.push(membership);
     membershipsByItem.set(membership.media_item_id, current);
+  }
+
+  for (const reaction of reactions) {
+    const current = reactionsByWork.get(reaction.work_key) || { like: [], priority: [] };
+    const person = profileById.get(reaction.user_id);
+    if (person && !current[reaction.kind].some((entry) => entry.id === person.id)) current[reaction.kind].push(person);
+    reactionsByWork.set(reaction.work_key, current);
   }
 
   return {
@@ -64,6 +74,7 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
     })),
     media: mediaItems.map((item) => {
       const membership = membershipsByItem.get(item.id) || [];
+      const workReactions = reactionsByWork.get(mediaReactionIdentity(item)) || { like: [], priority: [] };
       return {
         item_id: item.legacy_id || item.id,
         database_id: item.id,
@@ -91,6 +102,8 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
         list_positions: Object.fromEntries(membership.map((entry) => [entry.shelf_id, entry.position])),
         external_ids: item.external_ids || {},
         interests: interests.filter((entry) => entry.media_item_id === item.id).map((entry) => publicProfiles.find((profile) => profile.id === entry.user_id)).filter(Boolean),
+        likes: workReactions.like,
+        priorities: workReactions.priority,
       };
     }),
   };
@@ -164,7 +177,8 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false, 
     select: 'media_item_id,user_id',
   }), { fresh, accessToken }) : [];
   const publicProfiles = collections.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh, accessToken }) : [];
-  return mapSnapshot(collection, shelves, mediaItems, memberships, interests, publicProfiles);
+  const reactions = accessToken ? await supabaseSelect(query('media_reactions', { select: 'user_id,kind,work_key' }), { fresh, accessToken }).catch(() => []) : [];
+  return mapSnapshot(collection, shelves, mediaItems, memberships, interests, publicProfiles, reactions);
 }
 
 export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken, ownerIds } = {}) {
@@ -175,6 +189,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
 
   const collectionIds = collections.map((collection) => collection.id);
   const publicProfiles = await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh, accessToken });
+  const reactions = accessToken ? await supabaseSelect(query('media_reactions', { select: 'user_id,kind,work_key' }), { fresh, accessToken }).catch(() => []) : [];
   const visibleProfileIds = new Set(publicProfiles.map((profile) => profile.id));
   const scopedProfileIds = allowedOwnerIds
     ? new Set(collections.map((collection) => collection.owner_id))
@@ -290,6 +305,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
     [...mirroredMemberships, ...virtualMemberships],
     interests,
     publicProfiles,
+    reactions.filter((reaction) => scopedProfileIds.has(reaction.user_id)),
   );
   return { ...snapshot, mainWatchlist: true, media: snapshot.media.map((item) => {
     const watchDemand = demandByMediaId.get(item.database_id) || [];

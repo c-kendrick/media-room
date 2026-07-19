@@ -10,6 +10,7 @@ import { parseCollectionBackup, validateCollectionBackup } from '../src/backup-i
 import { supabaseRequest } from '../src/supabase.js';
 import { collectionSummaryStats } from '../src/collection-stats.js';
 import { appSiteUrl, authenticatedProfilePath, selectAuthenticatedProfile, signupRateLimitDetails } from '../src/auth.js';
+import { applyReactionToSnapshot, mediaReactionIdentity } from '../src/media-reactions.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -90,7 +91,7 @@ test('Main Main Watchlist matches title variants and missing years without mergi
 
 test('the first Main Watchlist interest filter remains a genuine single-stamp filter', async () => {
   const source = await read('src/App.jsx');
-  assert.match(source, /count === '1'[\s\S]*\(item\.interests\?\.length \|\| 0\) === 1/);
+  assert.match(source, /count === '1'[\s\S]*\(item\.priorities\?\.length \|\| 0\) === 1/);
   assert.match(source, /count === '1' \? '1 Stamp'/);
 });
 
@@ -410,7 +411,7 @@ test('add and edit share contextual media details and keep all non-name fields o
   assert.doesNotMatch(app, /<label>Creator<input/);
   assert.match(app, /Mark as Owned/);
   assert.match(app, /section === 'screen'[\s\S]*Mark Priority Watch/);
-  assert.match(app, /if \(priorityWatch && currentUserId\) await setInterest/);
+  assert.match(app, /if \(priorityWatch && currentUserId\) await setMediaReaction\(accessToken, created\[0\]\.id, 'priority', true\)/);
   assert.match(app, /<legend>Also add to<\/legend>/);
   assert.match(app, /section === 'game'[\s\S]*Platforms \(comma separated\)[\s\S]*: <label>Format/);
   assert.match(app, /section === 'screen' && <label>Runtime \(minutes\)/);
@@ -585,7 +586,7 @@ test('shared collection routing is read-only and completely isolated from Main W
   assert.match(app, /if \(!sharedMode\) \{[\s\S]*cacheSnapshot/);
   assert.match(app, /!sharedMode[\s\S]*account\?\.profile\?\.approved_at/);
   assert.match(app, /const isAdmin = isAdminAccount && !viewAsMember && !sharedMode/);
-  assert.match(app, /canInterest=\{Boolean\(!sharedMode/);
+  assert.match(app, /const canReact = Boolean\(!sharedMode/);
   assert.match(app, /data\.shared \? 'SHARED COLLECTION · READ ONLY'/);
   assert.match(app, /sharedMode \? 'Read-only link'/);
   assert.match(share, /share link is unavailable or has been revoked/i);
@@ -875,4 +876,64 @@ test('Club cards hide management until requested and owner actions confirm with 
   assert.match(migration, /target_user_id=auth\.uid\(\).*Transfer ownership before leaving/);
   assert.match(migration, /not public\.are_friends\(target_user_id\)/);
   assert.match(migration, /pending_invitee_ids/);
+});
+
+test('media reactions share one identity across matching copies without joining remakes', () => {
+  const original = { type: 'film', title: 'The Thing', year: 1982 };
+  assert.equal(mediaReactionIdentity(original), mediaReactionIdentity({ type: 'movie', title: 'Thing!', year: 1982 }));
+  assert.notEqual(mediaReactionIdentity(original), mediaReactionIdentity({ type: 'film', title: 'The Thing', year: 1951 }));
+  assert.notEqual(mediaReactionIdentity(original), mediaReactionIdentity({ type: 'book', title: 'The Thing', year: 1982 }));
+
+  const person = { id: 'person-a', username: 'alex', display_name: 'Alex' };
+  const snapshot = { collectionId: 'visible', media: [
+    { database_id: 'copy-a', type: 'film', title: 'The Thing', year: 1982, likes: [], priorities: [] },
+    { database_id: 'copy-b', type: 'movie', title: 'Thing!', year: 1982, likes: [], priorities: [] },
+    { database_id: 'remake', type: 'film', title: 'The Thing', year: 1951, likes: [], priorities: [] },
+  ] };
+  const liked = applyReactionToSnapshot(snapshot, snapshot.media[0], 'like', true, person);
+  assert.deepEqual(liked.media.map((item) => item.likes.map((entry) => entry.id)), [['person-a'], ['person-a'], []]);
+  assert.deepEqual(liked.media.map((item) => item.priorities), [[], [], []]);
+  const rolledBack = applyReactionToSnapshot(liked, snapshot.media[0], 'like', false, person);
+  assert.deepEqual(rolledBack.media.map((item) => item.likes), [[], [], []]);
+});
+
+test('likes and Priority Stamps are secure, private from share links, and preserve Watchlist maths', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/supabase-data.js');
+  const styles = `${await read('src/media-layout.css')}\n${await read('src/public.css')}`;
+  const migration = await read('supabase/migrations/20260719060000_media_reactions.sql');
+  const secureShare = await read('supabase/migrations/20260719020000_revocable_collection_share_links.sql');
+  const openShare = await read('supabase/migrations/20260719050000_open_public_collections.sql');
+
+  assert.match(migration, /create table public\.media_reactions/);
+  assert.match(migration, /primary key \(user_id, kind, work_key\)/);
+  assert.match(migration, /reaction_kind not in \('like', 'priority'\)/);
+  assert.match(migration, /not public\.profile_is_active\(auth\.uid\(\)\)/);
+  assert.match(migration, /not public\.can_view_media_item\(target_media_item_id\)/);
+  assert.match(migration, /reaction_kind = 'priority' and target\.type not in \('film', 'television'\)/);
+  assert.match(migration, /if reaction_kind = 'priority'[\s\S]*public\.media_interest/);
+  assert.match(migration, /grant select on public\.media_reactions to authenticated/);
+  assert.doesNotMatch(migration, /grant select on public\.media_reactions to anon/);
+  assert.doesNotMatch(migration, /create or replace function public\.can_view_collection/);
+  assert.doesNotMatch(migration, /on public\.(collections|shelves|media_items|club_memberships) for/);
+  assert.doesNotMatch(secureShare, /media_reactions/);
+  assert.doesNotMatch(openShare, /media_reactions/);
+
+  assert.match(data, /reactions\.filter\(\(reaction\) => scopedProfileIds\.has\(reaction\.user_id\)\)/);
+  assert.match(app, /function ReactionButton/);
+  assert.match(app, /const Icon = isLike \? Heart : Stamp/);
+  assert.match(app, /applyReactionToSnapshot\(data, item, kind, enabled, person\)/);
+  assert.match(app, /Previous state restored/);
+  assert.match(styles, /\.media-card-rating-row/);
+  assert.match(styles, /\.reaction-button\.like-reaction\.active/);
+  assert.match(styles, /content: attr\(data-tooltip\)/);
+});
+
+test('the user directory leads the Friends tab and admins start in non-Admin view', async () => {
+  const app = await read('src/App.jsx');
+  const friendsPanel = app.slice(app.indexOf('id="friends-panel"'), app.indexOf('id="clubs-panel"'));
+  assert.ok(friendsPanel.indexOf('DIRECTORY') < friendsPanel.indexOf('REQUESTS'));
+  assert.match(app, /const \[viewAsMember, setViewAsMember\] = useState\(true\)/);
+  assert.match(app, /onSignedIn=\{\(nextAccount\) => \{[\s\S]*setViewAsMember\(true\)/);
+  assert.match(app, /View as non-Admin/);
 });
