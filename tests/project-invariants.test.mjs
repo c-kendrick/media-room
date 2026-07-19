@@ -944,6 +944,8 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.match(styles, /\.media-card-rating-row/);
   assert.match(styles, /\.reaction-button\.like-reaction\.active/);
   assert.match(styles, /\.media-card-rating-row \.reaction-button\.like-reaction small[\s\S]*background: transparent/);
+  const cardLoveCount = styles.slice(styles.indexOf('.media-card-rating-row .reaction-button.like-reaction small'), styles.indexOf('.reaction-button[data-tooltip]'));
+  assert.doesNotMatch(cardLoveCount, /top: -5px|right: -4px|min-width: 0|height: auto/);
   assert.match(styles, /content: attr\(data-tooltip\)/);
 });
 

@@ -562,14 +562,8 @@
 }
 
 .media-card-rating-row .reaction-button.like-reaction small {
-  top: -5px;
-  right: -4px;
-  min-width: 0;
-  height: auto;
   border-radius: 0;
   background: transparent;
-  display: block;
-  line-height: 1;
 }
 
 .reaction-button[data-tooltip]:hover::after,
