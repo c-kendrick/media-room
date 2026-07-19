@@ -284,12 +284,12 @@
 .priority-watch.active span{background:#7f302d;border-color:#7f302d;color:#fff}
 .drawer-status-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin:2px 0 8px}
 .drawer-status-actions .priority-watch{margin:0}
-.drawer-status-actions .reaction-controls.labelled{display:flex;align-items:center;gap:7px}
+.drawer-status-actions .reaction-controls.labelled{display:flex;align-items:center;justify-content:flex-start;margin-left:0;gap:7px}
 .drawer-status-actions .reaction-button.labelled{width:auto;min-width:34px;height:32px;padding:0 9px;border-color:#cfc0b1;background:#fffaf2;gap:6px;color:#746960;font-size:9px;font-weight:700}
 .drawer-status-actions .reaction-button.labelled:hover:not(:disabled){border-color:#a98979;background:#f3e8db;color:#554a43}
 .drawer-status-actions .reaction-button.labelled.priority-reaction.active{border-color:#9d6158;background:#7f302d;color:#fffaf2}
 .drawer-status-actions .reaction-button.labelled.like-reaction.active{border-color:#c87470;background:#fff4f1;color:#c43c3c}
-.drawer-status-actions .reaction-button.labelled small{position:static;min-width:15px;height:15px;border-radius:8px;background:rgba(124,91,74,.1);color:inherit}
+.drawer-status-actions .reaction-button.labelled small{position:static;min-width:0;height:auto;border-radius:0;background:transparent;color:inherit;font-size:inherit;line-height:inherit;font-weight:inherit}
 .owned-toggle{border:0;background:transparent;color:#746b61;display:inline-flex;align-items:center;gap:7px;padding:6px 0;font-size:10px;font-weight:700;cursor:pointer}
 .owned-toggle span{width:19px;height:19px;border:1px solid #a99e91;border-radius:50%;display:grid;place-items:center;color:#81786c}
 .owned-toggle.active{color:#514a43}

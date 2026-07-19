@@ -1534,7 +1534,7 @@ function ReactionButton({ kind, people = [], canReact, currentUserId, onChange, 
   const summary = names.length
     ? `${isLike ? 'Loved' : 'Priority Watch'} by ${names.join(', ')}`
     : (isLike ? 'No loves yet' : 'No Priority Stamps yet');
-  const tooltip = isLike ? summary : 'Priority Watch Stamp';
+  const tooltip = isLike ? summary : ['Priority Watch Stamp', ...names].join('\n');
   const Icon = isLike ? Heart : Stamp;
   return <button
     type="button"
