@@ -65,16 +65,23 @@ export async function replaceMediaShelfMemberships(accessToken, databaseId, curr
 
   // Add first: a failed request leaves existing memberships untouched.
   if (additions.length) {
-    await supabaseRequest('/rest/v1/shelf_media_items', {
-      method: 'POST',
-      fresh: true,
-      body: additions.map((shelfId) => ({
-        shelf_id: shelfId,
-        media_item_id: databaseId,
-        position: 1000,
-      })),
-      headers: { ...headers, Prefer: 'return=minimal' },
-    });
+    try {
+      await supabaseRequest('/rest/v1/rpc/append_media_shelf_memberships', {
+        method: 'POST', fresh: true,
+        body: { target_media_item_id: databaseId, target_shelf_ids: additions },
+        headers,
+      });
+    } catch (error) {
+      if (error?.code !== 'PGRST202') throw error;
+      const query = new URLSearchParams({ shelf_id: `in.(${additions.join(',')})`, select: 'shelf_id,position' });
+      const memberships = await supabaseRequest('/rest/v1/shelf_media_items?' + query, { fresh: true, headers });
+      const maximums = memberships.reduce((map, row) => map.set(row.shelf_id, Math.max(map.get(row.shelf_id) || 0, Number(row.position) || 0)), new Map());
+      await supabaseRequest('/rest/v1/shelf_media_items', {
+        method: 'POST', fresh: true,
+        body: additions.map((shelfId) => ({ shelf_id: shelfId, media_item_id: databaseId, position: (maximums.get(shelfId) || 0) + 1000 })),
+        headers: { ...headers, Prefer: 'return=minimal' },
+      });
+    }
   }
 
   // Remove only memberships that were explicitly deselected. If a removal
