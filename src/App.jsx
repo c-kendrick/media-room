@@ -1866,6 +1866,12 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
     const page = track.querySelector('.poster-page');
     track.scrollTo({ left: nextPage * ((page?.offsetWidth || track.clientWidth) + 24), behavior: 'smooth' });
   };
+  const moveShelfWithViewport = (direction) => {
+    Promise.resolve(onMoveShelf(direction)).catch(() => {});
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      shelfRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }));
+  };
 
   return (
     <section ref={shelfRef} className={cls('media-shelf', shelfDragging && 'shelf-dragging')} onDragOver={(event) => canReorderShelf && event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (canReorderShelf) onShelfDrop?.(); }}>
@@ -1876,7 +1882,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
         </div>
         <div className="shelf-actions">
           <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && items.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
-          <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => onMoveShelf(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => onMoveShelf(1)}><ArrowDown size={15} /></button>}</span>
+          <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => moveShelfWithViewport(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => moveShelfWithViewport(1)}><ArrowDown size={15} /></button>}</span>
           <span className="shelf-action-group shelf-edit-actions">{canEdit && <button aria-label={`Edit ${shelf.name}`} title="Edit shelf" onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Move ${shelf.name} to Bin`} title="Move shelf to Bin" onClick={onDelete}><Trash2 size={15} /></button>}</span>
           <span className="shelf-action-group shelf-page-actions"><button aria-label={`Scroll ${shelf.name} left`} disabled={currentPage <= 0 || pageCount <= 1} onClick={() => scrollPage(-1)}><ChevronLeft /></button>{pageCount > 1 && <small>{currentPage + 1} / {pageCount}</small>}<button aria-label={`Scroll ${shelf.name} right`} disabled={currentPage >= pageCount - 1 || pageCount <= 1} onClick={() => scrollPage(1)}><ChevronRight /></button></span>
         </div>
@@ -1918,9 +1924,9 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
   };
   const rowBreak = Math.ceil(ordered.length / 2);
   const rows = [ordered.slice(0, rowBreak), ordered.slice(rowBreak)];
-  return <div className="modal-layer editor-layer"><section className="media-edit-dialog arrange-dialog">
+  return createPortal(<div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog arrange-dialog" role="dialog" aria-modal="true" aria-labelledby="arrange-shelf-title">
     <button className="close" type="button" onClick={onClose} aria-label="Close arranger"><X /></button>
-    <span className="eyebrow">ARRANGE SHELF</span><h2>{shelf.name}</h2>
+    <span className="eyebrow">ARRANGE SHELF</span><h2 id="arrange-shelf-title">{shelf.name}</h2>
     <p className="dialog-intro">Drag an item anywhere—including between rows—or click its position number and type exactly where it should go.</p>
     <div className="arrange-help"><span><GripVertical size={13} />Drag to move</span><span className="position-demo">12</span><span>Click a number to enter a position</span></div>
     <div className="arrange-rows">{rows.map((row, rowIndex) => <section className="arrange-row" key={rowIndex}>
@@ -1937,7 +1943,7 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
       </li>; })}</ol>
     </section>)}</div>
     <div className="dialog-actions"><button className="text-button" onClick={onClose}>Cancel</button><Button disabled={saving} onClick={async () => { setSaving(true); try { await onSave(ordered); } finally { setSaving(false); } }}>{saving ? 'Saving…' : 'Save order'}</Button></div>
-  </section></div>;
+  </section></div>, document.body);
 }
 
 function CollectionBinDrawer({ media, shelves, onClose, onError, onOpenMedia, onRestoreMedia, onDeleteMedia, onRestoreShelf, onDeleteShelf }) {
