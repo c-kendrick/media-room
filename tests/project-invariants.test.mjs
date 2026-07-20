@@ -1170,6 +1170,36 @@ test('section snapshot merging keeps visited tabs and cached drawer details', ()
   assert.equal(merged.media.find((row) => row.database_id === 'screen-item').description, 'Cached');
 });
 
+test('section snapshot merging is idempotent and heals cache-network duplicates', async () => {
+  const app = await read('src/App.jsx');
+  const screen = {
+    collectionId: 'collection-a', loadedSections: ['screen'], detailedSections: [],
+    collectionDescriptions: { screen: 'Screen' },
+    mediaShelves: [{ shelf_id: 'screen-shelf', section: 'screen' }],
+    media: [{ database_id: 'screen-item', item_id: 'screen-item', type: 'film' }],
+  };
+  const books = {
+    collectionId: 'collection-a', loadedSections: ['book'], detailedSections: [],
+    collectionDescriptions: { book: 'Books' },
+    mediaShelves: [{ shelf_id: 'book-shelf', section: 'book' }],
+    media: [{ database_id: 'book-item', item_id: 'book-item', type: 'book' }],
+  };
+  const combined = mergeSectionSnapshot(screen, books);
+  const repeated = mergeSectionSnapshot(combined, combined);
+  const corrupted = {
+    ...repeated,
+    mediaShelves: [...repeated.mediaShelves, ...repeated.mediaShelves],
+    media: [...repeated.media, ...repeated.media],
+  };
+  const healed = mergeSectionSnapshot(corrupted, books);
+
+  assert.deepEqual(repeated.mediaShelves.map((row) => row.shelf_id), ['screen-shelf', 'book-shelf']);
+  assert.deepEqual(repeated.media.map((row) => row.database_id), ['screen-item', 'book-item']);
+  assert.deepEqual(healed.mediaShelves.map((row) => row.shelf_id), ['screen-shelf', 'book-shelf']);
+  assert.deepEqual(healed.media.map((row) => row.database_id), ['screen-item', 'book-item']);
+  assert.match(app, /mergeLoadedSection\(targetCollectionId, loaded\);\s*return loaded;/);
+});
+
 test('drawer details load once while posters use tiered viewport prioritisation', async () => {
   const app = await read('src/App.jsx');
   const layout = await read('src/media-layout.css');

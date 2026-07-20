@@ -637,7 +637,10 @@ export default function App() {
     let request = sectionRequests.current.get(requestKey);
     if (!request) {
       request = loadMediaSnapshot({ fresh, collectionId: targetCollectionId, section, accessToken: token })
-        .then((loaded) => mergeLoadedSection(targetCollectionId, loaded))
+        .then((loaded) => {
+          mergeLoadedSection(targetCollectionId, loaded);
+          return loaded;
+        })
         .catch((error) => {
           sectionRequests.current.delete(requestKey);
           if (import.meta.env.DEV) console.warn(`[Media Room] Section RPC/fallback failed for ${targetCollectionId}/${section}.`, error);
