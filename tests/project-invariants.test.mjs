@@ -1109,6 +1109,22 @@ test('signed-in navigation is remembered safely without persisting shared-link d
   assert.match(app, /onSectionChange=\{\(section\) => \{ rememberedSection\.current = section; if \(!sharedMode\) writeLastPage/);
 });
 
+test('initial opening progresses from branding to a responsive skeleton without affecting page navigation', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /function InitialLoadingScreen\(\{ stage \}\)/);
+  assert.match(app, /Opening Kit’s Media Room…/);
+  assert.match(app, /setInitialLoadStage\('skeleton'\), 500/);
+  assert.match(app, /setInitialLoadStage\('detailed'\), 900/);
+  assert.match(app, /const initialLoading = loading \|\| authLoading \|\| collectionsLoading/);
+  assert.match(app, /if \(initialLoading \|\| initialLoadStage === 'brand'\)/);
+  assert.match(app, /<main className=\{cls\(collectionLoading && 'collection-loading'\)\}/);
+  assert.match(styles, /\.initial-skeleton\{[^}]*grid-template-columns:186px minmax\(0,1fr\)[^}]*overflow:hidden/);
+  assert.match(styles, /\.initial-skeleton\.is-detailed \.skeleton-detail\{opacity:1;transform:none\}/);
+  assert.match(styles, /@media\(max-width:760px\)\{[\s\S]*?\.initial-skeleton\{grid-template-columns:1fr\}/);
+  assert.match(styles, /@media\(prefers-reduced-motion:reduce\)/);
+});
+
 test('shelf removal uses the same muted control styling as the edit icon', async () => {
   const app = await read('src/App.jsx');
   const publicStyles = await read('src/public.css');

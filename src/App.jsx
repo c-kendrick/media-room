@@ -295,12 +295,39 @@ function AdvancedSearchDialog({ filters, onClear, onClose }) {
   </div>, document.body);
 }
 
+function InitialLoadingScreen({ stage }) {
+  if (stage === 'brand') {
+    return <div className="loading-screen opening-screen" role="status" aria-live="polite"><div className="brand-mark">KM</div><p>Opening Kit’s Media Room…</p></div>;
+  }
+
+  const detailed = stage === 'detailed';
+  return <div className={cls('initial-skeleton', detailed && 'is-detailed')} role="status" aria-live="polite" aria-label="Opening Kit’s Media Room">
+    <span className="skeleton-status">Preparing your Media Room…</span>
+    <aside className="initial-skeleton-sidebar" aria-hidden="true">
+      <div className="skeleton-brand"><span className="skeleton-brand-mark">KM</span><span><i className="skeleton-line wide" /><i className="skeleton-line medium" /></span></div>
+      <div className="skeleton-nav-primary"><i className="skeleton-icon" /><i className="skeleton-line wide" /></div>
+      <div className="skeleton-sidebar-detail skeleton-detail"><i className="skeleton-line label" />{[0, 1, 2, 3].map((item) => <span key={item}><i className="skeleton-avatar" /><i className="skeleton-line medium" /></span>)}</div>
+    </aside>
+    <section className="initial-skeleton-workspace" aria-hidden="true">
+      <header className="initial-skeleton-topbar"><i className="skeleton-menu" /><i className="skeleton-search" /><span><i className="skeleton-top-action" /><i className="skeleton-top-action skeleton-detail" /><i className="skeleton-top-action" /></span></header>
+      <main className="initial-skeleton-main">
+        <section className="skeleton-hero"><i className="skeleton-hero-mark" /><div><i className="skeleton-line title" /><i className="skeleton-line wide" /></div><span className="skeleton-detail"><i className="skeleton-stat" /><i className="skeleton-stat" /></span></section>
+        <div className="skeleton-tabs"><i /><i /><i /></div>
+        <div className="skeleton-command"><i className="skeleton-search-field" /><i className="skeleton-filter-button" /></div>
+        <section className="skeleton-shelf"><header><span><i className="skeleton-line heading" /><i className="skeleton-line medium skeleton-detail" /></span><i className="skeleton-pager" /></header><div className="skeleton-card-grid">{[0, 1, 2, 3, 4, 5].map((item) => <article className={item > 2 ? 'skeleton-detail' : ''} key={item}><i className="skeleton-poster" /><i className="skeleton-line wide" /><i className="skeleton-line short skeleton-detail" /></article>)}</div></section>
+        <section className="skeleton-shelf skeleton-secondary skeleton-detail"><header><span><i className="skeleton-line heading" /><i className="skeleton-line medium" /></span></header></section>
+      </main>
+    </section>
+  </div>;
+}
+
 export default function App() {
   restorePublicCollectionRoute();
   const [recoveryOpen, setRecoveryOpen] = useState(() => consumeRecoverySessionFromUrl() || new URLSearchParams(window.location.search).get('auth') === 'recovery');
   const [shareToken] = useState(() => readShareToken());
   const [publicUsername] = useState(() => readPublicCollectionUsername());
   const sharedMode = Boolean(shareToken || publicUsername);
+  const [initialLoadStage, setInitialLoadStage] = useState('brand');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -625,6 +652,15 @@ export default function App() {
   }, [account, authLoading, collections, landingApplied, viewAsAdmin, adminClubs]);
 
   useEffect(() => {
+    const skeletonTimer = window.setTimeout(() => setInitialLoadStage('skeleton'), 500);
+    const detailTimer = window.setTimeout(() => setInitialLoadStage('detailed'), 900);
+    return () => {
+      window.clearTimeout(skeletonTimer);
+      window.clearTimeout(detailTimer);
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     loadAuthenticatedAccount()
       .then((nextAccount) => {
@@ -658,8 +694,9 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  if (loading || authLoading || collectionsLoading || (!landingApplied && collections.length > 0)) {
-    return <div className="loading-screen"><div className="brand-mark">KM</div><p>Opening Kit’s Media Room…</p></div>;
+  const initialLoading = loading || authLoading || collectionsLoading || (!landingApplied && collections.length > 0);
+  if (initialLoading || initialLoadStage === 'brand') {
+    return <InitialLoadingScreen stage={initialLoadStage} />;
   }
 
   if (!data) {
