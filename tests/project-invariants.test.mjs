@@ -451,12 +451,23 @@ test('shelf controls use consistent spacing and headline-style labels', async ()
   assert.match(styles, /\.shelf-content-actions\{[^}]*gap:7px/);
 });
 
-test('the shelf arranger is a viewport modal and shelf moves follow the reordered shelf', async () => {
+test('the shelf arranger is a viewport modal and shelf moves preserve the viewport instantly', async () => {
   const app = await read('src/App.jsx');
   assert.match(app, /function ArrangeShelfDialog[\s\S]*return createPortal\([\s\S]*document\.body\)/);
   assert.match(app, /arrange-dialog fixed-set-arranger" role="dialog" aria-modal="true"/);
-  assert.match(app, /const moveShelfWithViewport = \(direction\) =>[\s\S]*onMoveShelf\(direction\)[\s\S]*scrollIntoView\(\{ behavior: 'smooth', block: 'center' \}\)/);
+  assert.match(app, /const moveShelfWithViewport = \(direction\) =>[\s\S]*previousTop[\s\S]*onMoveShelf\(direction\)[\s\S]*window\.scrollBy\(\{ top: nextTop - previousTop, behavior: 'auto' \}\)/);
   assert.match(app, /Move shelf down[\s\S]*moveShelfWithViewport\(1\)/);
+});
+
+test('shelf arranging has undo redo, generous drag targets, and button-only debounced shelf ordering', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /className="arrange-history"[\s\S]*<Undo2[\s\S]*Undo[\s\S]*<Redo2[\s\S]*Redo/);
+  assert.doesNotMatch(app, /Move items only where you choose|Drag to reorder shelf|shelfDragging=|onShelfDragStart=/);
+  assert.match(app, /window\.setTimeout\(\(\) => \{ void persistShelfOrder\(\); \}, 650\)/);
+  assert.match(app, /Shelf order could not be saved\. The previous order was restored\./);
+  assert.match(styles, /\.insert-target\{[^}]*left:0;right:0;height:50%;pointer-events:none/);
+  assert.match(styles, /\.insert-target\.enabled\{pointer-events:auto\}/);
 });
 
 test('queue shelf settings are explicit in every section and independent from Main Watchlist', async () => {
@@ -1310,7 +1321,14 @@ test('before and after insertion stays local and creates explicit overflow', () 
   assert.deepEqual(before.sets[1].slots.slice(0, 4).map((item) => item.database_id), ['media-8', 'media-9', 'media-3', 'media-10']);
 });
 
-test('direct position editing uses insertion rules and accepts a valid partial final set', () => {
+test('direct position editing shifts items within a set without creating overflow', () => {
+  const reordered = moveToPosition(createShelfDraft(shelfItems(7)), 'media-2', 6);
+  assert.deepEqual(reordered.sets[0].slots.map((item) => item.database_id), ['media-1', 'media-3', 'media-4', 'media-5', 'media-6', 'media-2', 'media-7']);
+  assert.equal(reordered.sets[0].overflow.length, 0);
+  assert.deepEqual(validateShelfDraft(reordered), []);
+});
+
+test('direct position editing across sets uses local insertion rules and accepts a valid partial final set', () => {
   const moved = moveToPosition(createShelfDraft(shelfItems(14)), 'media-3', 8);
   assert.equal(moved.sets[0].slots[2], null);
   assert.equal(moved.sets[1].slots[0].database_id, 'media-3');
@@ -1352,6 +1370,9 @@ test('numbered shelves and fixed segments are shelf-scoped, responsive and migra
   assert.match(app, /Your draft is still here; try again or cancel to restore the last saved order/);
   assert.match(data, /numbered: Boolean\(shelf\.is_numbered\)/);
   assert.match(layout, /grid-template-columns: repeat\(7, minmax\(var\(--shelf-card-min\), 1fr\)\)/);
+  assert.match(layout, /--shelf-card-min: 68px/);
+  assert.match(layout, /@container shelf-card \(max-width: 120px\)/);
+  assert.match(layout, /@media \(max-width: 580px\)[\s\S]*--shelf-card-min: 120px/);
   assert.match(layout, /poster-segment\.has-divider::after[\s\S]*top: 3px;[\s\S]*bottom: 3px;/);
   assert.match(migration, /add column if not exists is_numbered boolean not null default false/);
   assert.match(migration, /row_number\(\) over \(partition by shelf_id order by segment_index, lane_index, lane_offset/);

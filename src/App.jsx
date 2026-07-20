@@ -26,6 +26,7 @@ import {
   Pencil,
   Plus,
   RotateCw,
+  Redo2,
   Search,
   Share2,
   Shuffle,
@@ -33,6 +34,7 @@ import {
   Stamp,
   Trash2,
   Upload,
+  Undo2,
   UserRound,
   Users,
   X,
@@ -1508,13 +1510,17 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
   const [binOpen, setBinOpen] = useState(false);
   const [shelfEditor, setShelfEditor] = useState(null);
   const [addToShelfIds, setAddToShelfIds] = useState([]);
-  const [draggedShelfId, setDraggedShelfId] = useState(null);
   const [optimisticShelfIds, setOptimisticShelfIds] = useState([]);
   const [optimisticShelfDetails, setOptimisticShelfDetails] = useState({});
   const [optimisticDeletedShelfIds, setOptimisticDeletedShelfIds] = useState([]);
   const [optimisticMediaItems, setOptimisticMediaItems] = useState([]);
   const [optimisticMainShelfIds, setOptimisticMainShelfIds] = useState([]);
   const backupInputRef = useRef(null);
+  const shelfOrderTimerRef = useRef(null);
+  const latestShelfOrderRef = useRef([]);
+  const confirmedShelfOrderRef = useRef([]);
+  const shelfOrderDirtyRef = useRef(false);
+  const shelfOrderSavingRef = useRef(false);
 
   useEffect(() => {
     if (!posterRetryAfter && !detailsRetryAfter) return undefined;
@@ -1526,7 +1532,15 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
   }, [posterRetryAfter > 0, detailsRetryAfter > 0]);
 
   const sourceShelves = mediaShelvesForSection(data, section).filter((shelf) => !optimisticDeletedShelfIds.includes(shelf.shelf_id));
-  useEffect(() => { setOptimisticShelfIds(sourceShelves.map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves, section]);
+  useEffect(() => {
+    const sourceIds = sourceShelves.map((shelf) => shelf.shelf_id);
+    confirmedShelfOrderRef.current = sourceIds;
+    if (!shelfOrderDirtyRef.current && !shelfOrderSavingRef.current) {
+      latestShelfOrderRef.current = sourceIds;
+      setOptimisticShelfIds(sourceIds);
+    }
+  }, [data.collectionId, data.mediaShelves, section]);
+  useEffect(() => () => window.clearTimeout(shelfOrderTimerRef.current), []);
   useEffect(() => { setOptimisticShelfDetails({}); }, [data.collectionId, data.mediaShelves, section]);
   useEffect(() => { setOptimisticMainShelfIds(data.mediaShelves.filter((shelf) => shelf.section === 'screen' && shelf.showInMainWatchlist).map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves]);
   const shelfIndex = new Map(optimisticShelfIds.map((id, index) => [id, index]));
@@ -1646,18 +1660,43 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
     setStampFilters([]);
   };
 
-  const saveShelfOrder = async (ordered, previous) => {
-    setOptimisticShelfIds(ordered);
+  const sameShelfOrder = (left, right) => left.length === right.length && left.every((id, index) => id === right[index]);
+  const persistShelfOrder = async () => {
+    window.clearTimeout(shelfOrderTimerRef.current);
+    if (shelfOrderSavingRef.current || !shelfOrderDirtyRef.current) return;
+    const ordered = [...latestShelfOrderRef.current];
+    shelfOrderDirtyRef.current = false;
+    shelfOrderSavingRef.current = true;
     try {
       if (data.mainWatchlist) await reorderMainWatchlist(accessToken, ordered.filter((shelfId) => shelfId !== 'main-priority-watchlist'));
       else await reorderShelves(accessToken, data.collectionId, section, ordered);
-      await refresh({ fresh: true });
-      notify(data.mainWatchlist ? 'Main Watchlist order saved.' : 'Shelf order saved.');
+      confirmedShelfOrderRef.current = ordered;
+      if (sameShelfOrder(latestShelfOrderRef.current, ordered)) {
+        await refresh({ fresh: true });
+        notify(data.mainWatchlist ? 'Main Watchlist order saved.' : 'Shelf order saved.');
+      } else shelfOrderDirtyRef.current = true;
     } catch {
-      setOptimisticShelfIds(previous);
-      notify('Shelf order could not be saved.');
-      throw new Error('Shelf order could not be saved.');
+      if (sameShelfOrder(latestShelfOrderRef.current, ordered)) {
+        latestShelfOrderRef.current = [...confirmedShelfOrderRef.current];
+        setOptimisticShelfIds([...confirmedShelfOrderRef.current]);
+        notify('Shelf order could not be saved. The previous order was restored.');
+      } else shelfOrderDirtyRef.current = true;
+    } finally {
+      shelfOrderSavingRef.current = false;
+      if (shelfOrderDirtyRef.current) shelfOrderTimerRef.current = window.setTimeout(() => { void persistShelfOrder(); }, 650);
     }
+  };
+  const moveShelf = (shelfId, direction) => {
+    const ordered = [...latestShelfOrderRef.current];
+    const from = ordered.indexOf(shelfId);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= ordered.length) return;
+    [ordered[from], ordered[to]] = [ordered[to], ordered[from]];
+    latestShelfOrderRef.current = ordered;
+    shelfOrderDirtyRef.current = true;
+    setOptimisticShelfIds(ordered);
+    window.clearTimeout(shelfOrderTimerRef.current);
+    shelfOrderTimerRef.current = window.setTimeout(() => { void persistShelfOrder(); }, 650);
   };
 
   const toggleMainWatchlistShelf = async (shelf) => {
@@ -1786,7 +1825,7 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
           );
           if (!shelfItems.length && queryLower) return null;
           const showOwnerIntro = data.mainWatchlist && ownerIntroShelfIds.has(shelf.shelf_id);
-          return <React.Fragment key={shelf.shelf_id}>{showOwnerIntro && <section className="main-owner-intro"><h2>{shelf.ownerName}</h2><EditableDescription value={shelf.ownerNote} fallback={SECTION_NOTE_DEFAULTS.screen} canEdit={false} title={`${shelf.ownerName}’s note`} /></section>}<MediaShelf shelf={{ ...shelf, ownerName: data.mainWatchlist ? null : shelf.ownerName, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} onOpen={openMedia} canEdit={canEdit && !shelf.virtual} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={async (direction) => { const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(shelf.shelf_id); const to = from + direction; if (to < 0 || to >= ordered.length) return; [ordered[from], ordered[to]] = [ordered[to], ordered[from]]; await saveShelfOrder(ordered, previous); }} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} shelfDragging={draggedShelfId === shelf.shelf_id} onShelfDragStart={(event) => { event.dataTransfer.setData('text/plain', shelf.shelf_id); event.dataTransfer.effectAllowed = 'move'; setDraggedShelfId(shelf.shelf_id); }} onShelfDragEnd={() => setDraggedShelfId(null)} onShelfDrop={async () => { if (!draggedShelfId || draggedShelfId === shelf.shelf_id) return; const previous = shelves.map((row) => row.shelf_id); const ordered = [...previous]; const from = ordered.indexOf(draggedShelfId); const to = ordered.indexOf(shelf.shelf_id); ordered.splice(to, 0, ordered.splice(from, 1)[0]); setDraggedShelfId(null); try { await saveShelfOrder(ordered, previous); } catch {} }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={() => setShelfEditor(shelf)} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} /></React.Fragment>;
+          return <React.Fragment key={shelf.shelf_id}>{showOwnerIntro && <section className="main-owner-intro"><h2>{shelf.ownerName}</h2><EditableDescription value={shelf.ownerNote} fallback={SECTION_NOTE_DEFAULTS.screen} canEdit={false} title={`${shelf.ownerName}’s note`} /></section>}<MediaShelf shelf={{ ...shelf, ownerName: data.mainWatchlist ? null : shelf.ownerName, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} onOpen={openMedia} canEdit={canEdit && !shelf.virtual} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); await refresh({ fresh: true }); notify('Item order saved.'); } catch (error) { notify('Item order could not be saved.'); throw error; } }} onRename={() => setShelfEditor(shelf)} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} /></React.Fragment>;
         })}
       </div>
 
@@ -1838,7 +1877,7 @@ function SearchResultsSection({ items, onOpen, canRate, onRate }) {
   </section>;
 }
 
-function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorderShelf, canCurateMain, canRemoveMirror, onRemoveMirror, onToggleMain, canMoveUp, canMoveDown, onMoveShelf, onAdd, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
+function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorderShelf, canCurateMain, canRemoveMirror, onRemoveMirror, onToggleMain, canMoveUp, canMoveDown, onMoveShelf, onAdd, onReorder, onRename, onDelete }) {
   const shelfRef = useRef(null);
   const trackRef = useRef(null);
   const [displayItems, setDisplayItems] = useState(items);
@@ -1863,12 +1902,16 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
     track.scrollTo({ left: nextSegment * ((segment?.offsetWidth || track.clientWidth) + 24), behavior: 'smooth' });
   };
   const moveShelfWithViewport = (direction) => {
+    const previousTop = shelfRef.current?.getBoundingClientRect().top;
     Promise.resolve(onMoveShelf(direction)).catch(() => {});
-    requestAnimationFrame(() => requestAnimationFrame(() => shelfRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const nextTop = shelfRef.current?.getBoundingClientRect().top;
+      if (Number.isFinite(previousTop) && Number.isFinite(nextTop)) window.scrollBy({ top: nextTop - previousTop, behavior: 'auto' });
+    }));
   };
-  return <section ref={shelfRef} className={cls('media-shelf fixed-set-shelf', shelfDragging && 'shelf-dragging')} onDragOver={(event) => canReorderShelf && event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (canReorderShelf) onShelfDrop?.(); }}>
+  return <section ref={shelfRef} className="media-shelf fixed-set-shelf">
     <div className="shelf-head">
-      <div className="shelf-title">{canReorderShelf && <button className="shelf-drag-handle" aria-label={`Drag ${shelf.name} to reorder`} title="Drag to reorder shelf" draggable onDragStart={onShelfDragStart} onDragEnd={onShelfDragEnd}><GripVertical size={16} /></button>}<span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2>{shelf.subtitle && <p className="shelf-subtitle">{shelf.subtitle}</p>}</span></div>
+      <div className="shelf-title"><span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2>{shelf.subtitle && <p className="shelf-subtitle">{shelf.subtitle}</p>}</span></div>
       <div className="shelf-actions">
         <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && items.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
         <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => moveShelfWithViewport(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => moveShelfWithViewport(1)}><ArrowDown size={15} /></button>}</span>
@@ -1886,12 +1929,29 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
 
 function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
   useEscape(onClose);
-  const [draft, setDraft] = useState(() => createShelfDraft(items));
+  const [history, setHistory] = useState(() => ({ past: [], present: createShelfDraft(items), future: [] }));
   const [saving, setSaving] = useState(false);
   const [draggedItemId, setDraggedItemId] = useState(null);
   const [positionDrafts, setPositionDrafts] = useState({});
   const [feedback, setFeedback] = useState([]);
-  const applyDraft = (updater) => { setDraft((current) => updater(current)); setFeedback([]); };
+  const draft = history.present;
+  const applyDraft = (updater) => {
+    setHistory((current) => {
+      const next = updater(current.present);
+      return next === current.present ? current : { past: [...current.past, current.present], present: next, future: [] };
+    });
+    setFeedback([]);
+  };
+  const undo = () => {
+    setHistory((current) => current.past.length ? { past: current.past.slice(0, -1), present: current.past.at(-1), future: [current.present, ...current.future] } : current);
+    setPositionDrafts({});
+    setFeedback([]);
+  };
+  const redo = () => {
+    setHistory((current) => current.future.length ? { past: [...current.past, current.present], present: current.future[0], future: current.future.slice(1) } : current);
+    setPositionDrafts({});
+    setFeedback([]);
+  };
   const startDrag = (event, item) => { const identity = membershipIdentity(item); event.dataTransfer.setData('text/plain', identity); event.dataTransfer.effectAllowed = 'move'; setDraggedItemId(identity); };
   const droppedIdentity = (event) => draggedItemId || event.dataTransfer.getData('text/plain');
   const commitPosition = (item) => {
@@ -1906,11 +1966,11 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
     const identity = membershipIdentity(item);
     const position = slotIndex === null ? null : setIndex * SHELF_SET_SIZE + slotIndex + 1;
     return <div className={cls('arrange-entry', draggedItemId === identity && 'dragging')} draggable onDragStart={(event) => startDrag(event, item)} onDragEnd={() => setDraggedItemId(null)}>
-      <span className="insert-target before" aria-label={`Insert before ${item.title}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); applyDraft((current) => insertBeside(current, droppedIdentity(event), identity, 'before')); setDraggedItemId(null); }} />
+      <span className={cls('insert-target before', draggedItemId && 'enabled')} aria-label={`Insert before ${item.title}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); applyDraft((current) => insertBeside(current, droppedIdentity(event), identity, 'before')); setDraggedItemId(null); }} />
       <GripVertical className="arrange-grip" size={14} />
       {position === null ? <span className="overflow-mark">+</span> : <input className="arrange-position" aria-label={`Position for ${item.title}`} inputMode="numeric" value={positionDrafts[identity] ?? position} onFocus={() => setPositionDrafts((current) => ({ ...current, [identity]: String(position) }))} onChange={(event) => setPositionDrafts((current) => ({ ...current, [identity]: event.target.value.replace(/\D/g, '') }))} onBlur={() => commitPosition(item)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />}
       {item.poster_url ? <img src={cardPosterUrl(item.poster_url)} alt="" /> : <span className="arrange-poster-fallback"><Clapperboard size={13} /></span>}<strong>{cleanImportedMediaTitle(item.title)}</strong>{position !== null && <small className="slot-label">{position}</small>}
-      <span className="insert-target after" aria-label={`Insert after ${item.title}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); applyDraft((current) => insertBeside(current, droppedIdentity(event), identity, 'after')); setDraggedItemId(null); }} />
+      <span className={cls('insert-target after', draggedItemId && 'enabled')} aria-label={`Insert after ${item.title}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); applyDraft((current) => insertBeside(current, droppedIdentity(event), identity, 'after')); setDraggedItemId(null); }} />
     </div>;
   };
   const renderSet = (set, setIndex) => {
@@ -1921,8 +1981,8 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
     </section>;
   };
   const errors = feedback.length ? feedback : validateShelfDraft(draft);
-  return createPortal(<div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog arrange-dialog fixed-set-arranger" role="dialog" aria-modal="true" aria-labelledby="arrange-fixed-shelf-title"><button className="close" type="button" onClick={onClose} aria-label="Close arranger"><X /></button><span className="eyebrow">ARRANGE SHELF</span><h2 id="arrange-fixed-shelf-title">{shelf.name}</h2><p className="dialog-intro">Move items only where you choose. Empty positions stay empty, and inserting beside an item never spills into another set.</p>
-    <div className="arrange-help"><span><GripVertical size={13} />Drag an item</span><span className="position-demo">12</span><span>Edit its numbered position</span><i />Drop on either edge to insert before or after.</div>
+  return createPortal(<div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog arrange-dialog fixed-set-arranger" role="dialog" aria-modal="true" aria-labelledby="arrange-fixed-shelf-title"><button className="close" type="button" onClick={onClose} aria-label="Close arranger"><X /></button><span className="eyebrow">ARRANGE SHELF</span><h2 id="arrange-fixed-shelf-title">{shelf.name}</h2>
+    <div className="arrange-history" role="toolbar" aria-label="Arrangement history"><button type="button" disabled={!history.past.length} onClick={undo}><Undo2 size={14} />Undo</button><button type="button" disabled={!history.future.length} onClick={redo}><Redo2 size={14} />Redo</button></div>
     <div className="arrange-lanes">{[0, 1].map((lane) => <section className="arrange-lane" key={lane}><h3>ROW {lane + 1} SETS</h3>{draft.sets.map((set, setIndex) => setIndex % 2 === lane && renderSet(set, setIndex))}</section>)}</div>
     <button className="add-arrange-set" type="button" onClick={() => applyDraft(appendShelfSet)}><Plus size={13} />Add next set</button>
     {errors.length > 0 && <div className="arrange-validation" role="alert"><strong>Before this shelf can be saved:</strong><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></div>}
