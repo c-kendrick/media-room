@@ -731,6 +731,10 @@
   white-space: nowrap;
 }
 
+.media-card-meta .media-owned-tag.is-placeholder {
+  visibility: hidden;
+}
+
 .media-card-meta .media-format-tag,
 .drawer-meta-tags .drawer-format-tag {
   display: inline;

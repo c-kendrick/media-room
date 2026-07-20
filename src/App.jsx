@@ -2150,7 +2150,7 @@ function MediaCard({ item, shelfRank = null, eagerPoster = false, onClick, canRa
         {tags.length > 0 && item.year && <span className="media-meta-dash">—</span>}
         {item.year && <span className="media-year">{item.year}</span>}
         {item.priorities?.map((person) => <span className="card-interest" title={person.display_name || person.username} key={person.id || person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
-        {item.owned && <span className="media-owned-tag">Owned</span>}
+        <span className={cls('media-owned-tag', !item.owned && 'is-placeholder')} aria-hidden={!item.owned}>{item.owned ? 'Owned' : '\u00a0'}</span>
       </button>
       {shelfRank !== null && <span className="shelf-rank" aria-label={`Shelf position ${shelfRank}`}>#{shelfRank}</span>}
     </article>

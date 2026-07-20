@@ -161,6 +161,14 @@ test('new shelf memberships append optimistically and atomically at the bottom',
   assert.match(migration, /public\.can_manage_collection\(media_row\.collection_id\)/);
 });
 
+test('numbered shelf ranks reserve the ownership row for every card', async () => {
+  const app = await read('src/App.jsx');
+  const layout = await read('src/media-layout.css');
+  assert.match(app, /media-owned-tag', !item\.owned && 'is-placeholder'[\s\S]*item\.owned \? 'Owned' : '\\u00a0'/);
+  assert.match(layout, /\.media-card-meta \.media-owned-tag\.is-placeholder \{\s*visibility: hidden/);
+  assert.match(app, /media-owned-tag[\s\S]*shelfRank !== null[\s\S]*className="shelf-rank"/);
+});
+
 test('collection notes are section-specific while Main Watchlist mirrors Film & TV only', async () => {
   const app = await read('src/App.jsx');
   const data = await read('src/supabase-data.js');
@@ -321,7 +329,7 @@ test('owned status is owner-controlled, optimistic, and displayed as a muted car
   assert.match(data, /star_rating,owned,runtime/);
   assert.match(data, /owned: item\.owned \?\? false/);
   assert.match(app, /setOptimisticOwned\(next\)[\s\S]*onUpdate\(\{ owned: next \}/);
-  assert.match(app, /item\.owned && <span className="media-owned-tag">Owned<\/span>/);
+  assert.match(app, /media-owned-tag', !item\.owned && 'is-placeholder'[\s\S]*item\.owned \? 'Owned'/);
   assert.match(styles, /\.media-card-meta \.media-owned-tag[\s\S]*color: #81786c/);
   assert.match(migration, /c\.owner_id = auth\.uid\(\)/);
   assert.match(migration, /before update of owned/);
