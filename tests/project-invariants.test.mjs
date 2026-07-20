@@ -1104,6 +1104,10 @@ test('signed-in navigation is remembered safely without persisting shared-link d
   const app = await read('src/App.jsx');
   assert.match(app, /const LAST_PAGE_KEY_PREFIX = 'media-room:last-page:'/);
   assert.match(app, /readLastPage\(account\.profile\.id\)/);
+  assert.match(app, /const \[collectionsReadyFor, setCollectionsReadyFor\] = useState\(null\)/);
+  assert.match(app, /const requestedAccountScope = accountScope/);
+  assert.match(app, /setCollectionsReadyFor\(requestedAccountScope\)/);
+  assert.match(app, /const collectionsPending = collectionsReadyFor !== accountScope/);
   assert.match(app, /displayedCollections\.some\(\(collection\) => collection\.id === remembered\?\.collectionId\)/);
   assert.match(app, /if \(!sharedMode\) writeLastPage\(account\?\.profile\?\.id, nextCollectionId, 'screen'\)/);
   assert.match(app, /initialSection=\{rememberedSection\.current\}/);
