@@ -1828,7 +1828,7 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
       <div className={cls('dynamic-shelves', queryLower && 'has-search-results', sectionLoading && 'is-loading')}>
         {visibleShelves.map((shelf) => {
           const arrangeItems = sortShelfItems(
-            items.filter((item) => item.lists?.includes(shelf.shelf_id)),
+            items.filter((item) => !item.optimistic && item.lists?.includes(shelf.shelf_id)),
             shelf.shelf_id,
             data.media,
           );
