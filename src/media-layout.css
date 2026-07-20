@@ -19,6 +19,13 @@
   margin-bottom: 22px;
 }
 
+.dynamic-shelves.is-loading { display: none; }
+.section-loading-state { min-height: 420px; padding: 22px 0; overflow: hidden; }
+.section-loading-head { display: grid; gap: 8px; width: min(300px, 70%); margin-bottom: 18px; }
+.section-loading-posters { display: grid; grid-template-columns: repeat(6, var(--media-card-width)); gap: var(--media-column-gap); }
+.section-loading-posters > span { display: grid; gap: 9px; }
+.section-loading-posters .skeleton-poster { width: var(--media-card-width); height: var(--media-poster-height); }
+
 .media-tabs {
   margin-bottom: 10px;
   background: rgba(255, 251, 244, .72);

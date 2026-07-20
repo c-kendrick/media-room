@@ -154,33 +154,48 @@ function sectionMediaFilter(section) {
 
 async function loadSectionDirect(collection, section, options) {
   const { fresh, accessToken } = options;
-  const shelves = await supabaseSelect(query('shelves', {
-    collection_id: 'eq.' + collection.id,
-    section: 'eq.' + section,
-    select: 'id,section,name,subtitle,is_queue_list,is_reading_list,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
-    order: 'position.asc',
-  }), { fresh, accessToken });
-  const mediaItems = await supabaseSelect(query('media_items', {
-    collection_id: 'eq.' + collection.id,
-    type: sectionMediaFilter(section),
-    select: MEDIA_CARD_SELECT,
-    order: 'created_at.asc',
-  }), { fresh, accessToken });
-  const memberships = shelves.length ? await supabaseSelect(query('shelf_media_items', {
-    shelf_id: 'in.(' + shelves.map((shelf) => shelf.id).join(',') + ')',
-    select: 'shelf_id,media_item_id,position', order: 'position.asc',
-  }), { fresh, accessToken }) : [];
+  const [shelves, mediaItems] = await Promise.all([
+    supabaseSelect(query('shelves', {
+      collection_id: 'eq.' + collection.id,
+      section: 'eq.' + section,
+      select: 'id,section,name,subtitle,is_queue_list,is_reading_list,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
+      order: 'position.asc',
+    }), { fresh, accessToken }),
+    supabaseSelect(query('media_items', {
+      collection_id: 'eq.' + collection.id,
+      type: sectionMediaFilter(section),
+      select: MEDIA_CARD_SELECT,
+      order: 'created_at.asc',
+    }), { fresh, accessToken }),
+  ]);
   const mediaIds = mediaItems.map((item) => item.id);
-  const interests = mediaIds.length ? await supabaseSelect(query('media_interest', {
-    media_item_id: 'in.(' + mediaIds.join(',') + ')', select: 'media_item_id,user_id',
-  }), { fresh, accessToken }) : [];
-  const profileIds = [...new Set(interests.map((row) => row.user_id))];
+  const workKeys = new Set(mediaItems.map(mediaReactionIdentity));
+  const [memberships, interests, visibleReactions] = await Promise.all([
+    shelves.length ? supabaseSelect(query('shelf_media_items', {
+      shelf_id: 'in.(' + shelves.map((shelf) => shelf.id).join(',') + ')',
+      select: 'shelf_id,media_item_id,position', order: 'position.asc',
+    }), { fresh, accessToken }) : [],
+    mediaIds.length ? supabaseSelect(query('media_interest', {
+      media_item_id: 'in.(' + mediaIds.join(',') + ')', select: 'media_item_id,user_id',
+    }), { fresh, accessToken }) : [],
+    accessToken && workKeys.size ? supabaseSelect(query('media_reactions', {
+      select: 'user_id,kind,work_key',
+    }), { fresh, accessToken }) : [],
+  ]);
+  // The section RPC may be unavailable while a migration is being deployed. In
+  // that case authenticated viewers must still receive their persisted stamps.
+  // Never turn a failed reaction read into an empty successful snapshot: doing
+  // so makes saved love/priority state appear to disappear after a refresh and
+  // can overwrite a correct local cache.
+  const reactions = visibleReactions.filter((row) => workKeys.has(row.work_key));
+  const profileIds = [...new Set([
+    ...interests.map((row) => row.user_id),
+    ...reactions.map((row) => row.user_id),
+  ])];
   const publicProfiles = profileIds.length ? await supabaseSelect(query('public_profiles', {
     id: 'in.(' + profileIds.join(',') + ')', select: 'id,username,display_name',
   }), { fresh, accessToken }) : [];
-  // Older databases without the section RPC retain card loading. Reactions are
-  // omitted here instead of falling back to the previous database-wide query.
-  return { shelves, mediaItems, memberships, interests, publicProfiles, reactions: [] };
+  return { shelves, mediaItems, memberships, interests, publicProfiles, reactions };
 }
 
 export async function loadCollectionFromSupabase({ collectionId, section = 'screen', fresh = false, accessToken } = {}) {
@@ -208,7 +223,8 @@ export async function loadCollectionFromSupabase({ collectionId, section = 'scre
       target_collection_id: collection.id,
       target_section: section,
     }, { fresh, accessToken });
-  } catch {
+  } catch (error) {
+    if (import.meta.env.DEV) console.warn('[Media Room] load_collection_section RPC failed; using the slower direct fallback.', error);
     payload = await loadSectionDirect(collection, section, { fresh, accessToken });
   }
   if (!payload) return null;
@@ -240,7 +256,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
 
   const collectionIds = collections.map((collection) => collection.id);
   const publicProfiles = await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh, accessToken });
-  const reactions = accessToken ? await supabaseSelect(query('media_reactions', { select: 'user_id,kind,work_key' }), { fresh, accessToken }).catch(() => []) : [];
+  const reactions = accessToken ? await supabaseSelect(query('media_reactions', { select: 'user_id,kind,work_key' }), { fresh, accessToken }) : [];
   const visibleProfileIds = new Set(publicProfiles.map((profile) => profile.id));
   const scopedProfileIds = allowedOwnerIds
     ? new Set(collections.map((collection) => collection.owner_id))

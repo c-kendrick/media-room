@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowDown,
@@ -54,6 +54,7 @@ import { buildCollectionShareUrl, buildPublicCollectionUrl, createCollectionShar
 import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUserHub, removeClubMember, requestFriend, respondClubInvitation, respondFriendRequest, transferClubOwnership, unfriend } from './social.js';
 import { applyReactionToSnapshot, mediaReactionIdentity, setMediaLoveBatch, setMediaReaction } from './media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from './identity.js';
+import { clearCachedAccount, readCachedSection, writeCachedSnapshot } from './section-cache.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -70,6 +71,23 @@ function active(rows) {
 const MAIN_WATCHLIST_ID = 'main-watchlist';
 const LAST_PAGE_KEY_PREFIX = 'media-room:last-page:';
 const MEDIA_SECTIONS = new Set(['screen', 'book', 'game']);
+
+function allowsBackgroundPrefetch() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (connection?.saveData || ['slow-2g', '2g'].includes(connection?.effectiveType)) return false;
+  return !window.matchMedia?.('(prefers-reduced-data: reduce)').matches;
+}
+
+function scheduleIdle(work) {
+  if (window.requestIdleCallback) return { id: window.requestIdleCallback(work, { timeout: 2500 }), idle: true };
+  return { id: window.setTimeout(work, 350), idle: false };
+}
+
+function cancelIdle(scheduled) {
+  if (!scheduled) return;
+  if (scheduled.idle) window.cancelIdleCallback?.(scheduled.id);
+  else window.clearTimeout(scheduled.id);
+}
 
 function readLastPage(userId) {
   if (!userId) return null;
@@ -154,6 +172,30 @@ function mediaDisplayTags(item) {
 function mediaCardDisplayTags(item) {
   if (item.type === 'book') return item.creator?.trim() ? [item.creator.trim()] : [];
   return mediaDisplayTags(item);
+}
+
+function collectionShell(collection, section = 'screen') {
+  const mainWatchlist = collection?.id === MAIN_WATCHLIST_ID;
+  return {
+    generatedAt: null,
+    storage: 'supabase',
+    schemaVersion: 2,
+    collectionId: collection?.id,
+    ownerId: collection?.owner_id || null,
+    collectionTitle: mainWatchlist ? 'Main Watchlist' : (collection?.title || 'The media room'),
+    collectionDescription: collection?.description || SECTION_NOTE_DEFAULTS.screen,
+    collectionDescriptions: {
+      screen: collection?.description || SECTION_NOTE_DEFAULTS.screen,
+      book: SECTION_NOTE_DEFAULTS.book,
+      game: SECTION_NOTE_DEFAULTS.game,
+    },
+    loadedSections: [],
+    detailedSections: [],
+    mediaShelves: [],
+    media: [],
+    mainWatchlist,
+    pendingSection: section,
+  };
 }
 
 function cardPosterUrl(url) {
@@ -328,6 +370,13 @@ function InitialLoadingScreen({ stage }) {
   </div>;
 }
 
+function SectionLoadingState() {
+  return <section className="section-loading-state" aria-live="polite" aria-label="Loading section">
+    <div className="section-loading-head"><i className="skeleton-line heading" /><i className="skeleton-line medium" /></div>
+    <div className="section-loading-posters">{[0, 1, 2, 3, 4, 5].map((item) => <span key={item}><i className="skeleton-poster" /><i className="skeleton-line wide" /></span>)}</div>
+  </section>;
+}
+
 export default function App() {
   restorePublicCollectionRoute();
   const [recoveryOpen, setRecoveryOpen] = useState(() => consumeRecoverySessionFromUrl() || new URLSearchParams(window.location.search).get('auth') === 'recovery');
@@ -355,6 +404,8 @@ export default function App() {
   const [viewAsAdmin, setViewAsAdmin] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [adminClubs, setAdminClubs] = useState([]);
+  const [adminClubsLoading, setAdminClubsLoading] = useState(false);
+  const [adminClubsReadyFor, setAdminClubsReadyFor] = useState(null);
   const [adminMainClubId, setAdminMainClubId] = useState(() => window.localStorage.getItem(ADMIN_MAIN_CLUB_KEY) || '');
   const [confirmation, setConfirmation] = useState(null);
   const [collections, setCollections] = useState([]);
@@ -369,6 +420,9 @@ export default function App() {
   const detailRequests = useRef(new Map());
   const sectionRequests = useRef(new Map());
   const sectionDetailRequests = useRef(new Map());
+  const startupKitRequest = useRef(null);
+  const previousAccountScope = useRef(null);
+  const collectionIdRef = useRef(null);
   const dataRef = useRef(null);
   const pendingLoves = useRef(new Map());
   const loveVersions = useRef(new Map());
@@ -380,6 +434,7 @@ export default function App() {
   const userSelectedCollection = useRef(false);
   const rememberedSection = useRef('screen');
   const accessToken = account?.session?.access_token;
+  const accountScope = account?.profile?.id || 'public';
   const memberClubs = userHub?.clubs || [];
   const selectedMainWatchlistClub = memberClubs.find((club) => club.id === mainWatchlistClubId);
   const mainWatchlistTitle = selectedMainWatchlistClub
@@ -399,9 +454,25 @@ export default function App() {
   const cacheSnapshot = (snapshot, requestedCollectionId = null) => {
     if (snapshot?.collectionId) snapshotCache.current.set(snapshot.collectionId, snapshot);
     if (!requestedCollectionId) snapshotCache.current.set('default', snapshot);
+    if (!sharedMode) void writeCachedSnapshot({ accountScope }, snapshot);
+  };
+
+  const clearSnapshotCaches = ({ persistent = false } = {}) => {
+    snapshotCache.current.clear();
+    sectionRequests.current.clear();
+    sectionDetailRequests.current.clear();
+    detailRequests.current.clear();
+    if (persistent) void clearCachedAccount(accountScope);
+  };
+
+  const replaceAccountCaches = (snapshot) => {
+    snapshotCache.current.clear();
+    if (snapshot?.collectionId) snapshotCache.current.set(snapshot.collectionId, snapshot);
+    void clearCachedAccount(accountScope).then(() => writeCachedSnapshot({ accountScope }, snapshot));
   };
 
   dataRef.current = data;
+  collectionIdRef.current = collectionId;
 
   const applyPendingLoves = (snapshot) => {
     if (!snapshot?.media?.length || !account?.profile) return snapshot;
@@ -420,7 +491,11 @@ export default function App() {
       setData(optimistic);
     }
     for (const [key, snapshot] of snapshotCache.current) {
-      if (snapshot?.media) snapshotCache.current.set(key, applyReactionToSnapshot(snapshot, item, 'like', enabled, person));
+      if (snapshot?.media) {
+        const updated = applyReactionToSnapshot(snapshot, item, 'like', enabled, person);
+        snapshotCache.current.set(key, updated);
+        if (!sharedMode) void writeCachedSnapshot({ accountScope }, updated);
+      }
     }
   };
 
@@ -479,9 +554,33 @@ export default function App() {
     const request = ++latestRequest.current;
     if (fresh) setRefreshing(true);
     try {
-      const loadedSnapshot = sharedMode
-        ? (publicUsername ? await loadPublicCollection(publicUsername) : await loadSharedCollection(shareToken))
-        : await loadMediaSnapshot({ fresh, collectionId: targetCollectionId, section: rememberedSection.current, accessToken, mainWatchlistOwnerIds });
+      const initialSection = rememberedSection.current;
+      if (!sharedMode && targetCollectionId && targetCollectionId !== MAIN_WATCHLIST_ID && !fresh) {
+        const memory = snapshotCache.current.get(targetCollectionId);
+        if (memory?.loadedSections?.includes(initialSection)) {
+          dataRef.current = memory;
+          setData(memory);
+          setLoading(false);
+        } else {
+          const cached = await readCachedSection({ accountScope, collectionId: targetCollectionId, section: initialSection });
+          if (cached?.snapshot) {
+            const hydrated = mergeLoadedSection(targetCollectionId, cached.snapshot);
+            dataRef.current = hydrated;
+            setData(hydrated);
+            setLoading(false);
+          }
+        }
+      }
+      let loadedSnapshot;
+      if (sharedMode) loadedSnapshot = publicUsername ? await loadPublicCollection(publicUsername) : await loadSharedCollection(shareToken);
+      else if (targetCollectionId === MAIN_WATCHLIST_ID) loadedSnapshot = await loadMediaSnapshot({ fresh, collectionId: targetCollectionId, section: initialSection, accessToken, mainWatchlistOwnerIds });
+      else if (targetCollectionId) {
+        const targetIsPublicKit = accountScope === 'public' && initialSection === 'screen'
+          && collections.some((row) => row.id === targetCollectionId && row.slug === 'kits-collection');
+        loadedSnapshot = targetIsPublicKit && startupKitRequest.current && !fresh
+          ? await startupKitRequest.current
+          : await fetchSection(targetCollectionId, initialSection, { fresh });
+      } else loadedSnapshot = await loadMediaSnapshot({ fresh, section: initialSection, accessToken });
       const progressiveSnapshot = !sharedMode && loadedSnapshot?.collectionId !== MAIN_WATCHLIST_ID && dataRef.current?.collectionId === loadedSnapshot?.collectionId
         ? mergeSectionSnapshot(dataRef.current, loadedSnapshot)
         : loadedSnapshot;
@@ -519,29 +618,55 @@ export default function App() {
     }
   };
 
-  const loadSection = async (section) => {
-    const current = dataRef.current;
-    if (!current || current.mainWatchlist || current.loadedSections?.includes(section)) return current;
-    setCollectionLoading(true);
-    try {
-      const requestKey = `${current.collectionId}:${section}`;
-      let request = sectionRequests.current.get(requestKey);
-      if (!request) {
-        request = loadMediaSnapshot({ collectionId: current.collectionId, section, accessToken }).catch((error) => {
-          sectionRequests.current.delete(requestKey);
-          throw error;
-        });
-        sectionRequests.current.set(requestKey, request);
-      }
-      const loaded = await request;
-      const merged = applyPendingLoves(mergeSectionSnapshot(dataRef.current, loaded));
+  const mergeLoadedSection = (collectionId, loaded) => {
+    const current = dataRef.current?.collectionId === collectionId
+      ? dataRef.current
+      : snapshotCache.current.get(collectionId);
+    const merged = applyPendingLoves(current ? mergeSectionSnapshot(current, loaded) : loaded);
+    cacheSnapshot(merged, collectionId);
+    if (dataRef.current?.collectionId === collectionId || collectionId === collectionIdRef.current) {
       dataRef.current = merged;
       setData(merged);
-      cacheSnapshot(merged, current.collectionId);
-      return merged;
-    } finally {
-      setCollectionLoading(false);
     }
+    return merged;
+  };
+
+  const fetchSection = (targetCollectionId, section, { fresh = false, token = accessToken } = {}) => {
+    const requestKey = `${accountScope}:${targetCollectionId}:${section}`;
+    if (fresh) sectionRequests.current.delete(requestKey);
+    let request = sectionRequests.current.get(requestKey);
+    if (!request) {
+      request = loadMediaSnapshot({ fresh, collectionId: targetCollectionId, section, accessToken: token })
+        .then((loaded) => mergeLoadedSection(targetCollectionId, loaded))
+        .catch((error) => {
+          sectionRequests.current.delete(requestKey);
+          if (import.meta.env.DEV) console.warn(`[Media Room] Section RPC/fallback failed for ${targetCollectionId}/${section}.`, error);
+          throw error;
+        });
+      sectionRequests.current.set(requestKey, request);
+    }
+    return request;
+  };
+
+  const loadSection = async (section, { collection: requestedCollectionId = dataRef.current?.collectionId, fresh = false } = {}) => {
+    if (!requestedCollectionId || requestedCollectionId === MAIN_WATCHLIST_ID) return dataRef.current;
+    const memory = dataRef.current?.collectionId === requestedCollectionId
+      ? dataRef.current
+      : snapshotCache.current.get(requestedCollectionId);
+    if (!fresh && memory?.loadedSections?.includes(section)) return memory;
+
+    let cached = null;
+    if (!fresh && !sharedMode) {
+      cached = await readCachedSection({ accountScope, collectionId: requestedCollectionId, section });
+      if (cached?.snapshot) mergeLoadedSection(requestedCollectionId, cached.snapshot);
+    }
+
+    const network = fetchSection(requestedCollectionId, section, { fresh });
+    if (cached?.snapshot) {
+      void network.catch(() => null);
+      return snapshotCache.current.get(requestedCollectionId) || cached.snapshot;
+    }
+    return network;
   };
 
   const ensureSectionDetails = async (section) => {
@@ -582,6 +707,11 @@ export default function App() {
     })().catch(() => setToast('Some collection search details could not be loaded.'));
   };
 
+  const warmCollection = (targetCollectionId, section = 'screen') => {
+    if (!allowsBackgroundPrefetch() || !targetCollectionId || targetCollectionId === MAIN_WATCHLIST_ID) return;
+    void loadSection(section, { collection: targetCollectionId }).catch(() => null);
+  };
+
   const selectCollection = (nextCollectionId, { userInitiated = true } = {}) => {
     if (nextCollectionId === collectionId || nextCollectionId === data?.collectionId) return;
     if (userInitiated) {
@@ -590,11 +720,16 @@ export default function App() {
       if (!sharedMode) writeLastPage(account?.profile?.id, nextCollectionId, 'screen');
     }
     const cached = snapshotCache.current.get(nextCollectionId);
+    const navigationCollection = nextCollectionId === MAIN_WATCHLIST_ID
+      ? { id: MAIN_WATCHLIST_ID, title: 'Main Watchlist' }
+      : collections.find((row) => row.id === nextCollectionId);
     setCollectionId(nextCollectionId);
     setSelectedMediaId(null);
     setError('');
-    if (cached) setData(cached);
-    setCollectionLoading(!cached);
+    const immediate = cached || collectionShell(navigationCollection, rememberedSection.current);
+    dataRef.current = immediate;
+    setData(immediate);
+    setCollectionLoading(false);
     setMobileNav(false);
   };
 
@@ -607,9 +742,60 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (sharedMode || startupKitRequest.current) return;
+    startupKitRequest.current = loadMediaSnapshot({ section: 'screen' })
+      .then((snapshot) => {
+        cacheSnapshot(snapshot);
+        if (import.meta.env.DEV) console.debug('[Media Room] Public Kit Film & TV startup request completed.');
+        return snapshot;
+      })
+      .catch((error) => {
+        startupKitRequest.current = null;
+        if (import.meta.env.DEV) console.warn('[Media Room] Early public section request failed; normal fallback will retry.', error);
+        throw error;
+      });
+    void startupKitRequest.current.catch(() => null);
+  }, [sharedMode]);
+
+  useEffect(() => {
+    const previous = previousAccountScope.current;
+    previousAccountScope.current = accountScope;
+    if (!previous || previous === accountScope) return;
+    snapshotCache.current.clear();
+    sectionRequests.current.clear();
+    sectionDetailRequests.current.clear();
+    detailRequests.current.clear();
+    startupKitRequest.current = null;
+    if (landingApplied) {
+      dataRef.current = null;
+      setData(null);
+      setLoading(true);
+    }
+  }, [accountScope]);
+
+  useEffect(() => {
+    if (!accessToken || !account?.profile?.id || !account.profile.approved_at || account.profile.deactivated_at) return;
+    const remembered = readLastPage(account.profile.id);
+    if (!remembered?.collectionId || remembered.collectionId === MAIN_WATCHLIST_ID) return;
+    void loadSection(remembered.section, { collection: remembered.collectionId }).catch(() => null);
+  }, [accessToken, account?.profile?.id, account?.profile?.approved_at, account?.profile?.deactivated_at]);
+
+  useEffect(() => {
     if (!sharedMode && !landingApplied) return;
     refresh();
   }, [collectionId, accessToken, mainWatchlistScopeKey, shareToken, publicUsername, landingApplied]);
+
+  useEffect(() => {
+    if (sharedMode || !data?.collectionId || data.mainWatchlist || data.storage !== 'supabase' || !allowsBackgroundPrefetch()) return undefined;
+    const targetCollectionId = data.collectionId;
+    const scheduled = scheduleIdle(async () => {
+      for (const section of MEDIA_SECTIONS) {
+        if (dataRef.current?.collectionId !== targetCollectionId) return;
+        if (!dataRef.current?.loadedSections?.includes(section)) await loadSection(section).catch(() => null);
+      }
+    });
+    return () => cancelIdle(scheduled);
+  }, [sharedMode, data?.collectionId, data?.loadedSections?.join('|')]);
 
   useEffect(() => {
     const flushWhenHidden = () => {
@@ -650,16 +836,24 @@ export default function App() {
   useEffect(() => {
     if (account?.profile?.role !== 'admin' || !accessToken) {
       setAdminClubs([]);
+      setAdminClubsLoading(false);
+      setAdminClubsReadyFor(account?.profile?.id || 'public');
       return;
     }
+    const profileId = account.profile.id;
+    setAdminClubsLoading(true);
+    setAdminClubsReadyFor(null);
     listClubs(accessToken).then((clubs) => {
       setAdminClubs(clubs || []);
       if (adminMainClubId && !(clubs || []).some((club) => club.id === adminMainClubId)) {
         window.localStorage.removeItem(ADMIN_MAIN_CLUB_KEY);
         setAdminMainClubId('');
       }
-    }).catch(() => setAdminClubs([]));
-  }, [accessToken, account?.profile?.role]);
+    }).catch(() => setAdminClubs([])).finally(() => {
+      setAdminClubsLoading(false);
+      setAdminClubsReadyFor(profileId);
+    });
+  }, [accessToken, account?.profile?.id, account?.profile?.role]);
 
   const refreshUserHub = async () => {
     if (!accessToken || !account?.profile?.approved_at || account.profile.deactivated_at) {
@@ -698,7 +892,8 @@ export default function App() {
   }, [viewAsAdmin, adminClubs, collections, data?.collectionId]);
 
   useEffect(() => {
-    if (authLoading || !collections.length || landingApplied || userSelectedCollection.current) return;
+    const visibilityPending = account?.profile?.role === 'admin' && adminClubsReadyFor !== account.profile.id;
+    if (authLoading || !collections.length || visibilityPending || landingApplied || userSelectedCollection.current) return;
     const canRestore = Boolean(account?.profile?.id && account.profile.approved_at && !account.profile.deactivated_at);
     const remembered = canRestore ? readLastPage(account.profile.id) : null;
     const rememberedCollectionIsVisible = remembered?.collectionId === MAIN_WATCHLIST_ID
@@ -711,7 +906,7 @@ export default function App() {
     rememberedSection.current = rememberedCollectionIsVisible ? remembered.section : 'screen';
     setLandingApplied(true);
     selectCollection(landingCollectionId, { userInitiated: false });
-  }, [account, authLoading, collections, landingApplied, viewAsAdmin, adminClubs]);
+  }, [account, authLoading, collections, adminClubsReadyFor, landingApplied, viewAsAdmin, adminClubs]);
 
   useEffect(() => {
     const skeletonTimer = window.setTimeout(
@@ -893,15 +1088,13 @@ export default function App() {
     const person = { id: account.profile.id, username: account.profile.username, display_name: account.profile.display_name };
     const optimisticData = applyReactionToSnapshot(data, item, kind, enabled, person);
     setData(optimisticData);
-    snapshotCache.current.clear();
-    cacheSnapshot(optimisticData, data.collectionId);
+    replaceAccountCaches(optimisticData);
     try {
       await setMediaReaction(account.session.access_token, item.database_id, kind, enabled);
       setToast(enabled ? 'Priority Watch added.' : 'Priority Watch removed.');
     } catch (error) {
       setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
-      snapshotCache.current.clear();
-      cacheSnapshot(previousData, previousData.collectionId);
+      replaceAccountCaches(previousData);
       setToast('Priority Watch could not be updated. Previous state restored.');
       throw error;
     }
@@ -925,6 +1118,14 @@ export default function App() {
     }
   };
 
+  const warmCollectionFromNav = (event) => {
+    const button = event.target.closest('button');
+    if (!button || !event.currentTarget.contains(button)) return;
+    const navButtons = [...event.currentTarget.querySelectorAll('button')];
+    const collection = displayedCollections[navButtons.indexOf(button) - 1];
+    if (collection) warmCollection(collection.id);
+  };
+
   return (
     <div className={cls('app-shell media-only-shell public-media-shell', navCollapsed && 'nav-collapsed', sharedMode && 'shared-collection-shell')}>
       <div className="paper-texture" />
@@ -933,7 +1134,7 @@ export default function App() {
           <span className="brand-mark">KM</span>
           <span><strong>Kit’s Media<br />Room</strong></span>
         </button>
-        {!sharedMode && <nav>
+        {!sharedMode && <nav onMouseOver={warmCollectionFromNav} onFocusCapture={warmCollectionFromNav} onPointerDown={warmCollectionFromNav}>
           {data?.storage === 'supabase' && <button className={data.mainWatchlist ? 'active' : ''} onClick={() => selectCollection(MAIN_WATCHLIST_ID)}><ListOrdered size={17} />Main Watchlist</button>}
           <small className="collection-nav-label">COLLECTIONS</small>
           {data?.storage === 'supabase' && displayedCollections.map((collection) => <button key={collection.id} draggable={isAdmin} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)} onDragStart={(event) => { if (!isAdmin) return; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', collection.id); setDraggedCollectionId(collection.id); }} onDragEnd={() => setDraggedCollectionId(null)} onDragOver={(event) => { if (isAdmin && draggedCollectionId) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); dropCollection(collection.id); }}>
@@ -1154,7 +1355,7 @@ export default function App() {
           account={account}
           onClose={() => setAccountOpen(false)}
           onSignedIn={(nextAccount) => {
-            snapshotCache.current.clear();
+            clearSnapshotCaches();
             setAccount(nextAccount);
             setViewAsAdmin(false);
             setAccountOpen(false);
@@ -1163,7 +1364,7 @@ export default function App() {
             setToast('Signed in securely.');
           }}
           onSignedOut={() => {
-            snapshotCache.current.clear();
+            clearSnapshotCaches();
             setAccount(null);
             setViewAsAdmin(false);
             setAccountOpen(false);
@@ -1174,14 +1375,14 @@ export default function App() {
           onManageUsers={() => { setAccountOpen(false); setAdminOpen(true); }}
           viewAsAdmin={viewAsAdmin}
           onViewAsAdminChange={setViewAsAdmin}
-          onAccountUpdated={async (profile) => { setAccount((current) => ({ ...current, profile })); const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); snapshotCache.current.clear(); await refresh({ fresh: true, targetCollectionId: data.collectionId }); setToast('Account settings saved.'); }}
+          onAccountUpdated={async (profile) => { setAccount((current) => ({ ...current, profile })); const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); clearSnapshotCaches({ persistent: true }); await refresh({ fresh: true, targetCollectionId: data.collectionId }); setToast('Account settings saved.'); }}
           notify={setToast}
         />
       )}
       {recoveryOpen && <RecoveryPasswordDialog account={account} onClose={() => setRecoveryOpen(false)} onComplete={async () => { await signOut(); setAccount(null); setRecoveryOpen(false); setAccountOpen(true); window.history.replaceState({}, '', appSiteUrl()); setToast('Password updated. Sign in with your new password.'); }} />}
 
       {shareOpen && ownCollection && <ShareCollectionDialog accessToken={accessToken} collectionId={ownCollection.id} collectionTitle={ownCollection.title} notify={setToast} onClose={() => setShareOpen(false)} />}
-      {usersOpen && <UsersDialog accessToken={accessToken} currentUser={account.profile} hub={userHub} setHub={setUserHub} refreshHub={refreshUserHub} notify={setToast} onClose={() => setUsersOpen(false)} onVisibilityChanged={async () => { const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); snapshotCache.current.clear(); }} />}
+      {usersOpen && <UsersDialog accessToken={accessToken} currentUser={account.profile} hub={userHub} setHub={setUserHub} refreshHub={refreshUserHub} notify={setToast} onClose={() => setUsersOpen(false)} onVisibilityChanged={async () => { const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); clearSnapshotCaches({ persistent: true }); }} />}
 
       {adminOpen && <AdminUsers accessToken={accessToken} clubs={adminClubs} onClubsChange={setAdminClubs} mainWatchlistClubId={adminMainClubId} onMainWatchlistClubChange={(clubId) => {
         if (clubId) window.localStorage.setItem(ADMIN_MAIN_CLUB_KEY, clubId);
@@ -1191,7 +1392,7 @@ export default function App() {
       }} requestConfirmation={setConfirmation} onClose={() => setAdminOpen(false)} onUsersChanged={async () => {
         const nextCollections = await loadPublicCollections({ fresh: true, accessToken });
         setCollections(nextCollections);
-        snapshotCache.current.clear();
+        clearSnapshotCaches({ persistent: true });
         if (data.collectionId === MAIN_WATCHLIST_ID) {
           await refresh({ fresh: true, targetCollectionId: MAIN_WATCHLIST_ID });
         } else if (!nextCollections.some((collection) => collection.id === data.collectionId)) {
@@ -1278,7 +1479,6 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
   const [ownershipFilters, setOwnershipFilters] = useState([]);
   const [stampFilters, setStampFilters] = useState([]);
   const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
-  const [sectionLoading, setSectionLoading] = useState(false);
   const [creatingShelf, setCreatingShelf] = useState(false);
   const [addingMedia, setAddingMedia] = useState(false);
   const [bulkImportType, setBulkImportType] = useState(null);
@@ -1367,22 +1567,14 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
   const queueLabel = section === 'book' ? 'to read' : section === 'game' ? 'to play' : 'to watch';
   const advancedFilterCount = [listFilters, typeFilters, stampFilters, ratingFilters, ownershipFilters, formatFilters, genreFilters]
     .reduce((total, values) => total + values.length, 0);
+  const sectionLoading = Boolean(!data.mainWatchlist && !data.loadedSections?.includes(section));
 
   useEffect(() => {
     if (query.trim()) onEnsureSectionDetails?.(section).catch(() => notify('Some detailed search fields could not be loaded.'));
   }, [query, section]);
 
-  const switchSection = async (next) => {
-    if (next === section || sectionLoading) return;
-    setSectionLoading(true);
-    try {
-      await onLoadSection?.(next);
-    } catch {
-      notify(`${sectionName(next)} could not be loaded.`);
-      return;
-    } finally {
-      setSectionLoading(false);
-    }
+  const switchSection = (next) => {
+    if (next === section) return;
     setSection(next);
     onSectionChange(next);
     setQuery('');
@@ -1393,6 +1585,7 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
     setRatingFilters([]);
     setOwnershipFilters([]);
     setStampFilters([]);
+    void onLoadSection?.(next).catch(() => notify(`${sectionName(next)} could not be loaded.`));
   };
 
   const loadCompleteCollection = async ({ details = false } = {}) => {
@@ -1534,9 +1727,9 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
 
       <div className="media-command public-media-command">
         {!data.mainWatchlist && <div className="media-tabs" aria-busy={sectionLoading}>
-          <button disabled={sectionLoading} className={section === 'screen' ? 'active' : ''} onClick={() => switchSection('screen')}><Film />Film & TV</button>
-          <button disabled={sectionLoading} className={section === 'book' ? 'active' : ''} onClick={() => switchSection('book')}><BookOpen />Books</button>
-          <button disabled={sectionLoading} className={section === 'game' ? 'active' : ''} onClick={() => switchSection('game')}><Gamepad2 />Video Games</button>
+          <button className={section === 'screen' ? 'active' : ''} onClick={() => switchSection('screen')}><Film />Film & TV</button>
+          <button className={section === 'book' ? 'active' : ''} onClick={() => switchSection('book')}><BookOpen />Books</button>
+          <button className={section === 'game' ? 'active' : ''} onClick={() => switchSection('game')}><Gamepad2 />Video Games</button>
         </div>}
 
         <div className="media-search-row">
@@ -1562,9 +1755,11 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
         <MultiSelect label="All genres" values={genreFilters} options={genres.map((value) => [value, value])} onChange={setGenreFilters} />
       </>} />}
 
-      {queryLower && <SearchResultsSection items={searchResults} onOpen={openMedia} canRate={canEdit} onRate={onStarRatingChange} canReact={canReact} currentUserId={currentUserId} onReaction={onReaction} />}
+      {!sectionLoading && queryLower && <SearchResultsSection items={searchResults} onOpen={openMedia} canRate={canEdit} onRate={onStarRatingChange} canReact={canReact} currentUserId={currentUserId} onReaction={onReaction} />}
 
-      <div className={cls('dynamic-shelves', queryLower && 'has-search-results')}>
+      {sectionLoading && <SectionLoadingState />}
+
+      <div className={cls('dynamic-shelves', queryLower && 'has-search-results', sectionLoading && 'is-loading')}>
         {visibleShelves.map((shelf) => {
           const shelfItems = sortShelfItems(
             contentFiltered.filter((item) => item.lists?.includes(shelf.shelf_id)),
@@ -1577,8 +1772,8 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
         })}
       </div>
 
-      {!randomPool.length && <Empty>No media matches those filters.</Empty>}
-      {!data.mainWatchlist && (canEdit || isAdmin) && <section className="collection-tools">
+      {!sectionLoading && !randomPool.length && <Empty>No media matches those filters.</Empty>}
+      {!sectionLoading && !data.mainWatchlist && (canEdit || isAdmin) && <section className="collection-tools">
         <div className="collection-tools-intro"><span className="eyebrow">COLLECTION TOOLS</span><p>{canEdit ? 'Manage this section without cluttering the shelves.' : 'Administrative backup and artwork tools.'}</p></div>
         <div className="collection-tool-actions">
           {canEdit && <Button className="quiet-button create-shelf-button" icon={Plus} onClick={() => setCreatingShelf(true)}>Create Shelf</Button>}
@@ -1626,11 +1821,13 @@ function SearchResultsSection({ items, onOpen, canRate, onRate }) {
 }
 
 function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorderShelf, canCurateMain, canRemoveMirror, onRemoveMirror, onToggleMain, canMoveUp, canMoveDown, onMoveShelf, onAdd, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
+  const shelfRef = useRef(null);
   const trackRef = useRef(null);
   const [draggedId, setDraggedId] = useState(null);
   const [displayItems, setDisplayItems] = useState(items);
   const [arranging, setArranging] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
+  const [eagerPosters, setEagerPosters] = useState(false);
   const serverOrderKey = items.map((item) => `${item.database_id}:${item.updated_at || ''}:${item.star_rating ?? ''}:${item.list_positions?.[shelf.shelf_id] ?? ''}:${(item.interests || []).map((person) => person.id || person.username).sort().join(',')}:${(item.likes || []).map((person) => person.id).sort().join(',')}:${(item.priorities || []).map((person) => person.id).sort().join(',')}`).join('|');
   useEffect(() => { setDisplayItems(items); }, [serverOrderKey]);
   const rowBreak = Math.ceil(displayItems.length / 2);
@@ -1638,6 +1835,10 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
   const pageCount = Math.ceil(Math.max(...displayRows.map((row) => row.length), 0) / 7);
   const displayPages = Array.from({ length: pageCount }, (_, pageIndex) => displayRows.map((row) => row.slice(pageIndex * 7, (pageIndex + 1) * 7)));
   useEffect(() => { setCurrentPage((page) => Math.min(page, Math.max(pageCount - 1, 0))); }, [pageCount]);
+  useLayoutEffect(() => {
+    const bounds = shelfRef.current?.getBoundingClientRect();
+    setEagerPosters(Boolean(bounds && bounds.top < window.innerHeight * 1.15 && bounds.bottom > 0));
+  }, [shelf.shelf_id]);
   const scrollPage = (direction) => {
     const track = trackRef.current;
     if (!track) return;
@@ -1648,7 +1849,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
   };
 
   return (
-    <section className={cls('media-shelf', shelfDragging && 'shelf-dragging')} onDragOver={(event) => canReorderShelf && event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (canReorderShelf) onShelfDrop?.(); }}>
+    <section ref={shelfRef} className={cls('media-shelf', shelfDragging && 'shelf-dragging')} onDragOver={(event) => canReorderShelf && event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (canReorderShelf) onShelfDrop?.(); }}>
       <div className="shelf-head">
         <div className="shelf-title">
           {canReorderShelf && <button className="shelf-drag-handle" aria-label={`Drag ${shelf.name} to reorder`} title="Drag to reorder shelf" draggable onDragStart={onShelfDragStart} onDragEnd={onShelfDragEnd}><GripVertical size={16} /></button>}
@@ -1663,7 +1864,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
       </div>
       <div className="poster-track" ref={trackRef} onScroll={(event) => { const page = event.currentTarget.querySelector('.poster-page'); const width = (page?.offsetWidth || event.currentTarget.clientWidth) + 24; if (width > 0) setCurrentPage(Math.max(0, Math.min(Math.round(event.currentTarget.scrollLeft / width), Math.max(pageCount - 1, 0)))); }}>
         {displayPages.map((pageRows, pageIndex) => <div className="poster-page" key={pageIndex}>
-          {pageRows.flat().map((item) => <MediaCard key={item.item_id} item={item} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} draggable={canEdit && !item.optimistic} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const previous = [...displayItems]; const next = [...displayItems]; const from = next.findIndex((entry) => entry.database_id === draggedId); const to = next.findIndex((entry) => entry.database_id === item.database_id); next.splice(to, 0, next.splice(from, 1)[0]); setDisplayItems(next); setDraggedId(null); try { await onReorder(next.map((entry) => entry.database_id)); } catch { setDisplayItems(previous); } }} />)}
+          {pageRows.flat().map((item, itemIndex) => <MediaCard key={item.item_id} item={item} eagerPoster={eagerPosters && pageIndex === 0 && itemIndex < 8} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} draggable={canEdit && !item.optimistic} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const previous = [...displayItems]; const next = [...displayItems]; const from = next.findIndex((entry) => entry.database_id === draggedId); const to = next.findIndex((entry) => entry.database_id === item.database_id); next.splice(to, 0, next.splice(from, 1)[0]); setDisplayItems(next); setDraggedId(null); try { await onReorder(next.map((entry) => entry.database_id)); } catch { setDisplayItems(previous); } }} />)}
         </div>)}
         {!displayItems.length && <div className="empty-poster">No items on this shelf yet.</div>}
       </div>
@@ -1785,14 +1986,40 @@ function ReactionControls({ item, canReact, currentUserId, onReaction, labelled 
   </span>;
 }
 
-function MediaCard({ item, onClick, canRate, onRate, draggable, dragging, onDragStart, onDragEnd, onDrop }) {
+function ProgressivePoster({ src, alt, eager = false }) {
+  const imageRef = useRef(null);
+  const [shouldLoad, setShouldLoad] = useState(eager);
+  useEffect(() => {
+    if (eager) {
+      setShouldLoad(true);
+      return undefined;
+    }
+    if (shouldLoad) return undefined;
+    const image = imageRef.current;
+    if (!image || !('IntersectionObserver' in window)) {
+      setShouldLoad(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setShouldLoad(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '1400px 500px' });
+    observer.observe(image);
+    return () => observer.disconnect();
+  }, [eager, shouldLoad]);
+  return <img ref={imageRef} src={shouldLoad ? src : undefined} alt={alt} loading={eager ? 'eager' : 'lazy'} fetchPriority={eager ? 'high' : 'auto'} decoding="async" />;
+}
+
+function MediaCard({ item, eagerPoster = false, onClick, canRate, onRate, draggable, dragging, onDragStart, onDragEnd, onDrop }) {
   const tags = mediaCardDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
   return (
     <article className={cls('media-card', dragging && 'is-dragging', item.optimistic && 'is-optimistic')} onClick={onClick} draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={(event) => draggable && event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop?.(); }}>
       <button className="media-card-open" type="button" title="Open item">
         {item.poster_url
-          ? <img src={cardPosterUrl(item.poster_url)} alt={`${title} poster`} loading="lazy" decoding="async" />
+          ? <ProgressivePoster src={cardPosterUrl(item.poster_url)} alt={`${title} poster`} eager={eagerPoster} />
           : <span className="poster-fallback"><Clapperboard /><span>{title}</span></span>}
         <span className="media-card-title">{title}</span>
       </button>
@@ -1868,7 +2095,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
             <p className="creator">{item.director || item.creator}</p>
             <div className="drawer-status-actions">
               <ReactionControls item={item} canReact={canReact} currentUserId={currentUserId} onReaction={(_item, kind, enabled) => onReaction(kind, enabled)} labelled />
-              {canEdit && <button className={cls('owned-toggle', optimisticOwned && 'active')} onClick={async () => { const previous = optimisticOwned; const next = !previous; setOptimisticOwned(next); try { await onUpdate({ owned: next }, { success: next ? 'Marked as owned.' : 'Owned tag removed.', failure: 'Owned status could not be saved.' }); } catch { setOptimisticOwned(previous); } }}><span>{optimisticOwned ? <Check size={12} /> : '+'}</span>{optimisticOwned ? 'Owned' : 'Mark as Owned'}</button>}
+              {canEdit && <button className={cls('owned-toggle', optimisticOwned && 'active')} onClick={async () => { const previous = optimisticOwned; const next = !previous; setOptimisticOwned(next); try { await onUpdate({ owned: next }, { success: next ? 'Marked as owned.' : 'Owned tag removed.', failure: 'Owned status could not be saved.' }); } catch { setOptimisticOwned(previous); } }}><span>{optimisticOwned ? <Check size={12} /> : <Plus size={12} />}</span>{optimisticOwned ? 'Owned' : 'Mark as Owned'}</button>}
             </div>
             {canEdit && <div className="drawer-owner-actions">
               <Button className="drawer-edit-button primary" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>
