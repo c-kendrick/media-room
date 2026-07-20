@@ -832,7 +832,7 @@ test('member identities use real names, stable themed avatars, and word-based Cl
   assert.match(app, /className=\{cls\('account-button', account && 'signed-in-account'\)\}/);
   assert.match(app, /<UserAvatar person=\{account\.profile\} size="account"/);
   assert.match(app, /className="account-identity"><UserAvatar person=\{account\.profile\} size="large"/);
-  assert.match(styles, /@media\(max-width:760px\)\{[\s\S]*?\.share-collection-button,\.topbar-action-button,\.account-button\{width:40px!important;padding:0!important;justify-content:center!important\}/);
+  assert.match(styles, /@media\(max-width:760px\)\{[\s\S]*?\.share-collection-button,\.topbar-action-button,\.account-button\{width:40px!important;padding:0!important;display:grid!important;place-items:center!important;gap:0!important\}/);
   assert.match(styles, /\.account-desktop-label\{display:none\}/);
   assert.match(styles, /\.avatar-tone-9 \{ background: #d6cec9; color: #514b47; \}/);
   assert.match(styles, /\.account-button \.user-avatar-account \{ width: 28px/);
@@ -1072,4 +1072,52 @@ test('mobile page width is constrained while poster shelves keep their own horiz
   assert.match(mediaStyles, /\.poster-track \{[\s\S]*overflow-x: auto;/);
   assert.match(mediaStyles, /@media \(max-width: 760px\)[\s\S]*\.media-drawer \{[\s\S]*width: 100%;/);
   assert.doesNotMatch(mediaStyles, /@media \(max-width: 760px\)[\s\S]*\.media-drawer \{[\s\S]*width: 100vw;/);
+});
+
+test('reaction identities are visible only to self, Friends, and shared Club members', async () => {
+  const migration = await read('supabase/migrations/20260720010000_restrict_media_reaction_visibility.sql');
+  assert.match(migration, /create or replace function public\.can_view_media_reaction\(target_user_id uuid\)/);
+  assert.match(migration, /target_user_id = auth\.uid\(\)/);
+  assert.match(migration, /public\.are_friends\(target_user_id\)/);
+  assert.match(migration, /public\.shares_club_with\(target_user_id\)/);
+  assert.doesNotMatch(migration, /can_view_collection|is_kit_profile|is_admin/);
+  assert.match(migration, /revoke all on function public\.can_view_media_reaction\(uuid\) from public, anon/);
+  assert.match(migration, /grant execute on function public\.can_view_media_reaction\(uuid\) to authenticated/);
+});
+
+test('media filters live in an Advanced Search dialog and mobile top-bar icons are centred', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /function AdvancedSearchDialog/);
+  assert.match(app, /aria-labelledby="advanced-search-title"/);
+  assert.match(app, /<div className="media-search-row">[\s\S]*Advanced Search/);
+  assert.doesNotMatch(app, /<div className=\{cls\('media-filters'/);
+  assert.match(app, /advancedSearchOpen && <AdvancedSearchDialog[\s\S]*<MultiSelect label="All lists"/);
+  assert.match(styles, /\.advanced-filter-grid\{display:grid/);
+  assert.match(styles, /\.share-collection-button,\.topbar-action-button,\.account-button\{[^}]*display:grid!important;place-items:center!important;gap:0!important/);
+});
+
+test('the Media Room ships an installable standalone web app shell without caching shared data', async () => {
+  const html = await read('index.html');
+  const main = await read('src/main.jsx');
+  const worker = await read('public/sw.js');
+  const manifest = JSON.parse(await read('public/manifest.webmanifest'));
+  const icon192 = await readFile(new URL('../public/icons/media-room-192.png', import.meta.url));
+  const icon512 = await readFile(new URL('../public/icons/media-room-512.png', import.meta.url));
+  const maskable512 = await readFile(new URL('../public/icons/media-room-maskable-512.png', import.meta.url));
+
+  assert.equal(manifest.display, 'standalone');
+  assert.equal(manifest.start_url, './');
+  assert.equal(manifest.scope, './');
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '192x192'));
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '512x512' && icon.purpose === 'any'));
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '512x512' && icon.purpose === 'maskable'));
+  assert.ok(icon192.length > 1000 && icon512.length > 1000 && maskable512.length > 1000);
+  assert.match(html, /rel="manifest" href="%BASE_URL%manifest\.webmanifest"/);
+  assert.match(html, /rel="apple-touch-icon"/);
+  assert.match(html, /apple-mobile-web-app-capable/);
+  assert.match(main, /navigator\.serviceWorker\.register\(workerUrl, \{ scope \}\)/);
+  assert.match(worker, /request\.method !== 'GET' \|\| url\.origin !== self\.location\.origin/);
+  assert.match(worker, /if \(url\.href === APP_ROOT\)/);
+  assert.doesNotMatch(worker, /supabase|collection_share|media_reactions/);
 });

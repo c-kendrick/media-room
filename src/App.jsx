@@ -257,6 +257,17 @@ function MultiSelect({ label, values, options, onChange }) {
   );
 }
 
+function AdvancedSearchDialog({ filters, onClear, onClose }) {
+  useEscape(onClose);
+  return createPortal(<div className="modal-layer advanced-search-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="record-dialog advanced-search-dialog" role="dialog" aria-modal="true" aria-labelledby="advanced-search-title">
+      <div className="dialog-head"><div><span className="eyebrow">REFINE RESULTS</span><h2 id="advanced-search-title">Advanced Search</h2></div><button type="button" onClick={onClose} aria-label="Close Advanced Search"><X size={17} /></button></div>
+      <div className="advanced-search-body"><p>Choose any combination of filters. Results update immediately behind this dialog.</p><div className="advanced-filter-grid">{filters}</div></div>
+      <div className="dialog-footer"><button className="secondary-button" type="button" onClick={onClear}>Clear filters</button><Button className="primary" onClick={onClose}>Done</Button></div>
+    </section>
+  </div>, document.body);
+}
+
 export default function App() {
   restorePublicCollectionRoute();
   const [recoveryOpen, setRecoveryOpen] = useState(() => consumeRecoverySessionFromUrl() || new URLSearchParams(window.location.search).get('auth') === 'recovery');
@@ -1094,6 +1105,7 @@ function MediaView({ data, onDataChange, notify, openMedia, canEdit, canReact, c
   const [ratingFilters, setRatingFilters] = useState([]);
   const [ownershipFilters, setOwnershipFilters] = useState([]);
   const [stampFilters, setStampFilters] = useState([]);
+  const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const [creatingShelf, setCreatingShelf] = useState(false);
   const [addingMedia, setAddingMedia] = useState(false);
   const [bulkImportType, setBulkImportType] = useState(null);
@@ -1180,6 +1192,8 @@ function MediaView({ data, onDataChange, notify, openMedia, canEdit, canReact, c
     ?? (section === 'screen' ? data.collectionDescription : '');
   const collectionStats = collectionSummaryStats(items, shelves, section);
   const queueLabel = section === 'book' ? 'to read' : section === 'game' ? 'to play' : 'to watch';
+  const advancedFilterCount = [listFilters, typeFilters, stampFilters, ratingFilters, ownershipFilters, formatFilters, genreFilters]
+    .reduce((total, values) => total + values.length, 0);
 
   const switchSection = (next) => {
     setSection(next);
@@ -1204,6 +1218,16 @@ function MediaView({ data, onDataChange, notify, openMedia, canEdit, canReact, c
 
   const clearFilters = () => {
     setQuery('');
+    setListFilters([]);
+    setFormatFilters([]);
+    setGenreFilters([]);
+    setTypeFilters([]);
+    setRatingFilters([]);
+    setOwnershipFilters([]);
+    setStampFilters([]);
+  };
+
+  const clearAdvancedFilters = () => {
     setListFilters([]);
     setFormatFilters([]);
     setGenreFilters([]);
@@ -1317,15 +1341,9 @@ function MediaView({ data, onDataChange, notify, openMedia, canEdit, canReact, c
           <button className={section === 'game' ? 'active' : ''} onClick={() => switchSection('game')}><Gamepad2 />Video Games</button>
         </div>}
 
-        <div className={cls('media-filters', section === 'screen' && 'has-type')}>
+        <div className="media-search-row">
           <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}…`} /></label>
-          <MultiSelect label="All lists" values={listFilters} options={shelves.map((shelf) => [shelf.shelf_id, data.mainWatchlist ? <span className="owned-list-option"><small>{shelf.ownerName}</small><b>{shelf.name}</b></span> : shelf.name])} onChange={setListFilters} />
-          {section === 'screen' && !data.mainWatchlist && <MultiSelect label="Film & TV" values={typeFilters} options={sectionTypes} onChange={setTypeFilters} />}
-          {data.mainWatchlist && <MultiSelect label="Interest" values={stampFilters} options={['1', '2', '3', '4'].map((count) => [count, count === '1' ? '1 Stamp' : count === '4' ? '4+ People' : `${count} People`])} onChange={setStampFilters} />}
-          <MultiSelect label="Rating" values={ratingFilters} options={STAR_RATING_STEPS.map((rating) => [String(rating), `${rating} ${rating === 1 ? 'star' : 'stars'}`])} onChange={setRatingFilters} />
-          <MultiSelect label="Ownership" values={ownershipFilters} options={OWNERSHIP_FILTER_OPTIONS} onChange={setOwnershipFilters} />
-          <MultiSelect label={section === 'game' ? 'All platforms' : 'All formats'} values={formatFilters} options={formats.map((value) => [value, value])} onChange={setFormatFilters} />
-          <MultiSelect label="All genres" values={genreFilters} options={genres.map((value) => [value, value])} onChange={setGenreFilters} />
+          <button className={cls('advanced-search-trigger', advancedFilterCount > 0 && 'active')} type="button" onClick={() => setAdvancedSearchOpen(true)}><SlidersHorizontal size={15} /><span>Advanced Search</span>{advancedFilterCount > 0 && <b>{advancedFilterCount}</b>}</button>
         </div>
 
         <div className="media-action-row public-actions">
@@ -1335,6 +1353,16 @@ function MediaView({ data, onDataChange, notify, openMedia, canEdit, canReact, c
           )}
         </div>
       </div>
+
+      {advancedSearchOpen && <AdvancedSearchDialog onClose={() => setAdvancedSearchOpen(false)} onClear={clearAdvancedFilters} filters={<>
+        <MultiSelect label="All lists" values={listFilters} options={shelves.map((shelf) => [shelf.shelf_id, data.mainWatchlist ? <span className="owned-list-option"><small>{shelf.ownerName}</small><b>{shelf.name}</b></span> : shelf.name])} onChange={setListFilters} />
+        {section === 'screen' && !data.mainWatchlist && <MultiSelect label="Film & TV" values={typeFilters} options={sectionTypes} onChange={setTypeFilters} />}
+        {data.mainWatchlist && <MultiSelect label="Interest" values={stampFilters} options={['1', '2', '3', '4'].map((count) => [count, count === '1' ? '1 Stamp' : count === '4' ? '4+ People' : `${count} People`])} onChange={setStampFilters} />}
+        <MultiSelect label="Rating" values={ratingFilters} options={STAR_RATING_STEPS.map((rating) => [String(rating), `${rating} ${rating === 1 ? 'star' : 'stars'}`])} onChange={setRatingFilters} />
+        <MultiSelect label="Ownership" values={ownershipFilters} options={OWNERSHIP_FILTER_OPTIONS} onChange={setOwnershipFilters} />
+        <MultiSelect label={section === 'game' ? 'All platforms' : 'All formats'} values={formatFilters} options={formats.map((value) => [value, value])} onChange={setFormatFilters} />
+        <MultiSelect label="All genres" values={genreFilters} options={genres.map((value) => [value, value])} onChange={setGenreFilters} />
+      </>} />}
 
       {queryLower && <SearchResultsSection items={searchResults} onOpen={openMedia} canRate={canEdit} onRate={onStarRatingChange} canReact={canReact} currentUserId={currentUserId} onReaction={onReaction} />}
 
