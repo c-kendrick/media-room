@@ -167,7 +167,7 @@ test('collection notes are section-specific while Main Watchlist mirrors Film & 
 test('opening Main Watchlist has no redundant All Watchlists tab', async () => {
   const app = await read('src/App.jsx');
   assert.match(app, /<MediaView key=\{data\.collectionId\}/);
-  assert.match(app, /useState\('screen'\)/);
+  assert.match(app, /useState\(\(\) => MEDIA_SECTIONS\.has\(initialSection\) \? initialSection : 'screen'\)/);
   assert.doesNotMatch(app, />All Watchlists</);
   assert.match(app, /!data\.mainWatchlist && <div className="media-tabs">/);
 });
@@ -832,7 +832,7 @@ test('member identities use real names, stable themed avatars, and word-based Cl
   assert.match(app, /className=\{cls\('account-button', account && 'signed-in-account'\)\}/);
   assert.match(app, /<UserAvatar person=\{account\.profile\} size="account"/);
   assert.match(app, /className="account-identity"><UserAvatar person=\{account\.profile\} size="large"/);
-  assert.match(styles, /@media\(max-width:760px\)\{[\s\S]*?\.share-collection-button,\.topbar-action-button,\.account-button\{width:40px!important;padding:0!important;display:grid!important;place-items:center!important;gap:0!important\}/);
+  assert.match(styles, /@media\(max-width:760px\)\{[\s\S]*?\.share-collection-button,\.topbar-action-button,\.account-button\{width:40px!important;padding:0!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:0!important\}/);
   assert.match(styles, /\.account-desktop-label\{display:none\}/);
   assert.match(styles, /\.avatar-tone-9 \{ background: #d6cec9; color: #514b47; \}/);
   assert.match(styles, /\.account-button \.user-avatar-account \{ width: 28px/);
@@ -1094,7 +1094,25 @@ test('media filters live in an Advanced Search dialog and mobile top-bar icons a
   assert.doesNotMatch(app, /<div className=\{cls\('media-filters'/);
   assert.match(app, /advancedSearchOpen && <AdvancedSearchDialog[\s\S]*<MultiSelect label="All lists"/);
   assert.match(styles, /\.advanced-filter-grid\{display:grid/);
-  assert.match(styles, /\.share-collection-button,\.topbar-action-button,\.account-button\{[^}]*display:grid!important;place-items:center!important;gap:0!important/);
+  assert.match(styles, /\.share-collection-button,\.topbar-action-button,\.account-button\{[^}]*display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:0!important/);
+});
+
+test('signed-in navigation is remembered safely without persisting shared-link destinations', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /const LAST_PAGE_KEY_PREFIX = 'media-room:last-page:'/);
+  assert.match(app, /readLastPage\(account\.profile\.id\)/);
+  assert.match(app, /displayedCollections\.some\(\(collection\) => collection\.id === remembered\?\.collectionId\)/);
+  assert.match(app, /if \(!sharedMode\) writeLastPage\(account\?\.profile\?\.id, nextCollectionId, 'screen'\)/);
+  assert.match(app, /initialSection=\{rememberedSection\.current\}/);
+  assert.match(app, /onSectionChange=\{\(section\) => \{ rememberedSection\.current = section; if \(!sharedMode\) writeLastPage/);
+});
+
+test('shelf removal uses a muted Bin icon instead of an ambiguous X', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /className="delete-shelf" aria-label=\{`Move \$\{shelf\.name\} to Bin`\}[\s\S]*?<Trash2 size=\{15\} \/>/);
+  assert.doesNotMatch(app, /className="delete-shelf"[\s\S]{0,180}<X size=\{15\}/);
+  assert.match(styles, /\.delete-shelf\{opacity:\.48\}/);
 });
 
 test('the Media Room ships an installable standalone web app shell without caching shared data', async () => {
