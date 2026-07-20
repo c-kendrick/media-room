@@ -329,10 +329,6 @@
   cursor: pointer;
 }
 
-.shelf-head .delete-shelf {
-  color: #9c5747;
-}
-
 /* No scroll snapping: mouse, trackpad and scrollbar movement can stop anywhere. */
 .poster-track {
   display: flex;
