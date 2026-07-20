@@ -450,6 +450,14 @@ test('shelf controls use consistent spacing and headline-style labels', async ()
   assert.match(styles, /\.shelf-content-actions\{[^}]*gap:7px/);
 });
 
+test('the shelf arranger is a viewport modal and shelf moves follow the reordered shelf', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /function ArrangeShelfDialog[\s\S]*return createPortal\([\s\S]*document\.body\)/);
+  assert.match(app, /arrange-dialog" role="dialog" aria-modal="true"/);
+  assert.match(app, /const moveShelfWithViewport = \(direction\) =>[\s\S]*onMoveShelf\(direction\)[\s\S]*scrollIntoView\(\{ behavior: 'smooth', block: 'center' \}\)/);
+  assert.match(app, /Move shelf down[\s\S]*moveShelfWithViewport\(1\)/);
+});
+
 test('queue shelf settings are explicit in every section and independent from Main Watchlist', async () => {
   const app = await read('src/App.jsx');
   const data = await read('src/supabase-data.js');
