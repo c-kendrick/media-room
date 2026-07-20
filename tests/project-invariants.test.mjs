@@ -13,7 +13,7 @@ import { appSiteUrl, authenticatedProfilePath, selectAuthenticatedProfile, signu
 import { applyReactionToSnapshot, mediaReactionIdentity } from '../src/media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from '../src/identity.js';
 import { mapSnapshot, mergeSectionSnapshot } from '../src/supabase-data.js';
-import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
+import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -479,6 +479,24 @@ test('shelf arranging saves every active item independently of filters and treat
   assert.match(app, /await reorderShelfMedia\([^)]+\); notify\('Item order saved\.'\); void refresh\(\{ fresh: true \}\)\.catch/);
   assert.match(app, /Item order could not be saved: \$\{error\.message\}/);
   assert.match(app, /The shelf order could not be saved: \$\{error\.message\}/);
+});
+
+test('shelf reordering preserves server-only memberships instead of rejecting a valid visible order', async () => {
+  const migration = await read('supabase/migrations/20260720050000_resilient_shelf_reordering.sql');
+  assert.doesNotMatch(migration, /Order must include every active shelf item|active_count <>/);
+  assert.match(migration, /if exists \([\s\S]*Media item is not active on this shelf/);
+  assert.match(migration, /preserved as \([\s\S]*not \(smi\.media_item_id = any/);
+  assert.match(migration, /requested_count \+ row_number\(\)/);
+  assert.match(migration, /public\.can_manage_collection\(collection_id\)/);
+});
+
+test('empty shelf sets can be deleted without removing occupied sets', async () => {
+  const draft = createShelfDraft(shelfItems(7));
+  const withoutFirstEmpty = removeEmptyShelfSet(draft, 1);
+  assert.equal(withoutFirstEmpty.sets.length, draft.sets.length - 1);
+  assert.equal(removeEmptyShelfSet(draft, 0), draft);
+  const app = await read('src/App.jsx');
+  assert.match(app, /itemCount === 0[\s\S]*Delete empty Set \$\{setIndex \+ 1\}[\s\S]*removeEmptyShelfSet\(current, setIndex\)/);
 });
 
 test('mobile shelf controls and arranger keep a clear compact reading order', async () => {
