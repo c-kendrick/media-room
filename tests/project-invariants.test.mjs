@@ -470,6 +470,17 @@ test('shelf arranging has undo redo, generous drag targets, and button-only debo
   assert.match(styles, /\.insert-target\.enabled\{pointer-events:auto\}/);
 });
 
+test('shelf arranging saves every active item independently of filters and treats refresh as best effort', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /const arrangeItems = sortShelfItems\(\s*items\.filter\(\(item\) => item\.lists\?\.includes\(shelf\.shelf_id\)\)/);
+  assert.match(app, /<MediaShelf[^>]*items=\{shelfItems\} arrangeItems=\{arrangeItems\}/);
+  assert.match(app, /function MediaShelf\(\{ shelf, items, arrangeItems = items,/);
+  assert.match(app, /<ArrangeShelfDialog shelf=\{shelf\} items=\{arrangeItems\}/);
+  assert.match(app, /await reorderShelfMedia\([^)]+\); notify\('Item order saved\.'\); void refresh\(\{ fresh: true \}\)\.catch/);
+  assert.match(app, /Item order could not be saved: \$\{error\.message\}/);
+  assert.match(app, /The shelf order could not be saved: \$\{error\.message\}/);
+});
+
 test('mobile shelf controls and arranger keep a clear compact reading order', async () => {
   const app = await read('src/App.jsx');
   const styles = await read('src/public.css');
@@ -1395,7 +1406,7 @@ test('numbered shelves and fixed segments are shelf-scoped, responsive and migra
   assert.match(app, /Numbered shelf/);
   assert.match(app, /shelfRank=\{shelf\.numbered \?/);
   assert.match(app, /segmentIndex \* 14 \+ rowIndex \* 7 \+ itemIndex \+ 1/);
-  assert.match(app, /setDisplayItems\(nextItems\); try \{ await onReorder[\s\S]*setDisplayItems\(previous\); throw error/);
+  assert.match(app, /setDisplayItems\(nextItems\.filter\([\s\S]*try \{ await onReorder[\s\S]*setDisplayItems\(previous\); throw error/);
   assert.match(app, /Your draft is still here; try again or cancel to restore the last saved order/);
   assert.match(data, /numbered: Boolean\(shelf\.is_numbered\)/);
   assert.match(layout, /grid-template-columns: repeat\(7, minmax\(var\(--shelf-card-min\), 1fr\)\)/);
