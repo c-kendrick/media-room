@@ -703,7 +703,7 @@ export default function App() {
   }, [toast]);
 
   const initialLoading = loading || authLoading || collectionsLoading || (!landingApplied && collections.length > 0);
-  if (initialLoading || initialLoadStage === 'brand') {
+  if (initialLoading) {
     return <InitialLoadingScreen stage={initialLoadStage} />;
   }
 
