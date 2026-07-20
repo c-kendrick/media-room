@@ -1114,8 +1114,8 @@ test('initial opening progresses from branding to a responsive skeleton without 
   const styles = await read('src/public.css');
   assert.match(app, /function InitialLoadingScreen\(\{ stage \}\)/);
   assert.match(app, /Opening Kit’s Media Room…/);
-  assert.match(app, /setInitialLoadStage\('skeleton'\), 500/);
-  assert.match(app, /setInitialLoadStage\('detailed'\), 900/);
+  assert.match(app, /setInitialLoadStage\('skeleton'\),\s*1200/);
+  assert.match(app, /setInitialLoadStage\('detailed'\),\s*1600/);
   assert.match(app, /const initialLoading = loading \|\| authLoading \|\| collectionsLoading/);
   assert.match(app, /if \(initialLoading \|\| initialLoadStage === 'brand'\)/);
   assert.match(app, /<main className=\{cls\(collectionLoading && 'collection-loading'\)\}/);
