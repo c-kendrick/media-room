@@ -1117,7 +1117,7 @@ test('initial opening progresses from branding to a responsive skeleton without 
   assert.match(app, /setInitialLoadStage\('skeleton'\),\s*1200/);
   assert.match(app, /setInitialLoadStage\('detailed'\),\s*1600/);
   assert.match(app, /const initialLoading = loading \|\| authLoading \|\| collectionsLoading/);
-  assert.match(app, /if \(initialLoading \|\| initialLoadStage === 'brand'\)/);
+  assert.match(app, /if \(initialLoading\)/);
   assert.match(app, /<main className=\{cls\(collectionLoading && 'collection-loading'\)\}/);
   assert.match(styles, /\.initial-skeleton\{[^}]*grid-template-columns:186px minmax\(0,1fr\)[^}]*overflow:hidden/);
   assert.match(styles, /\.initial-skeleton\.is-detailed \.skeleton-detail\{opacity:1;transform:none\}/);
