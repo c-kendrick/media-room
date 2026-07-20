@@ -30,6 +30,12 @@ export function appendShelfSet(draft) {
   return { ...draft, sets: [...draft.sets, emptySet()] };
 }
 
+export function removeEmptyShelfSet(draft, setIndex) {
+  const target = draft.sets[setIndex];
+  if (!target || draft.sets.length <= 1 || target.slots.some(Boolean) || target.overflow.length) return draft;
+  return { ...draft, sets: draft.sets.filter((_, index) => index !== setIndex) };
+}
+
 function cloneDraft(draft) {
   return { ...draft, sets: draft.sets.map((set) => ({ slots: [...set.slots], overflow: [...set.overflow] })) };
 }

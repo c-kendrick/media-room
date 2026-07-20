@@ -55,7 +55,7 @@ import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUse
 import { applyReactionToSnapshot, mediaReactionIdentity, setMediaLoveBatch, setMediaReaction } from './media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from './identity.js';
 import { clearCachedAccount, readCachedSection, writeCachedSnapshot } from './section-cache.js';
-import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershipIdentity, moveToOverflow, moveToPosition, pairedShelfSegments, serializeShelfDraft, SHELF_SET_SIZE, validateShelfDraft } from './shelf-order.js';
+import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershipIdentity, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, SHELF_SET_SIZE, validateShelfDraft } from './shelf-order.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -2017,7 +2017,8 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
   };
   const renderSet = (set, setIndex) => {
     const start = setIndex * SHELF_SET_SIZE + 1;
-    return <section className={cls('arrange-set', set.overflow.length && 'has-overflow')} key={setIndex}><header><span><b>Set {setIndex + 1}</b><small>Positions {start}{'\u2013'}{start + SHELF_SET_SIZE - 1}</small></span><em>{set.slots.filter(Boolean).length + set.overflow.length} / 7 items</em></header>
+    const itemCount = set.slots.filter(Boolean).length + set.overflow.length;
+    return <section className={cls('arrange-set', set.overflow.length && 'has-overflow')} key={setIndex}><header><span><b>Set {setIndex + 1}</b><small>Positions {start}{'\u2013'}{start + SHELF_SET_SIZE - 1}</small></span><span className="arrange-set-summary"><em>{itemCount} / 7 items</em>{itemCount === 0 && draft.sets.length > 1 && <button type="button" aria-label={`Delete empty Set ${setIndex + 1}`} title="Delete empty set" onClick={() => applyDraft((current) => removeEmptyShelfSet(current, setIndex))}><Trash2 size={13} /></button>}</span></header>
       <ol className="arrange-slots">{set.slots.map((item, slotIndex) => <li className={item ? 'filled' : 'empty'} key={slotIndex} onDragOver={(event) => { if (!item) event.preventDefault(); }} onDrop={(event) => { if (item) return; event.preventDefault(); applyDraft((current) => dropIntoSlot(current, droppedIdentity(event), setIndex, slotIndex)); setDraggedItemId(null); }}>{item ? renderItem(item, setIndex, slotIndex) : <span className="empty-slot"><b>{start + slotIndex}</b><small>Empty position</small></span>}</li>)}</ol>
       <div className={cls('arrange-overflow', set.overflow.length && 'active')} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); applyDraft((current) => moveToOverflow(current, droppedIdentity(event), setIndex)); setDraggedItemId(null); }}><header><span>Temporary overflow</span>{set.overflow.length > 0 && <small>Move every item into a numbered position before saving.</small>}</header>{set.overflow.map((item) => <div key={membershipIdentity(item)}>{renderItem(item, setIndex)}</div>)}{!set.overflow.length && <small>Drop here to hold an item in this set.</small>}</div>
     </section>;
