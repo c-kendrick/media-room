@@ -903,7 +903,7 @@ test('each Club has an isolated Main Watchlist with personal fallback and distin
   const data = await read('src/supabase-data.js');
   const migration = await read('supabase/migrations/20260719030000_friends_and_member_clubs.sql');
   assert.match(app, /selectedMainWatchlistClub\?\.member_ids \|\| \[account\.profile\.id\]/);
-  assert.match(app, /loadMediaSnapshot\(\{ fresh, collectionId: targetCollectionId, section: rememberedSection\.current, accessToken, mainWatchlistOwnerIds \}\)/);
+  assert.match(app, /loadMediaSnapshot\(\{ fresh, collectionId: targetCollectionId, section: initialSection, accessToken, mainWatchlistOwnerIds \}\)/);
   assert.match(app, /const defaultClubId = memberClubs\[0\]\.id/);
   assert.match(app, /clubs\.map\(\(club\) => <button/);
   assert.match(app, /if \(clubs\.length <= 1\) return <h1>\{title\}<\/h1>/);
@@ -1126,21 +1126,29 @@ test('initial opening progresses from branding to a responsive skeleton without 
   assert.match(styles, /@media\(prefers-reduced-motion:reduce\)/);
 });
 
-test('collection loading is section-scoped, cached, and avoids startup-wide prefetches', async () => {
+test('collection loading is section-scoped, persistent, and selectively prefetched', async () => {
   const app = await read('src/App.jsx');
   const data = await read('src/supabase-data.js');
-  const migration = await read('supabase/migrations/20260720020000_progressive_collection_loading.sql');
+  const cache = await read('src/section-cache.js');
+  const migration = await read('supabase/migrations/20260720030000_responsive_section_rpc.sql');
 
   assert.match(app, /section: rememberedSection\.current/);
-  assert.match(app, /current\.loadedSections\?\.includes\(section\)/);
+  assert.match(app, /memory\?\.loadedSections\?\.includes\(section\)/);
   assert.match(app, /sectionRequests\.current\.get\(requestKey\)/);
-  assert.doesNotMatch(app, /requestIdleCallback\(prefetch|for \(const collection of displayedCollections\)/);
+  assert.match(app, /scheduleIdle/);
+  assert.match(app, /onMouseOver=\{warmCollectionFromNav\} onFocusCapture=\{warmCollectionFromNav\} onPointerDown=\{warmCollectionFromNav\}/);
+  assert.doesNotMatch(app, /for \(const collection of displayedCollections\)/);
   assert.match(app, /setOwnCollection\(collections\.find/);
+  assert.match(cache, /indexedDB\.open\(DATABASE_NAME, SECTION_CACHE_VERSION\)/);
+  assert.match(cache, /accountScope/);
+  assert.match(cache, /!snapshot\.shared && !snapshot\.mainWatchlist/);
   assert.match(data, /target_section: section/);
   assert.match(data, /section: 'eq\.' \+ section/);
   assert.match(migration, /create or replace function public\.load_collection_section/);
   assert.match(migration, /where case target_section/);
-  assert.doesNotMatch(data.slice(data.indexOf('loadCollectionFromSupabase'), data.indexOf('loadMainWatchlistFromSupabase')), /select: 'user_id,kind,work_key'\s*\}\)/);
+  assert.match(migration, /if payload is null or auth\.uid\(\) is null/);
+  assert.doesNotMatch(migration, /grant select on public\.media_reactions to anon/);
+  assert.match(data, /Never turn a failed reaction read into an empty successful snapshot/);
 });
 
 test('section snapshot merging keeps visited tabs and cached drawer details', () => {
@@ -1162,13 +1170,17 @@ test('section snapshot merging keeps visited tabs and cached drawer details', ()
   assert.equal(merged.media.find((row) => row.database_id === 'screen-item').description, 'Cached');
 });
 
-test('drawer details load once while off-screen shelves and posters remain browser-prioritised', async () => {
+test('drawer details load once while posters use tiered viewport prioritisation', async () => {
   const app = await read('src/App.jsx');
   const layout = await read('src/media-layout.css');
   assert.match(app, /detailRequests\.current\.get\(mediaItemId\)/);
   assert.match(app, /loadMediaDetails\(\{ mediaItemId, accessToken \}\)/);
   assert.match(app, /details_loaded: true/);
-  assert.match(app, /loading="lazy" decoding="async"/);
+  assert.match(app, /function ProgressivePoster/);
+  assert.match(app, /IntersectionObserver/);
+  assert.match(app, /rootMargin: '1400px 500px'/);
+  assert.match(app, /loading=\{eager \? 'eager' : 'lazy'\}/);
+  assert.match(app, /fetchPriority=\{eager \? 'high' : 'auto'\}/);
   assert.match(app, /function cardPosterUrl/);
   assert.match(app, /\/t\/p\/w342\//);
   assert.match(layout, /content-visibility: auto/);
