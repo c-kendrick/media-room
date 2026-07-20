@@ -652,7 +652,7 @@ export default function App() {
   }, [account, authLoading, collections, landingApplied, viewAsAdmin, adminClubs]);
 
   useEffect(() => {
-    const skeletonTimer = window.setTimeout(() => setInitialLoadStage('skeleton'), 500);
+    const skeletonTimer = window.setTimeout(() => setInitialLoadStage('skeleton'), 1200);
     const detailTimer = window.setTimeout(() => setInitialLoadStage('detailed'), 900);
     return () => {
       window.clearTimeout(skeletonTimer);
