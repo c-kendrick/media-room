@@ -518,7 +518,7 @@
   .media-tabs{grid-template-columns:1fr!important}
   .media-tabs button{min-height:36px!important}
   .media-filters,.media-filters.has-type{grid-template-columns:1fr 1fr!important}
-  .media-search{grid-column:1/-1!important}
+  .media-filters .media-search{grid-column:1/-1!important}
   .shelf-head{flex-wrap:wrap}
   .shelf-actions{width:100%;justify-content:flex-start;margin-left:0;padding-left:34px}
 }

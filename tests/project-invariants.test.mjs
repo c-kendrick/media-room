@@ -1094,6 +1094,8 @@ test('media filters live in an Advanced Search dialog and mobile top-bar icons a
   assert.doesNotMatch(app, /<div className=\{cls\('media-filters'/);
   assert.match(app, /advancedSearchOpen && <AdvancedSearchDialog[\s\S]*<MultiSelect label="All lists"/);
   assert.match(styles, /\.advanced-filter-grid\{display:grid/);
+  assert.match(styles, /@media\(max-width:760px\)[\s\S]*?\.media-search-row\{grid-template-columns:minmax\(0,1fr\) 40px\}/);
+  assert.match(styles, /\.media-filters \.media-search\{grid-column:1\/-1!important\}/);
   assert.match(styles, /\.share-collection-button,\.topbar-action-button,\.account-button\{[^}]*display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:0!important/);
 });
 
