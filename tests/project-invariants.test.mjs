@@ -470,6 +470,24 @@ test('shelf arranging has undo redo, generous drag targets, and button-only debo
   assert.match(styles, /\.insert-target\.enabled\{pointer-events:auto\}/);
 });
 
+test('mobile shelf controls and arranger keep a clear compact reading order', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /className="arrange-lanes"><h3 className="arrange-lane-heading">ROW 1 SETS<\/h3><h3 className="arrange-lane-heading">ROW 2 SETS<\/h3>\{draft\.sets\.map\(renderSet\)\}/);
+  assert.doesNotMatch(app, /setIndex % 2 === lane/);
+  assert.match(styles, /@media\(max-width:760px\)\{\.arrange-lanes\{grid-template-columns:1fr\}\.arrange-lane-heading\{display:none\}/);
+  assert.match(styles, /\.shelf-add-button\{[^}]*box-sizing:border-box!important;[^}]*width:40px!important;[^}]*height:40px!important;[^}]*padding:0!important;[^}]*display:grid!important;place-items:center!important/);
+});
+
+test('the collection navigation auto-collapses at medium viewport widths without locking the toggle', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /const AUTO_COLLAPSE_NAV_QUERY = '\(max-width: 1280px\)'/);
+  assert.match(app, /useState\(\(\) => window\.matchMedia\?\.\(AUTO_COLLAPSE_NAV_QUERY\)\.matches \?\? false\)/);
+  assert.match(app, /const collapseAtMediumWidth = \(event\) => \{ if \(event\.matches\) setNavCollapsed\(true\); \}/);
+  assert.match(app, /viewport\.addEventListener\?\.\('change', collapseAtMediumWidth\)/);
+  assert.match(app, /onClick=\{\(\) => setNavCollapsed\(\(current\) => !current\)\}/);
+});
+
 test('queue shelf settings are explicit in every section and independent from Main Watchlist', async () => {
   const app = await read('src/App.jsx');
   const data = await read('src/supabase-data.js');
