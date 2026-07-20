@@ -87,6 +87,23 @@ export function moveToPosition(draft, identity, position) {
   if (!Number.isInteger(position) || position < 1 || position > draft.sets.length * SHELF_SET_SIZE) return draft;
   const setIndex = Math.floor((position - 1) / SHELF_SET_SIZE);
   const slotIndex = (position - 1) % SHELF_SET_SIZE;
+  const sourceSetIndex = draft.sets.findIndex((set) => set.slots.some((item) => item && membershipIdentity(item) === identity));
+  const sourceSlotIndex = sourceSetIndex < 0
+    ? -1
+    : draft.sets[sourceSetIndex].slots.findIndex((item) => item && membershipIdentity(item) === identity);
+
+  // Moving a numbered item inside its current set is a true reorder. Removing
+  // it closes the gap, the intervening items shift, and no item is displaced
+  // into overflow (for example, 2 -> 6 produces 1,3,4,5,6,2,7).
+  if (sourceSetIndex === setIndex && sourceSlotIndex >= 0) {
+    if (sourceSlotIndex === slotIndex) return draft;
+    const next = cloneDraft(draft);
+    const slots = next.sets[setIndex].slots;
+    const [item] = slots.splice(sourceSlotIndex, 1);
+    slots.splice(slotIndex, 0, item);
+    next.sets[setIndex].slots = slots.slice(0, SHELF_SET_SIZE);
+    return next;
+  }
   const target = draft.sets[setIndex].slots[slotIndex];
   return target
     ? insertBeside(draft, identity, membershipIdentity(target), 'before')
