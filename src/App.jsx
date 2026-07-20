@@ -372,10 +372,21 @@ function InitialLoadingScreen({ stage }) {
   </div>;
 }
 
-function SectionLoadingState() {
-  return <section className="section-loading-state" aria-live="polite" aria-label="Loading section">
+function SectionLoadingState({ branded = false }) {
+  const [stage, setStage] = useState(branded ? 'brand' : 'skeleton');
+  useEffect(() => {
+    if (!branded) return undefined;
+    const skeletonTimer = window.setTimeout(() => setStage('skeleton'), 450);
+    const detailTimer = window.setTimeout(() => setStage('detailed'), 850);
+    return () => { window.clearTimeout(skeletonTimer); window.clearTimeout(detailTimer); };
+  }, [branded]);
+
+  if (stage === 'brand') {
+    return <section className="watchlist-loading-brand" role="status" aria-live="polite"><div className="brand-mark">KM</div><p>Opening Main Watchlist…</p></section>;
+  }
+  return <section className={cls('section-loading-state', branded && 'watchlist-loading-skeleton', stage === 'detailed' && 'is-detailed')} aria-live="polite" aria-label={branded ? 'Loading Main Watchlist' : 'Loading section'}>
     <div className="section-loading-head"><i className="skeleton-line heading" /><i className="skeleton-line medium" /></div>
-    <div className="section-loading-posters">{[0, 1, 2, 3, 4, 5].map((item) => <span key={item}><i className="skeleton-poster" /><i className="skeleton-line wide" /></span>)}</div>
+    <div className="section-loading-posters">{[0, 1, 2, 3, 4, 5].map((item) => <span className={branded && item > 2 ? 'skeleton-detail' : ''} key={item}><i className="skeleton-poster" /><i className="skeleton-line wide" />{branded && <i className="skeleton-line medium skeleton-detail" />}</span>)}</div>
   </section>;
 }
 
@@ -420,6 +431,7 @@ export default function App() {
   const [collectionLoading, setCollectionLoading] = useState(false);
   const [landingApplied, setLandingApplied] = useState(() => sharedMode);
   const snapshotCache = useRef(new Map());
+  const mainWatchlistMemoryScope = useRef(null);
 
   useEffect(() => {
     const viewport = window.matchMedia?.(AUTO_COLLAPSE_NAV_QUERY);
@@ -430,6 +442,7 @@ export default function App() {
   }, []);
   const detailRequests = useRef(new Map());
   const sectionRequests = useRef(new Map());
+  const mainWatchlistRequests = useRef(new Map());
   const sectionDetailRequests = useRef(new Map());
   const startupKitRequest = useRef(null);
   const previousAccountScope = useRef(null);
@@ -461,16 +474,22 @@ export default function App() {
     ? (selectedMainWatchlistClub?.member_ids || [account.profile.id])
     : undefined;
   const mainWatchlistScopeKey = mainWatchlistOwnerIds ? [...mainWatchlistOwnerIds].sort().join(',') : 'all';
+  const mainWatchlistCacheScope = `main-watchlist:${mainWatchlistScopeKey}`;
 
   const cacheSnapshot = (snapshot, requestedCollectionId = null) => {
-    if (snapshot?.collectionId) snapshotCache.current.set(snapshot.collectionId, snapshot);
+    if (snapshot?.collectionId) {
+      snapshotCache.current.set(snapshot.collectionId, snapshot);
+      if (snapshot.mainWatchlist) mainWatchlistMemoryScope.current = mainWatchlistScopeKey;
+    }
     if (!requestedCollectionId) snapshotCache.current.set('default', snapshot);
-    if (!sharedMode) void writeCachedSnapshot({ accountScope }, snapshot);
+    if (!sharedMode) void writeCachedSnapshot({ accountScope, scope: snapshot.mainWatchlist ? mainWatchlistCacheScope : 'collection' }, snapshot);
   };
 
   const clearSnapshotCaches = ({ persistent = false } = {}) => {
     snapshotCache.current.clear();
+    mainWatchlistMemoryScope.current = null;
     sectionRequests.current.clear();
+    mainWatchlistRequests.current.clear();
     sectionDetailRequests.current.clear();
     detailRequests.current.clear();
     if (persistent) void clearCachedAccount(accountScope);
@@ -505,7 +524,7 @@ export default function App() {
       if (snapshot?.media) {
         const updated = applyReactionToSnapshot(snapshot, item, 'like', enabled, person);
         snapshotCache.current.set(key, updated);
-        if (!sharedMode) void writeCachedSnapshot({ accountScope }, updated);
+        if (!sharedMode) void writeCachedSnapshot({ accountScope, scope: updated.mainWatchlist ? mainWatchlistCacheScope : 'collection' }, updated);
       }
     }
   };
@@ -566,25 +585,39 @@ export default function App() {
     if (fresh) setRefreshing(true);
     try {
       const initialSection = rememberedSection.current;
-      if (!sharedMode && targetCollectionId && targetCollectionId !== MAIN_WATCHLIST_ID && !fresh) {
+      if (!sharedMode && targetCollectionId && !fresh) {
         const memory = snapshotCache.current.get(targetCollectionId);
-        if (memory?.loadedSections?.includes(initialSection)) {
+        const memoryMatchesScope = targetCollectionId !== MAIN_WATCHLIST_ID || mainWatchlistMemoryScope.current === mainWatchlistScopeKey;
+        if (memoryMatchesScope && (memory?.loadedSections?.includes(initialSection) || (targetCollectionId === MAIN_WATCHLIST_ID && memory?.mainWatchlist))) {
           dataRef.current = memory;
           setData(memory);
           setLoading(false);
+          setCollectionLoading(false);
         } else {
-          const cached = await readCachedSection({ accountScope, collectionId: targetCollectionId, section: initialSection });
+          const cached = await readCachedSection({
+            accountScope,
+            collectionId: targetCollectionId,
+            section: targetCollectionId === MAIN_WATCHLIST_ID ? 'screen' : initialSection,
+            scope: targetCollectionId === MAIN_WATCHLIST_ID ? mainWatchlistCacheScope : 'collection',
+          });
           if (cached?.snapshot) {
-            const hydrated = mergeLoadedSection(targetCollectionId, cached.snapshot);
+            const hydrated = targetCollectionId === MAIN_WATCHLIST_ID
+              ? applyPendingLoves(cached.snapshot)
+              : mergeLoadedSection(targetCollectionId, cached.snapshot);
+            if (targetCollectionId === MAIN_WATCHLIST_ID) {
+              snapshotCache.current.set(targetCollectionId, hydrated);
+              mainWatchlistMemoryScope.current = mainWatchlistScopeKey;
+            }
             dataRef.current = hydrated;
             setData(hydrated);
             setLoading(false);
+            setCollectionLoading(false);
           }
         }
       }
       let loadedSnapshot;
       if (sharedMode) loadedSnapshot = publicUsername ? await loadPublicCollection(publicUsername) : await loadSharedCollection(shareToken);
-      else if (targetCollectionId === MAIN_WATCHLIST_ID) loadedSnapshot = await loadMediaSnapshot({ fresh, collectionId: targetCollectionId, section: initialSection, accessToken, mainWatchlistOwnerIds });
+      else if (targetCollectionId === MAIN_WATCHLIST_ID) loadedSnapshot = await fetchMainWatchlist({ fresh });
       else if (targetCollectionId) {
         const targetIsPublicKit = accountScope === 'public' && initialSection === 'screen'
           && collections.some((row) => row.id === targetCollectionId && row.slug === 'kits-collection');
@@ -662,6 +695,23 @@ export default function App() {
     return request;
   };
 
+  const fetchMainWatchlist = ({ fresh = false } = {}) => {
+    const requestKey = `${accountScope}:${mainWatchlistScopeKey}`;
+    let request = mainWatchlistRequests.current.get(requestKey);
+    if (!request || fresh) {
+      request = loadMediaSnapshot({ fresh, collectionId: MAIN_WATCHLIST_ID, section: 'screen', accessToken, mainWatchlistOwnerIds })
+        .then((snapshot) => {
+          if (snapshot) cacheSnapshot(snapshot, MAIN_WATCHLIST_ID);
+          return snapshot;
+        })
+        .finally(() => {
+          if (mainWatchlistRequests.current.get(requestKey) === request) mainWatchlistRequests.current.delete(requestKey);
+        });
+      mainWatchlistRequests.current.set(requestKey, request);
+    }
+    return request;
+  };
+
   const loadSection = async (section, { collection: requestedCollectionId = dataRef.current?.collectionId, fresh = false } = {}) => {
     if (!requestedCollectionId || requestedCollectionId === MAIN_WATCHLIST_ID) return dataRef.current;
     const memory = dataRef.current?.collectionId === requestedCollectionId
@@ -733,7 +783,9 @@ export default function App() {
       rememberedSection.current = 'screen';
       if (!sharedMode) writeLastPage(account?.profile?.id, nextCollectionId, 'screen');
     }
-    const cached = snapshotCache.current.get(nextCollectionId);
+    const cached = nextCollectionId === MAIN_WATCHLIST_ID && mainWatchlistMemoryScope.current !== mainWatchlistScopeKey
+      ? null
+      : snapshotCache.current.get(nextCollectionId);
     const navigationCollection = nextCollectionId === MAIN_WATCHLIST_ID
       ? { id: MAIN_WATCHLIST_ID, title: 'Main Watchlist' }
       : collections.find((row) => row.id === nextCollectionId);
@@ -743,7 +795,7 @@ export default function App() {
     const immediate = cached || collectionShell(navigationCollection, rememberedSection.current);
     dataRef.current = immediate;
     setData(immediate);
-    setCollectionLoading(false);
+    setCollectionLoading(!cached);
     setMobileNav(false);
   };
 
@@ -776,7 +828,9 @@ export default function App() {
     previousAccountScope.current = accountScope;
     if (!previous || previous === accountScope) return;
     snapshotCache.current.clear();
+    mainWatchlistMemoryScope.current = null;
     sectionRequests.current.clear();
+    mainWatchlistRequests.current.clear();
     sectionDetailRequests.current.clear();
     detailRequests.current.clear();
     startupKitRequest.current = null;
@@ -793,6 +847,24 @@ export default function App() {
     if (!remembered?.collectionId || remembered.collectionId === MAIN_WATCHLIST_ID) return;
     void loadSection(remembered.section, { collection: remembered.collectionId }).catch(() => null);
   }, [accessToken, account?.profile?.id, account?.profile?.approved_at, account?.profile?.deactivated_at]);
+
+  useEffect(() => {
+    if (sharedMode || !landingApplied || !data?.collectionId || data.collectionId === MAIN_WATCHLIST_ID || !allowsBackgroundPrefetch()) return undefined;
+    const scheduled = scheduleIdle(async () => {
+      const cached = await readCachedSection({
+        accountScope,
+        collectionId: MAIN_WATCHLIST_ID,
+        section: 'screen',
+        scope: mainWatchlistCacheScope,
+      });
+      if (cached?.snapshot && mainWatchlistMemoryScope.current !== mainWatchlistScopeKey) {
+        snapshotCache.current.set(MAIN_WATCHLIST_ID, applyPendingLoves(cached.snapshot));
+        mainWatchlistMemoryScope.current = mainWatchlistScopeKey;
+      }
+      await fetchMainWatchlist().catch(() => null);
+    });
+    return () => cancelIdle(scheduled);
+  }, [sharedMode, landingApplied, data?.collectionId, accessToken, accountScope, mainWatchlistScopeKey]);
 
   useEffect(() => {
     if (!sharedMode && !landingApplied) return;
@@ -1205,7 +1277,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} initialSection={rememberedSection.current} onLoadSection={loadSection} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
+          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
             const previousData = data;
             const optimisticData = {
               ...data,
@@ -1497,7 +1569,7 @@ function EditableDescription({ value, canEdit, onSave, fallback = '', title = 'C
   return <textarea className="editable-description-input" aria-label="Collection note" autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value || fallback); setEditing(false); } if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') event.currentTarget.blur(); }} />;
 }
 
-function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, onDescriptionChange }) {
+function MediaView({ data, loading = false, initialSection, onLoadSection, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, onDescriptionChange }) {
   const [section, setSection] = useState(() => MEDIA_SECTIONS.has(initialSection) ? initialSection : 'screen');
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -1608,7 +1680,7 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
   const queueLabel = section === 'book' ? 'to read' : section === 'game' ? 'to play' : 'to watch';
   const advancedFilterCount = [listFilters, typeFilters, stampFilters, ratingFilters, ownershipFilters, formatFilters, genreFilters]
     .reduce((total, values) => total + values.length, 0);
-  const sectionLoading = Boolean(!data.mainWatchlist && !data.loadedSections?.includes(section));
+  const sectionLoading = Boolean(loading || (!data.mainWatchlist && !data.loadedSections?.includes(section)));
 
   useEffect(() => {
     if (query.trim()) onEnsureSectionDetails?.(section).catch(() => notify('Some detailed search fields could not be loaded.'));
@@ -1823,7 +1895,7 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
 
       {!sectionLoading && queryLower && <SearchResultsSection items={searchResults} onOpen={openMedia} canRate={canEdit} onRate={onStarRatingChange} canReact={canReact} currentUserId={currentUserId} onReaction={onReaction} />}
 
-      {sectionLoading && <SectionLoadingState />}
+      {sectionLoading && <SectionLoadingState branded={data.mainWatchlist} />}
 
       <div className={cls('dynamic-shelves', queryLower && 'has-search-results', sectionLoading && 'is-loading')}>
         {visibleShelves.map((shelf) => {

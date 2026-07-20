@@ -277,61 +277,54 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
   if (!collections.length) return null;
 
   const collectionIds = collections.map((collection) => collection.id);
-  const publicProfiles = await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh, accessToken });
-  const reactions = accessToken ? await supabaseSelect(query('media_reactions', { select: 'user_id,kind,work_key' }), { fresh, accessToken }) : [];
+  const loadShelves = async () => {
+    try {
+      return await supabaseSelect(query('shelves', {
+        collection_id: 'in.(' + collectionIds.join(',') + ')',
+        show_in_main_watchlist: 'eq.true',
+        section: 'eq.screen',
+        deleted_at: 'is.null',
+        select: 'id,collection_id,section,name,subtitle,is_queue_list,is_reading_list,is_numbered,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
+        order: 'main_watchlist_position.asc',
+      }), { fresh, accessToken });
+    } catch {
+      try {
+        return await supabaseSelect(query('shelves', {
+          collection_id: 'in.(' + collectionIds.join(',') + ')',
+          show_in_main_watchlist: 'eq.true', section: 'eq.screen', deleted_at: 'is.null',
+          select: 'id,collection_id,section,name,subtitle,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
+          order: 'main_watchlist_position.asc',
+        }), { fresh, accessToken });
+      } catch {
+        return supabaseSelect(query('shelves', {
+          collection_id: 'in.(' + collectionIds.join(',') + ')', section: 'eq.screen', name: 'eq.Watchlist', deleted_at: 'is.null',
+          select: 'id,collection_id,section,name,position,deleted_at',
+        }), { fresh, accessToken });
+      }
+    }
+  };
+  const [publicProfiles, reactions, shelves, allInterestRows] = await Promise.all([
+    supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh, accessToken }),
+    accessToken ? supabaseSelect(query('media_reactions', { select: 'user_id,kind,work_key' }), { fresh, accessToken }) : Promise.resolve([]),
+    loadShelves(),
+    supabaseSelect(query('media_interest', { select: 'media_item_id,user_id' }), { fresh, accessToken }),
+  ]);
   const visibleProfileIds = new Set(publicProfiles.map((profile) => profile.id));
   const scopedProfileIds = allowedOwnerIds
     ? new Set(collections.map((collection) => collection.owner_id))
     : visibleProfileIds;
-  let shelves;
-  try {
-    shelves = await supabaseSelect(query('shelves', {
-      collection_id: 'in.(' + collectionIds.join(',') + ')',
-      show_in_main_watchlist: 'eq.true',
-      section: 'eq.screen',
-      deleted_at: 'is.null',
-      select: 'id,collection_id,section,name,subtitle,is_queue_list,is_reading_list,is_numbered,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
-      order: 'main_watchlist_position.asc',
-    }), { fresh, accessToken });
-  } catch {
-    try {
-      shelves = await supabaseSelect(query('shelves', {
-        collection_id: 'in.(' + collectionIds.join(',') + ')',
-        show_in_main_watchlist: 'eq.true', section: 'eq.screen', deleted_at: 'is.null',
-        select: 'id,collection_id,section,name,subtitle,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
-        order: 'main_watchlist_position.asc',
-      }), { fresh, accessToken });
-    } catch {
-      shelves = await supabaseSelect(query('shelves', {
-        collection_id: 'in.(' + collectionIds.join(',') + ')', section: 'eq.screen', name: 'eq.Watchlist', deleted_at: 'is.null',
-        select: 'id,collection_id,section,name,position,deleted_at',
-      }), { fresh, accessToken });
-    }
-  }
-  const interestRows = (await supabaseSelect(query('media_interest', { select: 'media_item_id,user_id' }), { fresh, accessToken }))
+  const interestRows = allInterestRows
     .filter((interest) => scopedProfileIds.has(interest.user_id));
-  const candidateShelfIds = shelves.map((shelf) => shelf.id);
-  const candidateMemberships = candidateShelfIds.length ? await supabaseSelect(query('shelf_media_items', {
-    shelf_id: 'in.(' + candidateShelfIds.join(',') + ')',
-    select: 'shelf_id,media_item_id,position',
-    order: 'position.asc',
-  }), { fresh, accessToken }) : [];
-  const candidateMediaIds = [...new Set([...candidateMemberships.map((membership) => membership.media_item_id), ...interestRows.map((interest) => interest.media_item_id)])];
-  const candidateMediaItems = candidateMediaIds.length ? await selectMediaItems({
-    id: 'in.(' + candidateMediaIds.join(',') + ')',
-    collection_id: 'in.(' + collectionIds.join(',') + ')',
-    deleted_at: 'is.null',
-    order: 'created_at.asc',
-  }, { fresh, accessToken }) : [];
   const shelfIds = shelves.map((shelf) => shelf.id);
   const memberships = shelfIds.length ? await supabaseSelect(query('shelf_media_items', {
     shelf_id: 'in.(' + shelfIds.join(',') + ')',
     select: 'shelf_id,media_item_id,position',
     order: 'position.asc',
   }), { fresh, accessToken }) : [];
-  const mediaIds = memberships.map((membership) => membership.media_item_id);
+  const mediaIds = [...new Set([...memberships.map((membership) => membership.media_item_id), ...interestRows.map((interest) => interest.media_item_id)])];
   const mediaItems = mediaIds.length ? await selectMediaItems({
     id: 'in.(' + mediaIds.join(',') + ')',
+    collection_id: 'in.(' + collectionIds.join(',') + ')',
     deleted_at: 'is.null',
     order: 'created_at.asc',
   }, { fresh, accessToken }) : [];
@@ -346,7 +339,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
   });
   const mirroredMediaIds = new Set(mirroredMemberships.map((membership) => membership.media_item_id));
   const mirroredMediaItems = mediaItems.filter((item) => mirroredMediaIds.has(item.id));
-  const allMediaItems = [...new Map([...mirroredMediaItems, ...candidateMediaItems].map((item) => [item.id, item])).values()];
+  const allMediaItems = mediaItems;
   const interests = interestRows.filter((interest) => allMediaItems.some((item) => item.id === interest.media_item_id));
   const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
   const collectionOrder = new Map(collections.map((collection, index) => [collection.id, index]));
@@ -395,6 +388,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
     interests,
     publicProfiles,
     reactions.filter((reaction) => scopedProfileIds.has(reaction.user_id)),
+    ['screen'],
   );
   return { ...snapshot, mainWatchlist: true, media: snapshot.media.map((item) => {
     const watchDemand = demandByMediaId.get(item.database_id) || [];

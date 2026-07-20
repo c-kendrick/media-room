@@ -14,6 +14,7 @@ import { applyReactionToSnapshot, mediaReactionIdentity } from '../src/media-rea
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from '../src/identity.js';
 import { mapSnapshot, mergeSectionSnapshot } from '../src/supabase-data.js';
 import { completeShelfOrder } from '../src/media-write.js';
+import { canPersistSnapshot, sectionSnapshot } from '../src/section-cache.js';
 import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -253,7 +254,8 @@ test('Main Watchlist includes one virtual priority and shared-demand shelf', asy
   assert.match(data, /id: 'main-priority-watchlist'/);
   assert.match(data, /demand\.length < 2/);
   assert.match(data, /interestedIdentities\.has\(identity\)/);
-  assert.match(data, /const candidateShelfIds = shelves\.map\(\(shelf\) => shelf\.id\)/);
+  assert.match(data, /const shelfIds = shelves\.map\(\(shelf\) => shelf\.id\)/);
+  assert.match(data, /\.\.\.memberships\.map[\s\S]*\.\.\.interestRows\.map/);
   assert.doesNotMatch(data, /canonicalWatchlistShelves/);
   assert.doesNotMatch(data, /mirroredShelfCount/);
   assert.match(data, /representativeByIdentity/);
@@ -1012,7 +1014,7 @@ test('each Club has an isolated Main Watchlist with personal fallback and distin
   const data = await read('src/supabase-data.js');
   const migration = await read('supabase/migrations/20260719030000_friends_and_member_clubs.sql');
   assert.match(app, /selectedMainWatchlistClub\?\.member_ids \|\| \[account\.profile\.id\]/);
-  assert.match(app, /loadMediaSnapshot\(\{ fresh, collectionId: targetCollectionId, section: initialSection, accessToken, mainWatchlistOwnerIds \}\)/);
+  assert.match(app, /loadMediaSnapshot\(\{ fresh, collectionId: MAIN_WATCHLIST_ID, section: 'screen', accessToken, mainWatchlistOwnerIds \}\)/);
   assert.match(app, /const defaultClubId = memberClubs\[0\]\.id/);
   assert.match(app, /clubs\.map\(\(club\) => <button/);
   assert.match(app, /if \(clubs\.length <= 1\) return <h1>\{title\}<\/h1>/);
@@ -1262,7 +1264,7 @@ test('collection loading is section-scoped, persistent, and selectively prefetch
   assert.match(app, /setOwnCollection\(collections\.find/);
   assert.match(cache, /indexedDB\.open\(DATABASE_NAME, SECTION_CACHE_VERSION\)/);
   assert.match(cache, /accountScope/);
-  assert.match(cache, /!snapshot\.shared && !snapshot\.mainWatchlist/);
+  assert.match(cache, /snapshot\?\.storage === 'supabase' && snapshot\.collectionId && !snapshot\.shared/);
   assert.match(data, /target_section: section/);
   assert.match(data, /section: 'eq\.' \+ section/);
   assert.match(migration, /create or replace function public\.load_collection_section/);
@@ -1270,6 +1272,31 @@ test('collection loading is section-scoped, persistent, and selectively prefetch
   assert.match(migration, /if payload is null or auth\.uid\(\) is null/);
   assert.doesNotMatch(migration, /grant select on public\.media_reactions to anon/);
   assert.match(data, /Never turn a failed reaction read into an empty successful snapshot/);
+});
+
+test('Main Watchlist uses an account-and-club-scoped stale cache with a progressive loading state', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/supabase-data.js');
+  const layout = await read('src/media-layout.css');
+  const snapshot = {
+    storage: 'supabase', collectionId: 'main-watchlist', mainWatchlist: true,
+    loadedSections: ['screen'], mediaShelves: [], media: [],
+  };
+
+  assert.equal(canPersistSnapshot(snapshot), true);
+  assert.equal(sectionSnapshot(snapshot, 'screen')?.mainWatchlist, true);
+  assert.match(app, /const mainWatchlistCacheScope = `main-watchlist:\$\{mainWatchlistScopeKey\}`/);
+  assert.match(app, /mainWatchlistMemoryScope\.current === mainWatchlistScopeKey/);
+  assert.match(app, /scope: targetCollectionId === MAIN_WATCHLIST_ID \? mainWatchlistCacheScope : 'collection'/);
+  assert.match(app, /setCollectionLoading\(!cached\)/);
+  assert.match(app, /const fetchMainWatchlist = \(\{ fresh = false \} = \{\}\) =>/);
+  assert.match(app, /scheduleIdle\(async \(\) => \{[\s\S]*collectionId: MAIN_WATCHLIST_ID[\s\S]*await fetchMainWatchlist\(\)/);
+  assert.match(app, /<SectionLoadingState branded=\{data\.mainWatchlist\} \/>/);
+  assert.match(app, /Opening Main Watchlist…/);
+  assert.match(layout, /\.watchlist-loading-brand/);
+  assert.match(layout, /\.watchlist-loading-skeleton\.is-detailed/);
+  assert.match(data, /const \[publicProfiles, reactions, shelves, allInterestRows\] = await Promise\.all/);
+  assert.doesNotMatch(data, /candidateMemberships|candidateMediaItems/);
 });
 
 test('section snapshot merging keeps visited tabs and cached drawer details', () => {
