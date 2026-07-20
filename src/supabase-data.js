@@ -61,6 +61,7 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
       shelf_id: shelf.id,
       name: shelf.name,
       subtitle: shelf.subtitle || '',
+      numbered: Boolean(shelf.is_numbered),
       queueList: Boolean(shelf.is_queue_list),
       readingList: Boolean(shelf.is_queue_list),
       section: shelf.section,
@@ -166,13 +167,22 @@ function sectionMediaFilter(section) {
 
 async function loadSectionDirect(collection, section, options) {
   const { fresh, accessToken } = options;
+  const loadShelves = async () => {
+    const filters = { collection_id: 'eq.' + collection.id, section: 'eq.' + section, order: 'position.asc' };
+    try {
+      return await supabaseSelect(query('shelves', {
+        ...filters,
+        select: 'id,section,name,subtitle,is_queue_list,is_reading_list,is_numbered,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
+      }), { fresh, accessToken });
+    } catch {
+      return supabaseSelect(query('shelves', {
+        ...filters,
+        select: 'id,section,name,subtitle,is_queue_list,is_reading_list,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
+      }), { fresh, accessToken });
+    }
+  };
   const [shelves, mediaItems] = await Promise.all([
-    supabaseSelect(query('shelves', {
-      collection_id: 'eq.' + collection.id,
-      section: 'eq.' + section,
-      select: 'id,section,name,subtitle,is_queue_list,is_reading_list,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
-      order: 'position.asc',
-    }), { fresh, accessToken }),
+    loadShelves(),
     supabaseSelect(query('media_items', {
       collection_id: 'eq.' + collection.id,
       type: sectionMediaFilter(section),
@@ -280,7 +290,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
       show_in_main_watchlist: 'eq.true',
       section: 'eq.screen',
       deleted_at: 'is.null',
-      select: 'id,collection_id,section,name,subtitle,is_queue_list,is_reading_list,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
+      select: 'id,collection_id,section,name,subtitle,is_queue_list,is_reading_list,is_numbered,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
       order: 'main_watchlist_position.asc',
     }), { fresh, accessToken });
   } catch {

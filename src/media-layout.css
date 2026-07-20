@@ -8,6 +8,8 @@
   --media-poster-height: 261px;
   --media-column-gap: 14px;
   --media-row-gap: 30px;
+  --shelf-card-min: 112px;
+  --shelf-segment-min: 894px;
 }
 
 .media-page {
@@ -354,14 +356,65 @@
 }
 
 /* Fourteen items per block: seven across, then a second row. */
-.poster-page {
-  flex: 0 0 auto;
+/* Each segment is one paired group of sets: odd set above even set. The
+   segment is container-sized on wide screens and becomes horizontally
+   scrollable only when seven usable cards no longer fit. */
+.fixed-set-shelf .poster-track {
+  gap: 24px;
+}
+
+.poster-segment {
+  position: relative;
+  box-sizing: border-box;
+  flex: 0 0 calc(100% - 4px);
+  min-width: var(--shelf-segment-min);
   display: grid;
-  grid-template-columns: repeat(7, var(--media-card-width));
-  grid-auto-rows: max-content;
-  gap: var(--media-row-gap) var(--media-column-gap);
+  align-content: start;
+  gap: var(--media-row-gap);
+  padding-right: 26px;
+}
+
+.poster-segment.has-divider::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 7px;
+  bottom: 3px;
+  width: 1px;
+  background: linear-gradient(transparent, #c9b9a7 8%, #c9b9a7 92%, transparent);
+  box-shadow: 1px 0 rgba(255,255,255,.75);
+}
+
+.poster-set-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(var(--shelf-card-min), 1fr));
+  gap: var(--media-column-gap);
   align-items: start;
-  scroll-snap-align: none;
+}
+
+.poster-set-row .media-card {
+  width: 100%;
+  max-width: none;
+}
+
+.poster-set-row .media-card img,
+.poster-set-row .media-card-open > .poster-fallback {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 2.96;
+}
+
+.shelf-rank {
+  display: block;
+  width: max-content;
+  margin-top: 5px;
+  padding-top: 4px;
+  border-top: 1px solid #d8c9b8;
+  color: #8d6655;
+  font-family: var(--serif);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
 }
 
 .media-card {
@@ -859,6 +912,8 @@
     --media-poster-height: 228px;
     --media-column-gap: 10px;
     --media-row-gap: 24px;
+    --shelf-card-min: 140px;
+    --shelf-segment-min: 1066px;
   }
 
   .media-tabs button {
@@ -896,10 +951,6 @@
 
   .shelf-head > div:last-child .delete-shelf {
     display: none;
-  }
-
-  .poster-page {
-    grid-template-columns: repeat(7, var(--media-card-width));
   }
 
   .media-drawer {
