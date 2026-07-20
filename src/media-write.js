@@ -137,8 +137,47 @@ export function deleteShelf(accessToken, shelfId) {
     headers: { Authorization: 'Bearer ' + accessToken, Prefer: 'return=representation' } });
 }
 
+export function completeShelfOrder(orderedMediaIds, membershipRows, activeMediaRows) {
+  const activeIds = new Set(activeMediaRows.map((row) => row.id));
+  const includedIds = new Set(orderedMediaIds);
+  const serverOnlyIds = membershipRows
+    .map((row) => row.media_item_id)
+    .filter((id) => {
+      if (!activeIds.has(id) || includedIds.has(id)) return false;
+      includedIds.add(id);
+      return true;
+    });
+  return [...orderedMediaIds, ...serverOnlyIds];
+}
+
+async function loadCompleteActiveShelfOrder(accessToken, shelfId, orderedMediaIds) {
+  const authorization = { Authorization: 'Bearer ' + accessToken };
+  const membershipQuery = new URLSearchParams({
+    shelf_id: `eq.${shelfId}`,
+    select: 'media_item_id,position,created_at',
+    order: 'position.asc,created_at.asc,media_item_id.asc',
+  });
+  const memberships = await supabaseRequest('/rest/v1/shelf_media_items?' + membershipQuery, { fresh: true, headers: authorization });
+  const membershipIds = [...new Set(memberships.map((row) => row.media_item_id))];
+  if (!membershipIds.length) return orderedMediaIds;
+  const mediaQuery = new URLSearchParams({
+    select: 'id',
+    id: `in.(${membershipIds.join(',')})`,
+    deleted_at: 'is.null',
+  });
+  const activeMedia = await supabaseRequest('/rest/v1/media_items?' + mediaQuery, { fresh: true, headers: authorization });
+  return completeShelfOrder(orderedMediaIds, memberships, activeMedia);
+}
+
 export async function reorderShelfMedia(accessToken, shelfId, orderedMediaIds) {
-  return supabaseRequest('/rest/v1/rpc/reorder_shelf_media', { method: 'POST', fresh: true, body: { target_shelf_id: shelfId, ordered_media_ids: orderedMediaIds }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
+  let completeOrder = orderedMediaIds;
+  try {
+    completeOrder = await loadCompleteActiveShelfOrder(accessToken, shelfId, orderedMediaIds);
+  } catch {
+    // The resilient RPC can save the visible subset directly. This preflight
+    // exists for databases that have not received that migration yet.
+  }
+  return supabaseRequest('/rest/v1/rpc/reorder_shelf_media', { method: 'POST', fresh: true, body: { target_shelf_id: shelfId, ordered_media_ids: completeOrder }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
 export async function reorderShelves(accessToken, collectionId, section, orderedShelfIds) {

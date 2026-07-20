@@ -13,6 +13,7 @@ import { appSiteUrl, authenticatedProfilePath, selectAuthenticatedProfile, signu
 import { applyReactionToSnapshot, mediaReactionIdentity } from '../src/media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from '../src/identity.js';
 import { mapSnapshot, mergeSectionSnapshot } from '../src/supabase-data.js';
+import { completeShelfOrder } from '../src/media-write.js';
 import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -472,13 +473,29 @@ test('shelf arranging has undo redo, generous drag targets, and button-only debo
 
 test('shelf arranging saves every active item independently of filters and treats refresh as best effort', async () => {
   const app = await read('src/App.jsx');
-  assert.match(app, /const arrangeItems = sortShelfItems\(\s*items\.filter\(\(item\) => item\.lists\?\.includes\(shelf\.shelf_id\)\)/);
+  assert.match(app, /const arrangeItems = sortShelfItems\(\s*items\.filter\(\(item\) => !item\.optimistic && item\.lists\?\.includes\(shelf\.shelf_id\)\)/);
   assert.match(app, /<MediaShelf[^>]*items=\{shelfItems\} arrangeItems=\{arrangeItems\}/);
   assert.match(app, /function MediaShelf\(\{ shelf, items, arrangeItems = items,/);
   assert.match(app, /<ArrangeShelfDialog shelf=\{shelf\} items=\{arrangeItems\}/);
   assert.match(app, /await reorderShelfMedia\([^)]+\); notify\('Item order saved\.'\); void refresh\(\{ fresh: true \}\)\.catch/);
   assert.match(app, /Item order could not be saved: \$\{error\.message\}/);
   assert.match(app, /The shelf order could not be saved: \$\{error\.message\}/);
+});
+
+test('shelf reordering completes the visible order with active server-only memberships', async () => {
+  const completed = completeShelfOrder(
+    ['visible-b', 'visible-a'],
+    [
+      { media_item_id: 'visible-a' },
+      { media_item_id: 'hidden-active' },
+      { media_item_id: 'hidden-deleted' },
+      { media_item_id: 'visible-b' },
+    ],
+    [{ id: 'visible-a' }, { id: 'visible-b' }, { id: 'hidden-active' }],
+  );
+  assert.deepEqual(completed, ['visible-b', 'visible-a', 'hidden-active']);
+  const writes = await read('src/media-write.js');
+  assert.match(writes, /loadCompleteActiveShelfOrder[\s\S]*shelf_media_items[\s\S]*deleted_at: 'is\.null'[\s\S]*ordered_media_ids: completeOrder/);
 });
 
 test('shelf reordering preserves server-only memberships instead of rejecting a valid visible order', async () => {
