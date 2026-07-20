@@ -67,6 +67,33 @@ function active(rows) {
   return (rows || []).filter((row) => !row.deleted_at);
 }
 
+const MAIN_WATCHLIST_ID = 'main-watchlist';
+const LAST_PAGE_KEY_PREFIX = 'media-room:last-page:';
+const MEDIA_SECTIONS = new Set(['screen', 'book', 'game']);
+
+function readLastPage(userId) {
+  if (!userId) return null;
+  try {
+    const remembered = JSON.parse(window.localStorage.getItem(`${LAST_PAGE_KEY_PREFIX}${userId}`));
+    if (!remembered?.collectionId) return null;
+    return { collectionId: remembered.collectionId, section: MEDIA_SECTIONS.has(remembered.section) ? remembered.section : 'screen' };
+  } catch {
+    return null;
+  }
+}
+
+function writeLastPage(userId, collectionId, section = 'screen') {
+  if (!userId || !collectionId) return;
+  try {
+    window.localStorage.setItem(`${LAST_PAGE_KEY_PREFIX}${userId}`, JSON.stringify({
+      collectionId,
+      section: MEDIA_SECTIONS.has(section) ? section : 'screen',
+    }));
+  } catch {
+    // Storage can be unavailable in strict privacy modes; navigation should still work normally.
+  }
+}
+
 function useEscape(onClose, active = true) {
   useEffect(() => {
     if (!active) return undefined;
@@ -314,6 +341,7 @@ export default function App() {
   const flushPendingLovesRef = useRef(() => Promise.resolve());
   const latestRequest = useRef(0);
   const userSelectedCollection = useRef(false);
+  const rememberedSection = useRef('screen');
   const accessToken = account?.session?.access_token;
   const memberClubs = userHub?.clubs || [];
   const selectedMainWatchlistClub = memberClubs.find((club) => club.id === mainWatchlistClubId);
@@ -439,8 +467,12 @@ export default function App() {
   };
 
   const selectCollection = (nextCollectionId, { userInitiated = true } = {}) => {
-    if (userInitiated) userSelectedCollection.current = true;
     if (nextCollectionId === collectionId || nextCollectionId === data?.collectionId) return;
+    if (userInitiated) {
+      userSelectedCollection.current = true;
+      rememberedSection.current = 'screen';
+      if (!sharedMode) writeLastPage(account?.profile?.id, nextCollectionId, 'screen');
+    }
     const cached = snapshotCache.current.get(nextCollectionId);
     setCollectionId(nextCollectionId);
     setSelectedMediaId(null);
@@ -578,13 +610,19 @@ export default function App() {
 
   useEffect(() => {
     if (authLoading || !collections.length || landingApplied || userSelectedCollection.current) return;
-    const landingCollection = account?.profile?.approved_at && !account.profile.deactivated_at
+    const canRestore = Boolean(account?.profile?.id && account.profile.approved_at && !account.profile.deactivated_at);
+    const remembered = canRestore ? readLastPage(account.profile.id) : null;
+    const rememberedCollectionIsVisible = remembered?.collectionId === MAIN_WATCHLIST_ID
+      || displayedCollections.some((collection) => collection.id === remembered?.collectionId);
+    const landingCollection = canRestore
       ? collections.find((collection) => collection.owner_id === account.profile.id)
       : collections.find((collection) => collection.slug === 'kits-collection');
-    if (!landingCollection) return;
+    const landingCollectionId = rememberedCollectionIsVisible ? remembered.collectionId : landingCollection?.id;
+    if (!landingCollectionId) return;
+    rememberedSection.current = rememberedCollectionIsVisible ? remembered.section : 'screen';
     setLandingApplied(true);
-    selectCollection(landingCollection.id, { userInitiated: false });
-  }, [account, authLoading, collections, landingApplied]);
+    selectCollection(landingCollectionId, { userInitiated: false });
+  }, [account, authLoading, collections, landingApplied, viewAsAdmin, adminClubs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -803,7 +841,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
+          <MediaView key={data.collectionId} data={data} initialSection={rememberedSection.current} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} onDescriptionChange={async (section, description) => {
             const previousData = data;
             const optimisticData = {
               ...data,
@@ -1095,8 +1133,8 @@ function EditableDescription({ value, canEdit, onSave, fallback = '', title = 'C
   return <textarea className="editable-description-input" aria-label="Collection note" autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value || fallback); setEditing(false); } if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') event.currentTarget.blur(); }} />;
 }
 
-function MediaView({ data, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, onDescriptionChange }) {
-  const [section, setSection] = useState('screen');
+function MediaView({ data, initialSection, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, onDescriptionChange }) {
+  const [section, setSection] = useState(() => MEDIA_SECTIONS.has(initialSection) ? initialSection : 'screen');
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
   const [formatFilters, setFormatFilters] = useState([]);
@@ -1197,6 +1235,7 @@ function MediaView({ data, onDataChange, notify, openMedia, canEdit, canReact, c
 
   const switchSection = (next) => {
     setSection(next);
+    onSectionChange(next);
     setQuery('');
     setListFilters([]);
     setFormatFilters([]);
@@ -1459,7 +1498,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
         <div className="shelf-actions">
           <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && items.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
           <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => onMoveShelf(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => onMoveShelf(1)}><ArrowDown size={15} /></button>}</span>
-          <span className="shelf-action-group shelf-edit-actions">{canEdit && <button aria-label={`Edit ${shelf.name}`} title="Edit shelf" onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Delete ${shelf.name}`} title="Move shelf to Bin" onClick={onDelete}><X size={15} /></button>}</span>
+          <span className="shelf-action-group shelf-edit-actions">{canEdit && <button aria-label={`Edit ${shelf.name}`} title="Edit shelf" onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Move ${shelf.name} to Bin`} title="Move shelf to Bin" onClick={onDelete}><Trash2 size={15} /></button>}</span>
           <span className="shelf-action-group shelf-page-actions"><button aria-label={`Scroll ${shelf.name} left`} disabled={currentPage <= 0 || pageCount <= 1} onClick={() => scrollPage(-1)}><ChevronLeft /></button>{pageCount > 1 && <small>{currentPage + 1} / {pageCount}</small>}<button aria-label={`Scroll ${shelf.name} right`} disabled={currentPage >= pageCount - 1 || pageCount <= 1} onClick={() => scrollPage(1)}><ChevronRight /></button></span>
         </div>
       </div>
@@ -1473,8 +1512,6 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
     </section>
   );
 }
-
-const MAIN_WATCHLIST_ID = 'main-watchlist';
 
 function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
   useEscape(onClose);
