@@ -409,6 +409,7 @@ export default function App() {
   const [adminMainClubId, setAdminMainClubId] = useState(() => window.localStorage.getItem(ADMIN_MAIN_CLUB_KEY) || '');
   const [confirmation, setConfirmation] = useState(null);
   const [collections, setCollections] = useState([]);
+  const [collectionsReadyFor, setCollectionsReadyFor] = useState(null);
   const [ownCollection, setOwnCollection] = useState(null);
   const [importDraft, setImportDraft] = useState(null);
   const [draggedCollectionId, setDraggedCollectionId] = useState(null);
@@ -814,12 +815,17 @@ export default function App() {
   useEffect(() => {
     if (sharedMode) {
       setCollections([]);
+      setCollectionsReadyFor('shared');
       setCollectionsLoading(false);
-      return;
+      return undefined;
     }
+    let cancelled = false;
+    const requestedAccountScope = accountScope;
     setCollectionsLoading(true);
+    setCollectionsReadyFor(null);
     loadPublicCollections({ fresh: true, accessToken })
       .then((nextCollections) => {
+        if (cancelled) return;
         setCollections(nextCollections);
         if (!nextCollections.length) setLandingApplied(true);
         if (data?.collectionId && data.collectionId !== MAIN_WATCHLIST_ID && !nextCollections.some((collection) => collection.id === data.collectionId)) {
@@ -827,9 +833,18 @@ export default function App() {
           if (kit) selectCollection(kit.id, { userInitiated: false });
         }
       })
-      .catch(() => { setCollections([]); setLandingApplied(true); })
-      .finally(() => setCollectionsLoading(false));
-  }, [accessToken, sharedMode]);
+      .catch(() => {
+        if (cancelled) return;
+        setCollections([]);
+        setLandingApplied(true);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setCollectionsReadyFor(requestedAccountScope);
+        setCollectionsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [accessToken, accountScope, sharedMode]);
 
   useEffect(() => {
     if (!accessToken || !account?.profile?.approved_at || account.profile.deactivated_at) { setOwnCollection(null); return; }
@@ -896,7 +911,8 @@ export default function App() {
 
   useEffect(() => {
     const visibilityPending = account?.profile?.role === 'admin' && adminClubsReadyFor !== account.profile.id;
-    if (authLoading || !collections.length || visibilityPending || landingApplied || userSelectedCollection.current) return;
+    const collectionsPending = collectionsReadyFor !== accountScope;
+    if (authLoading || collectionsPending || !collections.length || visibilityPending || landingApplied || userSelectedCollection.current) return;
     const canRestore = Boolean(account?.profile?.id && account.profile.approved_at && !account.profile.deactivated_at);
     const remembered = canRestore ? readLastPage(account.profile.id) : null;
     const rememberedCollectionIsVisible = remembered?.collectionId === MAIN_WATCHLIST_ID
@@ -909,7 +925,7 @@ export default function App() {
     rememberedSection.current = rememberedCollectionIsVisible ? remembered.section : 'screen';
     setLandingApplied(true);
     selectCollection(landingCollectionId, { userInitiated: false });
-  }, [account, authLoading, collections, adminClubsReadyFor, landingApplied, viewAsAdmin, adminClubs]);
+  }, [account, accountScope, authLoading, collections, collectionsReadyFor, adminClubsReadyFor, landingApplied, viewAsAdmin, adminClubs]);
 
   useEffect(() => {
     const skeletonTimer = window.setTimeout(
