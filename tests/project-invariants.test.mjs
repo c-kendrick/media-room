@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { buildWatchDemand } from '../src/watch-demand.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from '../src/star-rating.js';
-import { applyShelfMemberships } from '../src/shelf-membership.js';
+import { applyShelfMemberships, OPTIMISTIC_APPEND_POSITION } from '../src/shelf-membership.js';
 import { SECTION_NOTE_COLUMNS, SECTION_NOTE_DEFAULTS } from '../src/section-notes.js';
 import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from '../src/ownership-filter.js';
 import { parseCollectionBackup, validateCollectionBackup } from '../src/backup-import.js';
@@ -135,7 +135,7 @@ test('shelf membership toggles directly in the drawer and updates all visible st
   };
   const updated = applyShelfMemberships(snapshot, 'media-a', ['shelf-a', 'shelf-b']);
   assert.deepEqual(updated.media[0].lists, ['shelf-a', 'shelf-b']);
-  assert.deepEqual(updated.media[0].list_positions, { 'shelf-a': 4, 'shelf-b': 1000 });
+  assert.deepEqual(updated.media[0].list_positions, { 'shelf-a': 4, 'shelf-b': OPTIMISTIC_APPEND_POSITION });
   assert.notEqual(updated, snapshot);
 
   const app = await read('src/App.jsx');
@@ -145,6 +145,28 @@ test('shelf membership toggles directly in the drawer and updates all visible st
   assert.doesNotMatch(app, /Edit shelves|SHELF MEMBERSHIP|Save shelves/);
   assert.match(app, /const optimisticData = applyShelfMemberships[\s\S]*setData\(optimisticData\)[\s\S]*replaceMediaShelfMemberships/);
   assert.match(app, /Previous shelves restored/);
+});
+
+test('new shelf memberships append optimistically and atomically at the bottom', async () => {
+  const app = await read('src/App.jsx');
+  const writes = await read('src/media-write.js');
+  const migration = await read('supabase/migrations/20260721010000_append_new_shelf_memberships.sql');
+  assert.match(app, /list_positions: Object\.fromEntries\(shelfIds\.map\(\(id\) => \[id, OPTIMISTIC_APPEND_POSITION\]\)\)/);
+  assert.match(app, /OPTIMISTIC_APPEND_POSITION - rows\.length \+ index/);
+  assert.match(writes, /rpc\/append_media_shelf_memberships[\s\S]*target_media_item_id: databaseId, target_shelf_ids: additions/);
+  assert.match(writes, /error\?\.code !== 'PGRST202'[\s\S]*Math\.max[\s\S]*\+ 1000/);
+  assert.match(migration, /order by s\.id\s+for update/);
+  assert.match(migration, /coalesce\(max\(existing\.position\), 0\) \+ 1000/);
+  assert.match(migration, /on conflict \(shelf_id, media_item_id\) do nothing/);
+  assert.match(migration, /public\.can_manage_collection\(media_row\.collection_id\)/);
+});
+
+test('numbered shelf ranks reserve the ownership row for every card', async () => {
+  const app = await read('src/App.jsx');
+  const layout = await read('src/media-layout.css');
+  assert.match(app, /media-owned-tag', !item\.owned && 'is-placeholder'[\s\S]*item\.owned \? 'Owned' : '\\u00a0'/);
+  assert.match(layout, /\.media-card-meta \.media-owned-tag\.is-placeholder \{\s*visibility: hidden/);
+  assert.match(app, /media-owned-tag[\s\S]*shelfRank !== null[\s\S]*className="shelf-rank"/);
 });
 
 test('collection notes are section-specific while Main Watchlist mirrors Film & TV only', async () => {
@@ -307,7 +329,7 @@ test('owned status is owner-controlled, optimistic, and displayed as a muted car
   assert.match(data, /star_rating,owned,runtime/);
   assert.match(data, /owned: item\.owned \?\? false/);
   assert.match(app, /setOptimisticOwned\(next\)[\s\S]*onUpdate\(\{ owned: next \}/);
-  assert.match(app, /item\.owned && <span className="media-owned-tag">Owned<\/span>/);
+  assert.match(app, /media-owned-tag', !item\.owned && 'is-placeholder'[\s\S]*item\.owned \? 'Owned'/);
   assert.match(styles, /\.media-card-meta \.media-owned-tag[\s\S]*color: #81786c/);
   assert.match(migration, /c\.owner_id = auth\.uid\(\)/);
   assert.match(migration, /before update of owned/);
