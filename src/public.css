@@ -216,7 +216,6 @@
 .main-watchlist-copy{display:grid;gap:1px;line-height:1.02}
 .main-watchlist-copy small{font-size:6px;font-weight:600;letter-spacing:.01em}
 .main-watchlist-copy strong{font-size:10px;font-weight:900}
-.delete-shelf{opacity:.48}
 .remove-main-mirror{width:auto!important;min-height:34px;padding:0 10px!important;display:inline-flex!important;gap:7px;align-items:center;border-radius:6px!important;font-size:9px!important;white-space:nowrap}
 .remove-main-mirror{background:transparent!important;border:1px solid #d8c9bb!important;color:#8d5147!important}
 .remove-main-mirror:hover{background:#f3dfda!important}

@@ -1107,12 +1107,14 @@ test('signed-in navigation is remembered safely without persisting shared-link d
   assert.match(app, /onSectionChange=\{\(section\) => \{ rememberedSection\.current = section; if \(!sharedMode\) writeLastPage/);
 });
 
-test('shelf removal uses a muted Bin icon instead of an ambiguous X', async () => {
+test('shelf removal uses the same muted control styling as the edit icon', async () => {
   const app = await read('src/App.jsx');
-  const styles = await read('src/public.css');
+  const publicStyles = await read('src/public.css');
+  const layoutStyles = await read('src/media-layout.css');
   assert.match(app, /className="delete-shelf" aria-label=\{`Move \$\{shelf\.name\} to Bin`\}[\s\S]*?<Trash2 size=\{15\} \/>/);
   assert.doesNotMatch(app, /className="delete-shelf"[\s\S]{0,180}<X size=\{15\}/);
-  assert.match(styles, /\.delete-shelf\{opacity:\.48\}/);
+  assert.doesNotMatch(publicStyles, /\.delete-shelf\{[^}]*opacity:/);
+  assert.doesNotMatch(layoutStyles, /\.shelf-head \.delete-shelf\s*\{[^}]*color:/);
 });
 
 test('the Media Room ships an installable standalone web app shell without caching shared data', async () => {
