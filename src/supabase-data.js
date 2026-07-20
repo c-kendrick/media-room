@@ -1,4 +1,4 @@
-import { supabaseSelect } from './supabase.js';
+import { supabaseRpc, supabaseSelect } from './supabase.js';
 import { buildWatchDemand, buildWatchGroupIdentities } from './watch-demand.js';
 import { SECTION_NOTE_DEFAULTS } from './section-notes.js';
 import { mediaReactionIdentity } from './media-reactions.js';
@@ -6,6 +6,9 @@ import { mediaReactionIdentity } from './media-reactions.js';
 const MEDIA_SELECT = 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,owned,runtime,deleted_at,created_at,updated_at';
 const PRE_OWNED_MEDIA_SELECT = MEDIA_SELECT.replace(',owned', '');
 const LEGACY_MEDIA_SELECT = PRE_OWNED_MEDIA_SELECT.replace(',star_rating', '');
+const MEDIA_CARD_SELECT = 'id,legacy_id,collection_id,type,title,year,status,priority,poster_url,creator,format,platforms,rating,star_rating,owned,deleted_at,created_at,updated_at';
+const MEDIA_DETAIL_SELECT = 'id,notes,creator,director,description,genres,runtime';
+const SECTION_TYPES = { screen: ['film', 'television'], book: ['book'], game: ['game'] };
 
 function query(table, parameters) {
   return table + '?' + new URLSearchParams(parameters).toString();
@@ -23,7 +26,7 @@ async function selectMediaItems(parameters, options) {
   }
 }
 
-export function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [], publicProfiles = [], reactions = []) {
+export function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [], publicProfiles = [], reactions = [], loadedSections = null) {
   const membershipsByItem = new Map();
   const profileById = new Map(publicProfiles.map((profile) => [profile.id, profile]));
   const reactionsByWork = new Map();
@@ -72,6 +75,7 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
       sourceSection: shelf.source_section || shelf.section,
       virtual: Boolean(shelf.virtual),
     })),
+    loadedSections: loadedSections || ['screen', 'book', 'game'],
     media: mediaItems.map((item) => {
       const membership = membershipsByItem.get(item.id) || [];
       const workReactions = reactionsByWork.get(mediaReactionIdentity(item)) || { like: [], priority: [] };
@@ -96,6 +100,7 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
         star_rating: item.star_rating ?? null,
         owned: item.owned ?? false,
         runtime: item.runtime,
+        details_loaded: Boolean(item.details_loaded ?? Object.hasOwn(item, 'description')),
         added_at: item.created_at,
         updated_at: item.updated_at,
         deleted_at: item.deleted_at || null,
@@ -122,7 +127,63 @@ export async function loadPublicCollections({ fresh = false, accessToken } = {})
   }
 }
 
-export async function loadCollectionFromSupabase({ collectionId, fresh = false, accessToken } = {}) {
+export function mergeSectionSnapshot(current, sectionSnapshot) {
+  if (!current || current.collectionId !== sectionSnapshot.collectionId) return sectionSnapshot;
+  const section = sectionSnapshot.loadedSections?.[0];
+  const replacesSection = (row) => section && (row.section === section || SECTION_TYPES[section]?.includes(row.type));
+  const currentMediaById = new Map(current.media.map((row) => [row.database_id, row]));
+  const nextSectionMedia = sectionSnapshot.media.map((row) => {
+    const previous = currentMediaById.get(row.database_id);
+    return previous?.details_loaded ? { ...row, notes: previous.notes, creator: previous.creator, director: previous.director, description: previous.description, genres: previous.genres, runtime: previous.runtime, details_loaded: true } : row;
+  });
+  return {
+    ...current,
+    ...sectionSnapshot,
+    collectionDescriptions: { ...current.collectionDescriptions, ...sectionSnapshot.collectionDescriptions },
+    loadedSections: [...new Set([...(current.loadedSections || []), ...(sectionSnapshot.loadedSections || [])])],
+    mediaShelves: [...current.mediaShelves.filter((row) => !replacesSection(row)), ...sectionSnapshot.mediaShelves],
+    detailedSections: current.detailedSections || [],
+    media: [...current.media.filter((row) => !replacesSection(row)), ...nextSectionMedia],
+  };
+}
+
+function sectionMediaFilter(section) {
+  const types = SECTION_TYPES[section] || SECTION_TYPES.screen;
+  return types.length === 1 ? 'eq.' + types[0] : 'in.(' + types.join(',') + ')';
+}
+
+async function loadSectionDirect(collection, section, options) {
+  const { fresh, accessToken } = options;
+  const shelves = await supabaseSelect(query('shelves', {
+    collection_id: 'eq.' + collection.id,
+    section: 'eq.' + section,
+    select: 'id,section,name,subtitle,is_queue_list,is_reading_list,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
+    order: 'position.asc',
+  }), { fresh, accessToken });
+  const mediaItems = await supabaseSelect(query('media_items', {
+    collection_id: 'eq.' + collection.id,
+    type: sectionMediaFilter(section),
+    select: MEDIA_CARD_SELECT,
+    order: 'created_at.asc',
+  }), { fresh, accessToken });
+  const memberships = shelves.length ? await supabaseSelect(query('shelf_media_items', {
+    shelf_id: 'in.(' + shelves.map((shelf) => shelf.id).join(',') + ')',
+    select: 'shelf_id,media_item_id,position', order: 'position.asc',
+  }), { fresh, accessToken }) : [];
+  const mediaIds = mediaItems.map((item) => item.id);
+  const interests = mediaIds.length ? await supabaseSelect(query('media_interest', {
+    media_item_id: 'in.(' + mediaIds.join(',') + ')', select: 'media_item_id,user_id',
+  }), { fresh, accessToken }) : [];
+  const profileIds = [...new Set(interests.map((row) => row.user_id))];
+  const publicProfiles = profileIds.length ? await supabaseSelect(query('public_profiles', {
+    id: 'in.(' + profileIds.join(',') + ')', select: 'id,username,display_name',
+  }), { fresh, accessToken }) : [];
+  // Older databases without the section RPC retain card loading. Reactions are
+  // omitted here instead of falling back to the previous database-wide query.
+  return { shelves, mediaItems, memberships, interests, publicProfiles, reactions: [] };
+}
+
+export async function loadCollectionFromSupabase({ collectionId, section = 'screen', fresh = false, accessToken } = {}) {
   const collectionFilter = {
     ...(collectionId ? { id: 'eq.' + collectionId } : { slug: 'eq.kits-collection' }),
     limit: '1',
@@ -141,45 +202,34 @@ export async function loadCollectionFromSupabase({ collectionId, fresh = false, 
   const collection = collections[0];
   if (!collection) return null;
 
-  const shelvesPromise = supabaseSelect(query('shelves', {
-    collection_id: 'eq.' + collection.id,
-    select: 'id,section,name,subtitle,is_queue_list,is_reading_list,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
-    order: 'section.asc,position.asc',
-  }), { fresh, accessToken }).catch(() => supabaseSelect(query('shelves', {
-      collection_id: 'eq.' + collection.id,
-      select: 'id,section,name,subtitle,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
-      order: 'section.asc,position.asc',
-    }), { fresh, accessToken })).catch(() => supabaseSelect(query('shelves', {
-      collection_id: 'eq.' + collection.id,
-      select: 'id,section,name,position,deleted_at',
-      order: 'section.asc,position.asc',
-    }), { fresh, accessToken }));
-  const [shelves, mediaItems] = await Promise.all([
-    shelvesPromise,
-    selectMediaItems({
-      collection_id: 'eq.' + collection.id,
-      order: 'created_at.asc',
-    }, { fresh, accessToken }),
-  ]);
+  let payload;
+  try {
+    payload = await supabaseRpc('load_collection_section', {
+      target_collection_id: collection.id,
+      target_section: section,
+    }, { fresh, accessToken });
+  } catch {
+    payload = await loadSectionDirect(collection, section, { fresh, accessToken });
+  }
+  if (!payload) return null;
+  return mapSnapshot(
+    payload.collection || collection,
+    payload.shelves || [], payload.media || payload.mediaItems || [], payload.memberships || [],
+    payload.interests || [], payload.profiles || payload.publicProfiles || [], payload.reactions || [], [section],
+  );
+}
 
-  const memberships = shelves.length
-    ? await supabaseSelect(query('shelf_media_items', {
-      shelf_id: 'in.(' + shelves.map((shelf) => shelf.id).join(',') + ')',
-      select: 'shelf_id,media_item_id,position',
-      order: 'position.asc',
-    }), { fresh, accessToken })
-    : [];
+export async function loadMediaDetails({ mediaItemId, fresh = false, accessToken } = {}) {
+  const rows = await supabaseSelect(query('media_items', { id: 'eq.' + mediaItemId, select: MEDIA_DETAIL_SELECT, limit: '1' }), { fresh, accessToken });
+  return rows[0] ? { ...rows[0], details_loaded: true } : null;
+}
 
-  // Do not put every media UUID into an `in.(...)` URL parameter. A large
-  // collection exceeds common URL limits and makes the whole snapshot fall
-  // back to static data. Interest markers are a small public relation, so
-  // retrieve them once and associate them in mapSnapshot instead.
-  const interests = mediaItems.length ? await supabaseSelect(query('media_interest', {
-    select: 'media_item_id,user_id',
-  }), { fresh, accessToken }) : [];
-  const publicProfiles = collections.length ? await supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh, accessToken }) : [];
-  const reactions = accessToken ? await supabaseSelect(query('media_reactions', { select: 'user_id,kind,work_key' }), { fresh, accessToken }).catch(() => []) : [];
-  return mapSnapshot(collection, shelves, mediaItems, memberships, interests, publicProfiles, reactions);
+export async function loadSectionDetails({ collectionId, section, fresh = false, accessToken } = {}) {
+  return supabaseSelect(query('media_items', {
+    collection_id: 'eq.' + collectionId,
+    type: sectionMediaFilter(section),
+    select: MEDIA_DETAIL_SELECT,
+  }), { fresh, accessToken });
 }
 
 export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken, ownerIds } = {}) {

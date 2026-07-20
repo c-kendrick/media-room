@@ -39,3 +39,12 @@ export function supabaseSelect(path, { fresh = false, accessToken } = {}) {
     headers: { Authorization: 'Bearer ' + (accessToken || SUPABASE_PUBLISHABLE_KEY) },
   });
 }
+
+export function supabaseRpc(name, body, { fresh = false, accessToken } = {}) {
+  return supabaseRequest('/rest/v1/rpc/' + name, {
+    method: 'POST',
+    body,
+    fresh,
+    headers: { Authorization: 'Bearer ' + (accessToken || SUPABASE_PUBLISHABLE_KEY) },
+  });
+}

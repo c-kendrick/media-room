@@ -261,6 +261,10 @@
 .media-shelf {
   margin: 20px 0 38px;
   transition: opacity .15s ease, transform .15s ease;
+  /* Let the browser skip layout/paint work for distant shelves while keeping
+     them mounted early enough that scrolling never waits on React. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 720px;
 }
 
 .media-shelf.shelf-dragging {

@@ -12,6 +12,7 @@ import { collectionSummaryStats } from '../src/collection-stats.js';
 import { appSiteUrl, authenticatedProfilePath, selectAuthenticatedProfile, signupRateLimitDetails } from '../src/auth.js';
 import { applyReactionToSnapshot, mediaReactionIdentity } from '../src/media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from '../src/identity.js';
+import { mergeSectionSnapshot } from '../src/supabase-data.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -169,7 +170,7 @@ test('opening Main Watchlist has no redundant All Watchlists tab', async () => {
   assert.match(app, /<MediaView key=\{data\.collectionId\}/);
   assert.match(app, /useState\(\(\) => MEDIA_SECTIONS\.has\(initialSection\) \? initialSection : 'screen'\)/);
   assert.doesNotMatch(app, />All Watchlists</);
-  assert.match(app, /!data\.mainWatchlist && <div className="media-tabs">/);
+  assert.match(app, /!data\.mainWatchlist && <div className="media-tabs" aria-busy=\{sectionLoading\}>/);
 });
 
 test('collection summary counts use live shelf UUIDs and owned flags', async () => {
@@ -542,7 +543,7 @@ test('private clubs restrict collection visibility and stay admin-only', async (
   assert.match(migration, /if not public\.is_admin\(\) then raise exception 'Admin access required'/);
 
   assert.match(client, /Authorization: 'Bearer ' \+ \(accessToken \|\| SUPABASE_PUBLISHABLE_KEY\)/);
-  assert.match(data, /loadMediaSnapshot\(\{ fresh = false, collectionId, accessToken, mainWatchlistOwnerIds \}/);
+  assert.match(data, /loadMediaSnapshot\(\{ fresh = false, collectionId, section = 'screen', accessToken, mainWatchlistOwnerIds \}/);
   assert.match(supabaseData, /loadMainWatchlistFromSupabase\(\{ fresh = false, accessToken, ownerIds \}/);
   assert.match(supabaseData, /\.filter\(\(interest\) => scopedProfileIds\.has\(interest\.user_id\)\)/);
   assert.match(supabaseData, /collection_id: 'in\.\(' \+ collectionIds\.join\(','\) \+ '\)'/);
@@ -804,7 +805,7 @@ test('Main Watchlist selection lives in the hero title without an extra content 
 test('Share Collection always manages the signed-in owner collection and no duplicate Friends button remains', async () => {
   const app = await read('src/App.jsx');
   assert.match(app, /const \[ownCollection, setOwnCollection\] = useState\(null\)/);
-  assert.match(app, /setOwnCollection\(visibleCollections\.find\(\(collection\) => collection\.owner_id === account\.profile\.id\) \|\| null\)/);
+  assert.match(app, /setOwnCollection\(collections\.find\(\(collection\) => collection\.owner_id === account\.profile\.id\) \|\| null\)/);
   assert.match(app, /const canShareCollection = Boolean\(account\?\.profile\?\.approved_at[\s\S]*&& ownCollection\)/);
   assert.doesNotMatch(app, /canShareCollection = Boolean\([^\n]*!sharedMode/);
   assert.match(app, /collectionId=\{ownCollection\.id\} collectionTitle=\{ownCollection\.title\}/);
@@ -845,11 +846,11 @@ test('all single-item additions require a shelf and foreign imports open and sav
   const importFlow = app.slice(app.indexOf('{importDraft &&'), app.indexOf('{searchOpen &&'));
   assert.match(data, /collection_id: item\.collection_id/);
   assert.match(app, /selectedMediaCollectionId !== ownCollection\.id/);
-  assert.match(app, /loadMediaSnapshot\(\{ fresh: true, collectionId: destinationCollectionId, accessToken \}\)/);
+  assert.match(app, /loadMediaSnapshot\(\{ fresh: true, collectionId: destinationCollectionId, section: destinationSection, accessToken \}\)/);
   assert.match(app, /sourceCollectionTitle=\{selectedSourceCollectionTitle\}/);
   assert.match(app, />Import to Your Collection<\/Button>/);
-  assert.match(app, /setImportDraft\(\{[\s\S]*destination: cachedDestination[\s\S]*shelvesLoading: !cachedDestination/);
-  assert.match(app, /setSelectedMediaId\(null\);[\s\S]*if \(!cachedDestination\) loadImportDestination\(draftKey, ownCollection\.id\)/);
+  assert.match(app, /setImportDraft\(\{[\s\S]*destination: cachedDestination[\s\S]*shelvesLoading: !destinationReady/);
+  assert.match(app, /setSelectedMediaId\(null\);[\s\S]*if \(!destinationReady\) loadImportDestination\(draftKey, ownCollection\.id, destinationSection, cachedDestination\)/);
   assert.match(app, /initialItem=\{importDraft\.item\}/);
   assert.match(app, /mediaForm\(initialItem \|\| \{\}, section === 'screen' \? 'film' : section\)/);
   assert.match(app, /if \(!shelfIds\.length\) \{ setError\('Choose at least one shelf\.'/);
@@ -902,7 +903,7 @@ test('each Club has an isolated Main Watchlist with personal fallback and distin
   const data = await read('src/supabase-data.js');
   const migration = await read('supabase/migrations/20260719030000_friends_and_member_clubs.sql');
   assert.match(app, /selectedMainWatchlistClub\?\.member_ids \|\| \[account\.profile\.id\]/);
-  assert.match(app, /loadMediaSnapshot\(\{ fresh, collectionId: targetCollectionId, accessToken, mainWatchlistOwnerIds \}\)/);
+  assert.match(app, /loadMediaSnapshot\(\{ fresh, collectionId: targetCollectionId, section: rememberedSection\.current, accessToken, mainWatchlistOwnerIds \}\)/);
   assert.match(app, /const defaultClubId = memberClubs\[0\]\.id/);
   assert.match(app, /clubs\.map\(\(club\) => <button/);
   assert.match(app, /if \(clubs\.length <= 1\) return <h1>\{title\}<\/h1>/);
@@ -1123,6 +1124,55 @@ test('initial opening progresses from branding to a responsive skeleton without 
   assert.match(styles, /\.initial-skeleton\.is-detailed \.skeleton-detail\{opacity:1;transform:none\}/);
   assert.match(styles, /@media\(max-width:760px\)\{[\s\S]*?\.initial-skeleton\{grid-template-columns:1fr\}/);
   assert.match(styles, /@media\(prefers-reduced-motion:reduce\)/);
+});
+
+test('collection loading is section-scoped, cached, and avoids startup-wide prefetches', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/supabase-data.js');
+  const migration = await read('supabase/migrations/20260720020000_progressive_collection_loading.sql');
+
+  assert.match(app, /section: rememberedSection\.current/);
+  assert.match(app, /current\.loadedSections\?\.includes\(section\)/);
+  assert.match(app, /sectionRequests\.current\.get\(requestKey\)/);
+  assert.doesNotMatch(app, /requestIdleCallback\(prefetch|for \(const collection of displayedCollections\)/);
+  assert.match(app, /setOwnCollection\(collections\.find/);
+  assert.match(data, /target_section: section/);
+  assert.match(data, /section: 'eq\.' \+ section/);
+  assert.match(migration, /create or replace function public\.load_collection_section/);
+  assert.match(migration, /where case target_section/);
+  assert.doesNotMatch(data.slice(data.indexOf('loadCollectionFromSupabase'), data.indexOf('loadMainWatchlistFromSupabase')), /select: 'user_id,kind,work_key'\s*\}\)/);
+});
+
+test('section snapshot merging keeps visited tabs and cached drawer details', () => {
+  const current = {
+    collectionId: 'collection-a', loadedSections: ['screen'], detailedSections: [],
+    collectionDescriptions: { screen: 'Screen' },
+    mediaShelves: [{ shelf_id: 'screen-shelf', section: 'screen' }],
+    media: [{ database_id: 'screen-item', type: 'film', description: 'Cached', details_loaded: true }],
+  };
+  const books = {
+    collectionId: 'collection-a', loadedSections: ['book'],
+    collectionDescriptions: { book: 'Books' },
+    mediaShelves: [{ shelf_id: 'book-shelf', section: 'book' }],
+    media: [{ database_id: 'book-item', type: 'book', details_loaded: false }],
+  };
+  const merged = mergeSectionSnapshot(current, books);
+  assert.deepEqual(merged.loadedSections, ['screen', 'book']);
+  assert.deepEqual(merged.mediaShelves.map((row) => row.shelf_id), ['screen-shelf', 'book-shelf']);
+  assert.equal(merged.media.find((row) => row.database_id === 'screen-item').description, 'Cached');
+});
+
+test('drawer details load once while off-screen shelves and posters remain browser-prioritised', async () => {
+  const app = await read('src/App.jsx');
+  const layout = await read('src/media-layout.css');
+  assert.match(app, /detailRequests\.current\.get\(mediaItemId\)/);
+  assert.match(app, /loadMediaDetails\(\{ mediaItemId, accessToken \}\)/);
+  assert.match(app, /details_loaded: true/);
+  assert.match(app, /loading="lazy" decoding="async"/);
+  assert.match(app, /function cardPosterUrl/);
+  assert.match(app, /\/t\/p\/w342\//);
+  assert.match(layout, /content-visibility: auto/);
+  assert.match(layout, /contain-intrinsic-size: auto 720px/);
 });
 
 test('shelf removal uses the same muted control styling as the edit icon', async () => {
