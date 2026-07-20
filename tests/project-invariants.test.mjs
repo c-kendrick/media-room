@@ -473,9 +473,12 @@ test('shelf arranging has undo redo, generous drag targets, and button-only debo
 test('mobile shelf controls and arranger keep a clear compact reading order', async () => {
   const app = await read('src/App.jsx');
   const styles = await read('src/public.css');
-  assert.match(app, /className="arrange-lanes"><h3 className="arrange-lane-heading">ROW 1 SETS<\/h3><h3 className="arrange-lane-heading">ROW 2 SETS<\/h3>\{draft\.sets\.map\(renderSet\)\}/);
+  assert.match(app, /className="arrange-lane-headings"><h3>ROW 1 SETS<\/h3><h3>ROW 2 SETS<\/h3><\/div>/);
+  assert.match(app, /Math\.ceil\(draft\.sets\.length \/ 2\)[\s\S]*className="arrange-set-pair"[\s\S]*draft\.sets\.slice\(pairIndex \* 2, pairIndex \* 2 \+ 2\)/);
   assert.doesNotMatch(app, /setIndex % 2 === lane/);
-  assert.match(styles, /@media\(max-width:760px\)\{\.arrange-lanes\{grid-template-columns:1fr\}\.arrange-lane-heading\{display:none\}/);
+  assert.match(styles, /\.arrange-lanes\{display:flex;flex-direction:column;gap:14px/);
+  assert.match(styles, /\.arrange-lane-headings,\.arrange-set-pair\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);align-items:start/);
+  assert.match(styles, /@media\(max-width:760px\)\{\.arrange-lane-headings\{display:none\}\.arrange-set-pair\{grid-template-columns:1fr\}/);
   assert.match(styles, /\.shelf-add-button\{[^}]*box-sizing:border-box!important;[^}]*width:40px!important;[^}]*height:40px!important;[^}]*padding:0!important;[^}]*display:grid!important;place-items:center!important/);
 });
 
@@ -1057,7 +1060,8 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.match(styles, /\.media-card-rating-row/);
   assert.match(styles, /\.reaction-button\.like-reaction\.active/);
   assert.match(app, /people\.length > 0 && 'has-count'/);
-  assert.match(styles, /\.reaction-controls \{[\s\S]*justify-content: flex-end;[\s\S]*margin-left: auto;/);
+  assert.match(styles, /\.media-card-rating-row \{[\s\S]*flex-wrap: wrap;[\s\S]*width: 100%;[\s\S]*max-width: 100%;/);
+  assert.match(styles, /\.reaction-controls \{[\s\S]*flex: 0 0 auto;[\s\S]*flex-wrap: nowrap;[\s\S]*max-width: 100%;[\s\S]*margin-left: 0;/);
   assert.match(styles, /\.reaction-button\.has-count:not\(\.labelled\) \{[\s\S]*width: auto;[\s\S]*gap: 2px;/);
   const cardReactionCount = styles.slice(styles.indexOf('.reaction-button:not(.labelled) small'), styles.indexOf('.reaction-button[data-tooltip]'));
   assert.match(cardReactionCount, /position: static;[\s\S]*background: transparent;[\s\S]*color: #c43c3c;[\s\S]*font-size: 9px;/);
