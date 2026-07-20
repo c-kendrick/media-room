@@ -33,8 +33,6 @@ import {
   Stamp,
   Trash2,
   Upload,
-  ChevronsDown,
-  ChevronsUp,
   UserRound,
   Users,
   X,
@@ -55,6 +53,7 @@ import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUse
 import { applyReactionToSnapshot, mediaReactionIdentity, setMediaLoveBatch, setMediaReaction } from './media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from './identity.js';
 import { clearCachedAccount, readCachedSection, writeCachedSnapshot } from './section-cache.js';
+import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershipIdentity, moveToOverflow, moveToPosition, pairedShelfSegments, serializeShelfDraft, SHELF_SET_SIZE, validateShelfDraft } from './shelf-order.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -1809,7 +1808,7 @@ function MediaView({ data, initialSection, onLoadSection, onEnsureSectionDetails
       {creatingShelf && <CreateShelfDialog section={section} onClose={() => setCreatingShelf(false)} onSave={async (values) => { setCreatingShelf(false); try { await createShelf(accessToken, { collection_id: data.collectionId, section, ...values, position: (shelves.at(-1)?.position || 0) + 1000 }); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }} />}
       {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id, index) => [id, (index + 1) * 1000])), interests: [], likes: [], priorities: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, collection_id: data.collectionId }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setMediaReaction(accessToken, created[0].id, 'priority', true); await refresh({ fresh: true }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('Media added.'); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('The media item could not be saved.'); }); }} />}
       {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; onDataChange(optimisticData); try { const deleted = await permanentlyDeleteMedia(accessToken, item.database_id); if (!deleted?.length) throw new Error('Supabase did not delete the media item.'); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; onDataChange(optimisticData); try { const deleted = await deleteShelf(accessToken, shelf.shelf_id); if (!deleted?.length) throw new Error('Supabase did not delete the shelf.'); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })} />}
-      {shelfEditor && <ShelfEditDialog shelf={shelfEditor} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
+      {shelfEditor && <ShelfEditDialog shelf={shelfEditor} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList, numbered: changes.is_numbered ?? shelfEditor.numbered } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
       {bulkImportType && <BulkImportDialog type={bulkImportType} shelves={shelves} onClose={() => setBulkImportType(null)} onImport={(shelfIds, rows) => {
         const temporaryBatch = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const temporaryItems = rows.map((item, index) => ({ ...item, year: null, item_id: `bulk-${temporaryBatch}-${index}`, database_id: `bulk-${temporaryBatch}-${index}`, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id) => [id, (index + 1) * 1000])), interests: [], optimistic: true, created_at: new Date().toISOString() }));
@@ -1842,107 +1841,92 @@ function SearchResultsSection({ items, onOpen, canRate, onRate }) {
 function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorderShelf, canCurateMain, canRemoveMirror, onRemoveMirror, onToggleMain, canMoveUp, canMoveDown, onMoveShelf, onAdd, shelfDragging, onShelfDragStart, onShelfDragEnd, onShelfDrop, onReorder, onRename, onDelete }) {
   const shelfRef = useRef(null);
   const trackRef = useRef(null);
-  const [draggedId, setDraggedId] = useState(null);
   const [displayItems, setDisplayItems] = useState(items);
   const [arranging, setArranging] = useState(false);
-  const [currentPage, setCurrentPage] = useState(0);
+  const [currentSegment, setCurrentSegment] = useState(0);
   const [eagerPosters, setEagerPosters] = useState(false);
   const serverOrderKey = items.map((item) => `${item.database_id}:${item.updated_at || ''}:${item.star_rating ?? ''}:${item.list_positions?.[shelf.shelf_id] ?? ''}:${(item.interests || []).map((person) => person.id || person.username).sort().join(',')}:${(item.likes || []).map((person) => person.id).sort().join(',')}:${(item.priorities || []).map((person) => person.id).sort().join(',')}`).join('|');
   useEffect(() => { setDisplayItems(items); }, [serverOrderKey]);
-  const rowBreak = Math.ceil(displayItems.length / 2);
-  const displayRows = [displayItems.slice(0, rowBreak), displayItems.slice(rowBreak)];
-  const pageCount = Math.ceil(Math.max(...displayRows.map((row) => row.length), 0) / 7);
-  const displayPages = Array.from({ length: pageCount }, (_, pageIndex) => displayRows.map((row) => row.slice(pageIndex * 7, (pageIndex + 1) * 7)));
-  useEffect(() => { setCurrentPage((page) => Math.min(page, Math.max(pageCount - 1, 0))); }, [pageCount]);
+  const displaySegments = pairedShelfSegments(displayItems);
+  const segmentCount = displaySegments.length;
+  useEffect(() => { setCurrentSegment((segment) => Math.min(segment, Math.max(segmentCount - 1, 0))); }, [segmentCount]);
   useLayoutEffect(() => {
     const bounds = shelfRef.current?.getBoundingClientRect();
     setEagerPosters(Boolean(bounds && bounds.top < window.innerHeight * 1.15 && bounds.bottom > 0));
   }, [shelf.shelf_id]);
-  const scrollPage = (direction) => {
+  const scrollSegment = (direction) => {
     const track = trackRef.current;
     if (!track) return;
-    const nextPage = Math.max(0, Math.min(currentPage + direction, Math.max(pageCount - 1, 0)));
-    setCurrentPage(nextPage);
-    const page = track.querySelector('.poster-page');
-    track.scrollTo({ left: nextPage * ((page?.offsetWidth || track.clientWidth) + 24), behavior: 'smooth' });
+    const nextSegment = Math.max(0, Math.min(currentSegment + direction, Math.max(segmentCount - 1, 0)));
+    setCurrentSegment(nextSegment);
+    const segment = track.querySelector('.poster-segment');
+    track.scrollTo({ left: nextSegment * ((segment?.offsetWidth || track.clientWidth) + 24), behavior: 'smooth' });
   };
   const moveShelfWithViewport = (direction) => {
     Promise.resolve(onMoveShelf(direction)).catch(() => {});
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      shelfRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }));
+    requestAnimationFrame(() => requestAnimationFrame(() => shelfRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })));
   };
-
-  return (
-    <section ref={shelfRef} className={cls('media-shelf', shelfDragging && 'shelf-dragging')} onDragOver={(event) => canReorderShelf && event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (canReorderShelf) onShelfDrop?.(); }}>
-      <div className="shelf-head">
-        <div className="shelf-title">
-          {canReorderShelf && <button className="shelf-drag-handle" aria-label={`Drag ${shelf.name} to reorder`} title="Drag to reorder shelf" draggable onDragStart={onShelfDragStart} onDragEnd={onShelfDragEnd}><GripVertical size={16} /></button>}
-          <span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2>{shelf.subtitle && <p className="shelf-subtitle">{shelf.subtitle}</p>}</span>
-        </div>
-        <div className="shelf-actions">
-          <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && items.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} aria-label={`${shelf.showInMainWatchlist ? 'Remove' : 'Add'} ${shelf.name} ${shelf.showInMainWatchlist ? 'from' : 'to'} Main Watchlist`} title={shelf.showInMainWatchlist ? 'Click to remove from Main Watchlist' : 'Show in Main Watchlist'} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
-          <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => moveShelfWithViewport(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => moveShelfWithViewport(1)}><ArrowDown size={15} /></button>}</span>
-          <span className="shelf-action-group shelf-edit-actions">{canEdit && <button aria-label={`Edit ${shelf.name}`} title="Edit shelf" onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Move ${shelf.name} to Bin`} title="Move shelf to Bin" onClick={onDelete}><Trash2 size={15} /></button>}</span>
-          <span className="shelf-action-group shelf-page-actions"><button aria-label={`Scroll ${shelf.name} left`} disabled={currentPage <= 0 || pageCount <= 1} onClick={() => scrollPage(-1)}><ChevronLeft /></button>{pageCount > 1 && <small>{currentPage + 1} / {pageCount}</small>}<button aria-label={`Scroll ${shelf.name} right`} disabled={currentPage >= pageCount - 1 || pageCount <= 1} onClick={() => scrollPage(1)}><ChevronRight /></button></span>
-        </div>
+  return <section ref={shelfRef} className={cls('media-shelf fixed-set-shelf', shelfDragging && 'shelf-dragging')} onDragOver={(event) => canReorderShelf && event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (canReorderShelf) onShelfDrop?.(); }}>
+    <div className="shelf-head">
+      <div className="shelf-title">{canReorderShelf && <button className="shelf-drag-handle" aria-label={`Drag ${shelf.name} to reorder`} title="Drag to reorder shelf" draggable onDragStart={onShelfDragStart} onDragEnd={onShelfDragEnd}><GripVertical size={16} /></button>}<span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2>{shelf.subtitle && <p className="shelf-subtitle">{shelf.subtitle}</p>}</span></div>
+      <div className="shelf-actions">
+        <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && items.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
+        <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => moveShelfWithViewport(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => moveShelfWithViewport(1)}><ArrowDown size={15} /></button>}</span>
+        <span className="shelf-action-group shelf-edit-actions">{canEdit && <button aria-label={`Edit ${shelf.name}`} onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Move ${shelf.name} to Bin`} onClick={onDelete}><Trash2 size={15} /></button>}</span>
+        <span className="shelf-action-group shelf-set-actions"><button aria-label={`Show previous sets in ${shelf.name}`} disabled={currentSegment <= 0 || segmentCount <= 1} onClick={() => scrollSegment(-1)}><ChevronLeft /></button>{segmentCount > 1 && <small>Sets {currentSegment * 2 + 1}{displaySegments[currentSegment]?.[1]?.length ? `\u2013${currentSegment * 2 + 2}` : ''}</small>}<button aria-label={`Show next sets in ${shelf.name}`} disabled={currentSegment >= segmentCount - 1 || segmentCount <= 1} onClick={() => scrollSegment(1)}><ChevronRight /></button></span>
       </div>
-      <div className="poster-track" ref={trackRef} onScroll={(event) => { const page = event.currentTarget.querySelector('.poster-page'); const width = (page?.offsetWidth || event.currentTarget.clientWidth) + 24; if (width > 0) setCurrentPage(Math.max(0, Math.min(Math.round(event.currentTarget.scrollLeft / width), Math.max(pageCount - 1, 0)))); }}>
-        {displayPages.map((pageRows, pageIndex) => <div className="poster-page" key={pageIndex}>
-          {pageRows.flat().map((item, itemIndex) => <MediaCard key={item.item_id} item={item} eagerPoster={eagerPosters && pageIndex === 0 && itemIndex < 8} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} draggable={canEdit && !item.optimistic} dragging={draggedId === item.database_id} onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedId(item.database_id); }} onDragEnd={() => setDraggedId(null)} onDrop={async () => { if (!draggedId || draggedId === item.database_id) return; const previous = [...displayItems]; const next = [...displayItems]; const from = next.findIndex((entry) => entry.database_id === draggedId); const to = next.findIndex((entry) => entry.database_id === item.database_id); next.splice(to, 0, next.splice(from, 1)[0]); setDisplayItems(next); setDraggedId(null); try { await onReorder(next.map((entry) => entry.database_id)); } catch { setDisplayItems(previous); } }} />)}
-        </div>)}
-        {!displayItems.length && <div className="empty-poster">No items on this shelf yet.</div>}
-      </div>
-      {arranging && <ArrangeShelfDialog shelf={shelf} items={displayItems} onClose={() => setArranging(false)} onSave={async (nextItems) => { const previous = [...displayItems]; setDisplayItems(nextItems); setArranging(false); try { await onReorder(nextItems.map((item) => item.database_id)); } catch { setDisplayItems(previous); } }} />}
-    </section>
-  );
+    </div>
+    <div className="poster-track" ref={trackRef} onScroll={(event) => { const segment = event.currentTarget.querySelector('.poster-segment'); const width = (segment?.offsetWidth || event.currentTarget.clientWidth) + 24; if (width > 0) setCurrentSegment(Math.max(0, Math.min(Math.round(event.currentTarget.scrollLeft / width), Math.max(segmentCount - 1, 0)))); }}>
+      {displaySegments.map((segmentRows, segmentIndex) => <div className={cls('poster-segment', segmentIndex < displaySegments.length - 1 && 'has-divider')} key={segmentIndex}>{segmentRows.map((row, rowIndex) => row.length > 0 && <div className="poster-set-row" data-set={segmentIndex * 2 + rowIndex + 1} key={rowIndex}>{row.map((item, itemIndex) => <MediaCard key={item.item_id} item={item} shelfRank={shelf.numbered ? segmentIndex * 14 + rowIndex * 7 + itemIndex + 1 : null} eagerPoster={eagerPosters && segmentIndex === 0 && rowIndex === 0} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} />)}</div>)}</div>)}
+      {!displayItems.length && <div className="empty-poster">No items on this shelf yet.</div>}
+    </div>
+    {arranging && <ArrangeShelfDialog shelf={shelf} items={displayItems} onClose={() => setArranging(false)} onSave={async (nextItems) => { const previous = [...displayItems]; setDisplayItems(nextItems); try { await onReorder(nextItems.map((item) => item.database_id)); } catch (error) { setDisplayItems(previous); throw error; } }} />}
+  </section>;
 }
 
 function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
   useEscape(onClose);
-  const [ordered, setOrdered] = useState(items);
+  const [draft, setDraft] = useState(() => createShelfDraft(items));
   const [saving, setSaving] = useState(false);
   const [draggedItemId, setDraggedItemId] = useState(null);
   const [positionDrafts, setPositionDrafts] = useState({});
-  const move = (index, destination) => {
-    if (destination < 0 || destination >= ordered.length || destination === index) return;
-    setOrdered((current) => {
-      const next = [...current];
-      next.splice(destination, 0, next.splice(index, 1)[0]);
-      return next;
-    });
+  const [feedback, setFeedback] = useState([]);
+  const applyDraft = (updater) => { setDraft((current) => updater(current)); setFeedback([]); };
+  const startDrag = (event, item) => { const identity = membershipIdentity(item); event.dataTransfer.setData('text/plain', identity); event.dataTransfer.effectAllowed = 'move'; setDraggedItemId(identity); };
+  const droppedIdentity = (event) => draggedItemId || event.dataTransfer.getData('text/plain');
+  const commitPosition = (item) => {
+    const identity = membershipIdentity(item);
+    const raw = positionDrafts[identity];
+    const position = Number(raw);
+    if (!/^\d+$/.test(raw || '') || !Number.isInteger(position) || position < 1 || position > draft.sets.length * SHELF_SET_SIZE) setFeedback([`Enter a whole position from 1 to ${draft.sets.length * SHELF_SET_SIZE}.`]);
+    else applyDraft((current) => moveToPosition(current, identity, position));
+    setPositionDrafts((current) => { const next = { ...current }; delete next[identity]; return next; });
   };
-  const moveById = (itemId, destination) => {
-    const index = ordered.findIndex((item) => item.database_id === itemId);
-    move(index, destination);
+  const renderItem = (item, setIndex, slotIndex = null) => {
+    const identity = membershipIdentity(item);
+    const position = slotIndex === null ? null : setIndex * SHELF_SET_SIZE + slotIndex + 1;
+    return <div className={cls('arrange-entry', draggedItemId === identity && 'dragging')} draggable onDragStart={(event) => startDrag(event, item)} onDragEnd={() => setDraggedItemId(null)}>
+      <span className="insert-target before" aria-label={`Insert before ${item.title}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); applyDraft((current) => insertBeside(current, droppedIdentity(event), identity, 'before')); setDraggedItemId(null); }} />
+      <GripVertical className="arrange-grip" size={14} />
+      {position === null ? <span className="overflow-mark">+</span> : <input className="arrange-position" aria-label={`Position for ${item.title}`} inputMode="numeric" value={positionDrafts[identity] ?? position} onFocus={() => setPositionDrafts((current) => ({ ...current, [identity]: String(position) }))} onChange={(event) => setPositionDrafts((current) => ({ ...current, [identity]: event.target.value.replace(/\D/g, '') }))} onBlur={() => commitPosition(item)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />}
+      {item.poster_url ? <img src={cardPosterUrl(item.poster_url)} alt="" /> : <span className="arrange-poster-fallback"><Clapperboard size={13} /></span>}<strong>{cleanImportedMediaTitle(item.title)}</strong>{position !== null && <small className="slot-label">{position}</small>}
+      <span className="insert-target after" aria-label={`Insert after ${item.title}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); applyDraft((current) => insertBeside(current, droppedIdentity(event), identity, 'after')); setDraggedItemId(null); }} />
+    </div>;
   };
-  const commitPosition = (itemId, currentIndex) => {
-    const raw = positionDrafts[itemId];
-    const destination = Math.max(0, Math.min(ordered.length - 1, Number(raw) - 1));
-    if (Number.isInteger(destination)) move(currentIndex, destination);
-    setPositionDrafts((current) => { const next = { ...current }; delete next[itemId]; return next; });
+  const renderSet = (set, setIndex) => {
+    const start = setIndex * SHELF_SET_SIZE + 1;
+    return <section className={cls('arrange-set', set.overflow.length && 'has-overflow')} key={setIndex}><header><span><b>Set {setIndex + 1}</b><small>Positions {start}{'\u2013'}{start + SHELF_SET_SIZE - 1}</small></span><em>{set.slots.filter(Boolean).length + set.overflow.length} / 7 items</em></header>
+      <ol className="arrange-slots">{set.slots.map((item, slotIndex) => <li className={item ? 'filled' : 'empty'} key={slotIndex} onDragOver={(event) => { if (!item) event.preventDefault(); }} onDrop={(event) => { if (item) return; event.preventDefault(); applyDraft((current) => dropIntoSlot(current, droppedIdentity(event), setIndex, slotIndex)); setDraggedItemId(null); }}>{item ? renderItem(item, setIndex, slotIndex) : <span className="empty-slot"><b>{start + slotIndex}</b><small>Empty position</small></span>}</li>)}</ol>
+      <div className={cls('arrange-overflow', set.overflow.length && 'active')} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); applyDraft((current) => moveToOverflow(current, droppedIdentity(event), setIndex)); setDraggedItemId(null); }}><header><span>Temporary overflow</span>{set.overflow.length > 0 && <small>Move every item into a numbered position before saving.</small>}</header>{set.overflow.map((item) => <div key={membershipIdentity(item)}>{renderItem(item, setIndex)}</div>)}{!set.overflow.length && <small>Drop here to hold an item in this set.</small>}</div>
+    </section>;
   };
-  const rowBreak = Math.ceil(ordered.length / 2);
-  const rows = [ordered.slice(0, rowBreak), ordered.slice(rowBreak)];
-  return createPortal(<div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog arrange-dialog" role="dialog" aria-modal="true" aria-labelledby="arrange-shelf-title">
-    <button className="close" type="button" onClick={onClose} aria-label="Close arranger"><X /></button>
-    <span className="eyebrow">ARRANGE SHELF</span><h2 id="arrange-shelf-title">{shelf.name}</h2>
-    <p className="dialog-intro">Drag an item anywhere—including between rows—or click its position number and type exactly where it should go.</p>
-    <div className="arrange-help"><span><GripVertical size={13} />Drag to move</span><span className="position-demo">12</span><span>Click a number to enter a position</span></div>
-    <div className="arrange-rows">{rows.map((row, rowIndex) => <section className="arrange-row" key={rowIndex}>
-      <header><span>ROW {rowIndex + 1}</span><small>{row.length ? `${rowIndex === 0 ? 1 : rowBreak + 1}–${rowIndex === 0 ? rowBreak : ordered.length}` : 'Empty'}</small></header>
-      <ol className="arrange-list">{row.map((item) => { const index = ordered.findIndex((entry) => entry.database_id === item.database_id); return <li className={draggedItemId === item.database_id ? 'dragging' : ''} key={item.database_id} draggable onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.database_id); event.dataTransfer.effectAllowed = 'move'; setDraggedItemId(item.database_id); }} onDragEnd={() => setDraggedItemId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (draggedItemId && draggedItemId !== item.database_id) moveById(draggedItemId, index); setDraggedItemId(null); }}>
-        <GripVertical className="arrange-grip" size={14} />
-        <input className="arrange-position" aria-label={`Position for ${item.title}`} inputMode="numeric" value={positionDrafts[item.database_id] ?? index + 1} onFocus={() => setPositionDrafts((current) => ({ ...current, [item.database_id]: String(index + 1) }))} onChange={(event) => setPositionDrafts((current) => ({ ...current, [item.database_id]: event.target.value.replace(/\D/g, '') }))} onBlur={() => commitPosition(item.database_id, index)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
-        {item.poster_url ? <img src={item.poster_url} alt="" /> : <span className="arrange-poster-fallback"><Clapperboard size={13} /></span>}
-        <strong>{cleanImportedMediaTitle(item.title)}</strong>
-        <div className="arrange-row-actions">
-          <button disabled={index === 0} onClick={() => move(index, 0)} title="Move to beginning" aria-label={`Move ${item.title} to beginning`}><ChevronsUp size={14} /></button>
-          <button disabled={index === ordered.length - 1} onClick={() => move(index, ordered.length - 1)} title="Move to end" aria-label={`Move ${item.title} to end`}><ChevronsDown size={14} /></button>
-        </div>
-      </li>; })}</ol>
-    </section>)}</div>
-    <div className="dialog-actions"><button className="text-button" onClick={onClose}>Cancel</button><Button disabled={saving} onClick={async () => { setSaving(true); try { await onSave(ordered); } finally { setSaving(false); } }}>{saving ? 'Saving…' : 'Save order'}</Button></div>
+  const errors = feedback.length ? feedback : validateShelfDraft(draft);
+  return createPortal(<div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog arrange-dialog fixed-set-arranger" role="dialog" aria-modal="true" aria-labelledby="arrange-fixed-shelf-title"><button className="close" type="button" onClick={onClose} aria-label="Close arranger"><X /></button><span className="eyebrow">ARRANGE SHELF</span><h2 id="arrange-fixed-shelf-title">{shelf.name}</h2><p className="dialog-intro">Move items only where you choose. Empty positions stay empty, and inserting beside an item never spills into another set.</p>
+    <div className="arrange-help"><span><GripVertical size={13} />Drag an item</span><span className="position-demo">12</span><span>Edit its numbered position</span><i />Drop on either edge to insert before or after.</div>
+    <div className="arrange-lanes">{[0, 1].map((lane) => <section className="arrange-lane" key={lane}><h3>ROW {lane + 1} SETS</h3>{draft.sets.map((set, setIndex) => setIndex % 2 === lane && renderSet(set, setIndex))}</section>)}</div>
+    <button className="add-arrange-set" type="button" onClick={() => applyDraft(appendShelfSet)}><Plus size={13} />Add next set</button>
+    {errors.length > 0 && <div className="arrange-validation" role="alert"><strong>Before this shelf can be saved:</strong><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></div>}
+    <div className="dialog-actions"><button className="text-button" onClick={onClose}>Cancel</button><Button disabled={saving || errors.length > 0} onClick={async () => { const validation = validateShelfDraft(draft); setFeedback(validation); if (validation.length) return; setSaving(true); try { await onSave(serializeShelfDraft(draft)); onClose(); } catch { setFeedback(['The shelf order could not be saved. Your draft is still here; try again or cancel to restore the last saved order.']); } finally { setSaving(false); } }}>{saving ? 'Saving...' : 'Save order'}</Button></div>
   </section></div>, document.body);
 }
 
@@ -2037,7 +2021,7 @@ function ProgressivePoster({ src, alt, eager = false }) {
   return <img ref={imageRef} src={shouldLoad ? src : undefined} alt={alt} loading={eager ? 'eager' : 'lazy'} fetchPriority={eager ? 'high' : 'auto'} decoding="async" />;
 }
 
-function MediaCard({ item, eagerPoster = false, onClick, canRate, onRate, draggable, dragging, onDragStart, onDragEnd, onDrop }) {
+function MediaCard({ item, shelfRank = null, eagerPoster = false, onClick, canRate, onRate, draggable, dragging, onDragStart, onDragEnd, onDrop }) {
   const tags = mediaCardDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
   return (
@@ -2060,6 +2044,7 @@ function MediaCard({ item, eagerPoster = false, onClick, canRate, onRate, dragga
         {item.priorities?.map((person) => <span className="card-interest" title={person.display_name || person.username} key={person.id || person.username}>— {String(person.display_name || person.username).slice(0, 1).toUpperCase()}</span>)}
         {item.owned && <span className="media-owned-tag">Owned</span>}
       </button>
+      {shelfRank !== null && <span className="shelf-rank" aria-label={`Shelf position ${shelfRank}`}>#{shelfRank}</span>}
     </article>
   );
 }
@@ -2505,13 +2490,15 @@ function ShelfEditDialog({ shelf, onClose, onSave }) {
   const [name, setName] = useState(shelf.name);
   const [subtitle, setSubtitle] = useState(shelf.subtitle || '');
   const [queueList, setQueueList] = useState(Boolean(shelf.queueList));
+  const [numbered, setNumbered] = useState(Boolean(shelf.numbered));
   const queueCopy = shelf.section === 'book' ? ['Reading List', 'Items on this shelf count toward “to read”.'] : shelf.section === 'game' ? ['Backlog / To Play shelf', 'Items on this shelf count toward “to play”.'] : ['Watchlist / To Watch shelf', 'Items on this shelf count toward “to watch”.'];
-  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog" onSubmit={(event) => { event.preventDefault(); const cleanedName = name.trim(); const cleanedSubtitle = subtitle.trim(); if ((!shelf.required && !cleanedName) || cleanedSubtitle.length > 180) return; onSave({ ...(shelf.required ? {} : { name: cleanedName }), subtitle: cleanedSubtitle || null, is_queue_list: queueList }); onClose(); }}>
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog" onSubmit={(event) => { event.preventDefault(); const cleanedName = name.trim(); const cleanedSubtitle = subtitle.trim(); if ((!shelf.required && !cleanedName) || cleanedSubtitle.length > 180) return; onSave({ ...(shelf.required ? {} : { name: cleanedName }), subtitle: cleanedSubtitle || null, is_queue_list: queueList, is_numbered: numbered }); onClose(); }}>
     <button className="close" type="button" onClick={onClose} aria-label="Close shelf editor"><X /></button>
     <span className="eyebrow">EDIT SHELF</span><h2>{shelf.name}</h2>
     {!shelf.required && <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>}
     <label>Subtitle <span className="field-hint">Optional</span><input autoFocus={shelf.required} value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
     <label className="reading-list-designation"><input type="checkbox" checked={queueList} onChange={(event) => setQueueList(event.target.checked)} /><span><b>{queueCopy[0]}</b><small>{queueCopy[1]}</small></span></label>
+    <label className="reading-list-designation"><input type="checkbox" checked={numbered} onChange={(event) => setNumbered(event.target.checked)} /><span><b>Numbered shelf</b><small>Show each item's shelf position beneath its card.</small></span></label>
     <small className="character-count">{subtitle.length} / 180</small>
     <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose}>Cancel</button><Button type="submit" icon={Pencil} disabled={!shelf.required && !name.trim()}>Save Shelf</Button></div>
   </form></div>;
@@ -2523,13 +2510,15 @@ function CreateShelfDialog({ section, onClose, onSave }) {
   const [subtitle, setSubtitle] = useState('');
   const [queueList, setQueueList] = useState(false);
   const [mainWatchlist, setMainWatchlist] = useState(false);
+  const [numbered, setNumbered] = useState(false);
   const queueCopy = section === 'book' ? ['Reading List', 'Count this shelf toward “to read”.'] : section === 'game' ? ['Backlog / To Play shelf', 'Count this shelf toward “to play”.'] : ['Watchlist / To Watch shelf', 'Count this shelf toward “to watch”.'];
-  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog create-shelf-dialog" onSubmit={(event) => { event.preventDefault(); if (!name.trim()) return; onSave({ name: name.trim(), subtitle: subtitle.trim() || null, is_queue_list: queueList, ...(section === 'screen' ? { show_in_main_watchlist: mainWatchlist } : {}) }); }}>
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog create-shelf-dialog" onSubmit={(event) => { event.preventDefault(); if (!name.trim()) return; onSave({ name: name.trim(), subtitle: subtitle.trim() || null, is_queue_list: queueList, is_numbered: numbered, ...(section === 'screen' ? { show_in_main_watchlist: mainWatchlist } : {}) }); }}>
     <button className="close" type="button" onClick={onClose} aria-label="Close create shelf"><X /></button>
     <span className="eyebrow">NEW SHELF</span><h2>Create a Shelf</h2>
     <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>
     <label>Subtitle <span className="field-hint">Optional</span><input value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
     <label className="reading-list-designation"><input type="checkbox" checked={queueList} onChange={(event) => setQueueList(event.target.checked)} /><span><b>{queueCopy[0]}</b><small>{queueCopy[1]}</small></span></label>
+    <label className="reading-list-designation"><input type="checkbox" checked={numbered} onChange={(event) => setNumbered(event.target.checked)} /><span><b>Numbered shelf</b><small>Show each item's shelf position beneath its card.</small></span></label>
     {section === 'screen' && <label className="reading-list-designation"><input type="checkbox" checked={mainWatchlist} onChange={(event) => setMainWatchlist(event.target.checked)} /><span><b>Include in Main Watchlist</b><small>Mirror this shelf publicly in the shared Main Watchlist.</small></span></label>}
     <small className="character-count">{subtitle.length} / 180</small>
     <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={!name.trim()}>Create Shelf</Button></div>

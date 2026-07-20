@@ -12,7 +12,8 @@ import { collectionSummaryStats } from '../src/collection-stats.js';
 import { appSiteUrl, authenticatedProfilePath, selectAuthenticatedProfile, signupRateLimitDetails } from '../src/auth.js';
 import { applyReactionToSnapshot, mediaReactionIdentity } from '../src/media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from '../src/identity.js';
-import { mergeSectionSnapshot } from '../src/supabase-data.js';
+import { mapSnapshot, mergeSectionSnapshot } from '../src/supabase-data.js';
+import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -453,7 +454,7 @@ test('shelf controls use consistent spacing and headline-style labels', async ()
 test('the shelf arranger is a viewport modal and shelf moves follow the reordered shelf', async () => {
   const app = await read('src/App.jsx');
   assert.match(app, /function ArrangeShelfDialog[\s\S]*return createPortal\([\s\S]*document\.body\)/);
-  assert.match(app, /arrange-dialog" role="dialog" aria-modal="true"/);
+  assert.match(app, /arrange-dialog fixed-set-arranger" role="dialog" aria-modal="true"/);
   assert.match(app, /const moveShelfWithViewport = \(direction\) =>[\s\S]*onMoveShelf\(direction\)[\s\S]*scrollIntoView\(\{ behavior: 'smooth', block: 'center' \}\)/);
   assert.match(app, /Move shelf down[\s\S]*moveShelfWithViewport\(1\)/);
 });
@@ -1262,4 +1263,115 @@ test('the Media Room ships an installable standalone web app shell without cachi
   assert.match(worker, /request\.method !== 'GET' \|\| url\.origin !== self\.location\.origin/);
   assert.match(worker, /if \(url\.href === APP_ROOT\)/);
   assert.doesNotMatch(worker, /supabase|collection_share|media_reactions/);
+});
+
+const shelfItems = (count, title = (index) => `Item ${index + 1}`) => Array.from({ length: count }, (_, index) => ({ database_id: `media-${index + 1}`, title: title(index) }));
+
+test('legacy shelf groups convert to the alternating canonical set order', () => {
+  const items = shelfItems(30);
+  assert.deepEqual(legacyVisualOrderToCanonical(items).map((item) => item.database_id), [
+    ...shelfItems(7).map((item) => item.database_id),
+    ...Array.from({ length: 7 }, (_, index) => `media-${index + 16}`),
+    ...Array.from({ length: 7 }, (_, index) => `media-${index + 8}`),
+    ...Array.from({ length: 7 }, (_, index) => `media-${index + 23}`),
+    'media-15', 'media-30',
+  ]);
+  assert.deepEqual(legacyVisualOrderToCanonical(shelfItems(7)).map((item) => item.database_id), shelfItems(7).map((item) => item.database_id));
+});
+
+test('canonical shelf boundaries place 8, 15, 22 and later sets in paired rows', () => {
+  const segments = pairedShelfSegments(shelfItems(43));
+  assert.equal(segments[0][0][0].database_id, 'media-1');
+  assert.equal(segments[0][1][0].database_id, 'media-8');
+  assert.equal(segments[1][0][0].database_id, 'media-15');
+  assert.equal(segments[1][1][0].database_id, 'media-22');
+  assert.equal(segments[2][0][0].database_id, 'media-29');
+  assert.equal(segments[2][1][0].database_id, 'media-36');
+  assert.equal(segments[3][0][0].database_id, 'media-43');
+});
+
+test('empty-slot drops preserve the original gap without compacting another set', () => {
+  const initial = createShelfDraft(shelfItems(14));
+  const movedToOverflow = moveToOverflow(initial, 'media-3', 1);
+  assert.equal(movedToOverflow.sets[0].slots[2], null);
+  assert.equal(movedToOverflow.sets[1].overflow[0].database_id, 'media-3');
+  const restored = dropIntoSlot(movedToOverflow, 'media-3', 0, 2);
+  assert.equal(restored.sets[0].slots[2].database_id, 'media-3');
+  assert.equal(restored.sets[1].overflow.length, 0);
+});
+
+test('before and after insertion stays local and creates explicit overflow', () => {
+  const after = insertBeside(createShelfDraft(shelfItems(14)), 'media-3', 'media-10', 'after');
+  assert.equal(after.sets[0].slots[2], null);
+  assert.deepEqual(after.sets[1].slots.map((item) => item.database_id), ['media-8', 'media-9', 'media-10', 'media-3', 'media-11', 'media-12', 'media-13']);
+  assert.equal(after.sets[1].overflow[0].database_id, 'media-14');
+  assert.equal(after.sets[2].slots.every((item) => item === null), true);
+  const before = insertBeside(createShelfDraft(shelfItems(14)), 'media-3', 'media-10', 'before');
+  assert.deepEqual(before.sets[1].slots.slice(0, 4).map((item) => item.database_id), ['media-8', 'media-9', 'media-3', 'media-10']);
+});
+
+test('direct position editing uses insertion rules and accepts a valid partial final set', () => {
+  const moved = moveToPosition(createShelfDraft(shelfItems(14)), 'media-3', 8);
+  assert.equal(moved.sets[0].slots[2], null);
+  assert.equal(moved.sets[1].slots[0].database_id, 'media-3');
+  assert.equal(moved.sets[1].overflow[0].database_id, 'media-14');
+  const repaired = dropIntoSlot(moved, 'media-14', 0, 2);
+  assert.deepEqual(validateShelfDraft(repaired), []);
+  assert.equal(serializeShelfDraft(repaired).length, 14);
+  assert.deepEqual(validateShelfDraft(createShelfDraft(shelfItems(10))), []);
+});
+
+test('save validation reports overflow, gaps and incomplete earlier sets', () => {
+  const overflow = insertBeside(createShelfDraft(shelfItems(14)), 'media-3', 'media-10', 'after');
+  assert.ok(validateShelfDraft(overflow).some((error) => /Set 2 contains 8 items/.test(error)));
+  assert.ok(validateShelfDraft(overflow).some((error) => /Set 1 has an empty position/.test(error)));
+  const gappedFinal = createShelfDraft(shelfItems(8));
+  gappedFinal.sets[1].slots[1] = gappedFinal.sets[1].slots[0];
+  gappedFinal.sets[1].slots[0] = null;
+  assert.ok(validateShelfDraft(gappedFinal).some((error) => /filled continuously/.test(error)));
+});
+
+test('matching titles remain distinct while membership cloning or loss is rejected', () => {
+  const duplicates = shelfItems(2, () => 'Killing Gunther');
+  assert.deepEqual(validateShelfDraft(createShelfDraft(duplicates)), []);
+  const corrupted = createShelfDraft(duplicates);
+  corrupted.sets[0].slots[1] = corrupted.sets[0].slots[0];
+  assert.ok(validateShelfDraft(corrupted).some((error) => /membership unexpectedly/.test(error)));
+});
+
+test('numbered shelves and fixed segments are shelf-scoped, responsive and migration-backed', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/supabase-data.js');
+  const layout = await read('src/media-layout.css');
+  const migration = await read('supabase/migrations/20260720040000_fixed_seven_item_shelf_sets.sql');
+  const writes = await read('src/media-write.js');
+  assert.match(app, /Numbered shelf/);
+  assert.match(app, /shelfRank=\{shelf\.numbered \?/);
+  assert.match(app, /segmentIndex \* 14 \+ rowIndex \* 7 \+ itemIndex \+ 1/);
+  assert.match(app, /setDisplayItems\(nextItems\); try \{ await onReorder[\s\S]*setDisplayItems\(previous\); throw error/);
+  assert.match(app, /Your draft is still here; try again or cancel to restore the last saved order/);
+  assert.match(data, /numbered: Boolean\(shelf\.is_numbered\)/);
+  assert.match(layout, /grid-template-columns: repeat\(7, minmax\(var\(--shelf-card-min\), 1fr\)\)/);
+  assert.match(layout, /poster-segment\.has-divider::after[\s\S]*top: 3px;[\s\S]*bottom: 3px;/);
+  assert.match(migration, /add column if not exists is_numbered boolean not null default false/);
+  assert.match(migration, /row_number\(\) over \(partition by shelf_id order by segment_index, lane_index, lane_offset/);
+  assert.match(migration, /public\.can_manage_collection\(collection_id\)/);
+  assert.doesNotMatch(writes.match(/export async function reorderShelfMedia[\s\S]*?\n\}/)?.[0] || '', /for \(let index/);
+});
+
+test('numbered ranks stay on memberships and can differ between source shelves', () => {
+  const mapped = mapSnapshot(
+    { id: 'collection', owner_id: 'owner', title: 'Collection' },
+    [
+      { id: 'shelf-a', section: 'screen', name: 'A', is_numbered: true, position: 1000 },
+      { id: 'shelf-b', section: 'screen', name: 'B', is_numbered: true, position: 2000 },
+    ],
+    [{ id: 'media-a', type: 'film', title: 'Same record', platforms: [], genres: [] }],
+    [
+      { shelf_id: 'shelf-a', media_item_id: 'media-a', position: 2000 },
+      { shelf_id: 'shelf-b', media_item_id: 'media-a', position: 5000 },
+    ],
+  );
+  assert.equal(mapped.mediaShelves.every((shelf) => shelf.numbered), true);
+  assert.deepEqual(mapped.media[0].list_positions, { 'shelf-a': 2000, 'shelf-b': 5000 });
 });
