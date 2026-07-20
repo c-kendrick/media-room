@@ -27,6 +27,11 @@
 .section-loading-posters { display: grid; grid-template-columns: repeat(6, var(--media-card-width)); gap: var(--media-column-gap); }
 .section-loading-posters > span { display: grid; gap: 9px; }
 .section-loading-posters .skeleton-poster { width: var(--media-card-width); height: var(--media-poster-height); }
+.watchlist-loading-brand { min-height: 420px; display: grid; place-items: center; align-content: center; gap: 12px; color: #70665c; font-family: var(--serif); animation: opening-screen-in .22s ease-out; }
+.watchlist-loading-brand .brand-mark { width: 60px; height: 60px; font-size: 23px; animation: opening-mark-in .35s ease-out; }
+.watchlist-loading-brand p { margin: 0; font-size: 12px; }
+.watchlist-loading-skeleton .skeleton-detail { opacity: 0; transform: translateY(4px); }
+.watchlist-loading-skeleton.is-detailed .skeleton-detail { opacity: 1; transform: none; }
 
 .media-tabs {
   margin-bottom: 10px;

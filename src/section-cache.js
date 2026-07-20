@@ -14,7 +14,7 @@ export function sectionCacheKey({ accountScope = 'public', collectionId, section
 }
 
 export function canPersistSnapshot(snapshot) {
-  return Boolean(snapshot?.storage === 'supabase' && snapshot.collectionId && !snapshot.shared && !snapshot.mainWatchlist);
+  return Boolean(snapshot?.storage === 'supabase' && snapshot.collectionId && !snapshot.shared);
 }
 
 export function sectionSnapshot(snapshot, section) {
@@ -101,12 +101,13 @@ export async function writeCachedSection(options, snapshot) {
   return true;
 }
 
-export async function writeCachedSnapshot({ accountScope = 'public' } = {}, snapshot) {
+export async function writeCachedSnapshot({ accountScope = 'public', scope = 'collection' } = {}, snapshot) {
   if (!canPersistSnapshot(snapshot)) return false;
   await Promise.all((snapshot.loadedSections || []).map((section) => writeCachedSection({
     accountScope,
     collectionId: snapshot.collectionId,
     section,
+    scope,
   }, snapshot)));
   return true;
 }
