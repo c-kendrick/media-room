@@ -129,21 +129,33 @@ export async function loadPublicCollections({ fresh = false, accessToken } = {})
 
 export function mergeSectionSnapshot(current, sectionSnapshot) {
   if (!current || current.collectionId !== sectionSnapshot.collectionId) return sectionSnapshot;
-  const section = sectionSnapshot.loadedSections?.[0];
-  const replacesSection = (row) => section && (row.section === section || SECTION_TYPES[section]?.includes(row.type));
+  const incomingSections = new Set(sectionSnapshot.loadedSections || []);
+  const replacesIncomingSection = (row) => {
+    for (const section of incomingSections) {
+      if (row.section === section || SECTION_TYPES[section]?.includes(row.type)) return true;
+    }
+    return false;
+  };
   const currentMediaById = new Map(current.media.map((row) => [row.database_id, row]));
-  const nextSectionMedia = sectionSnapshot.media.map((row) => {
+  const nextSectionMedia = (sectionSnapshot.media || []).map((row) => {
     const previous = currentMediaById.get(row.database_id);
     return previous?.details_loaded ? { ...row, notes: previous.notes, creator: previous.creator, director: previous.director, description: previous.description, genres: previous.genres, runtime: previous.runtime, details_loaded: true } : row;
   });
+  const uniqueRows = (rows, identity) => [...new Map(rows.map((row) => [identity(row), row])).values()];
   return {
     ...current,
     ...sectionSnapshot,
     collectionDescriptions: { ...current.collectionDescriptions, ...sectionSnapshot.collectionDescriptions },
     loadedSections: [...new Set([...(current.loadedSections || []), ...(sectionSnapshot.loadedSections || [])])],
-    mediaShelves: [...current.mediaShelves.filter((row) => !replacesSection(row)), ...sectionSnapshot.mediaShelves],
+    mediaShelves: uniqueRows([
+      ...(current.mediaShelves || []).filter((row) => !replacesIncomingSection(row)),
+      ...(sectionSnapshot.mediaShelves || []),
+    ], (row) => row.shelf_id),
     detailedSections: current.detailedSections || [],
-    media: [...current.media.filter((row) => !replacesSection(row)), ...nextSectionMedia],
+    media: uniqueRows([
+      ...(current.media || []).filter((row) => !replacesIncomingSection(row)),
+      ...nextSectionMedia,
+    ], (row) => row.database_id || row.item_id),
   };
 }
 
