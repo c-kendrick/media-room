@@ -1062,6 +1062,10 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.match(app, /people\.length > 0 && 'has-count'/);
   assert.match(styles, /\.media-card-rating-row \{[\s\S]*flex-wrap: wrap;[\s\S]*width: 100%;[\s\S]*max-width: 100%;/);
   assert.match(styles, /\.reaction-controls \{[\s\S]*flex: 0 0 auto;[\s\S]*flex-wrap: nowrap;[\s\S]*max-width: 100%;[\s\S]*margin-left: 0;/);
+  assert.match(app, /function shelfNeedsUniformReactionWrap\(shelfElement\)[\s\S]*starWidth \+ reactionWidth \+ columnGap > row\.clientWidth/);
+  assert.match(app, /new ResizeObserver\(synchronizeReactionRows\)[\s\S]*querySelectorAll\('\.reaction-controls'\)/);
+  assert.match(app, /uniformReactionWrap && 'uniform-reaction-wrap'/);
+  assert.match(styles, /\.fixed-set-shelf\.uniform-reaction-wrap \.media-card-rating-row \{[\s\S]*flex-direction: column;/);
   assert.match(styles, /\.reaction-button\.has-count:not\(\.labelled\) \{[\s\S]*width: auto;[\s\S]*gap: 2px;/);
   const cardReactionCount = styles.slice(styles.indexOf('.reaction-button:not(.labelled) small'), styles.indexOf('.reaction-button[data-tooltip]'));
   assert.match(cardReactionCount, /position: static;[\s\S]*background: transparent;[\s\S]*color: #c43c3c;[\s\S]*font-size: 9px;/);

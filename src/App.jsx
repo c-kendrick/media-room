@@ -1886,6 +1886,18 @@ function SearchResultsSection({ items, onOpen, canRate, onRate }) {
   </section>;
 }
 
+function shelfNeedsUniformReactionWrap(shelfElement) {
+  return [...shelfElement.querySelectorAll('.media-card-rating-row')].some((row) => {
+    const stars = row.querySelector('.star-rating');
+    const reactions = row.querySelector('.reaction-controls');
+    if (!stars || !reactions) return false;
+    const columnGap = Number.parseFloat(window.getComputedStyle(row).columnGap) || 0;
+    const starWidth = stars.getBoundingClientRect().width;
+    const reactionWidth = Math.max(reactions.scrollWidth, reactions.getBoundingClientRect().width);
+    return starWidth + reactionWidth + columnGap > row.clientWidth + 0.5;
+  });
+}
+
 function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorderShelf, canCurateMain, canRemoveMirror, onRemoveMirror, onToggleMain, canMoveUp, canMoveDown, onMoveShelf, onAdd, onReorder, onRename, onDelete }) {
   const shelfRef = useRef(null);
   const trackRef = useRef(null);
@@ -1893,6 +1905,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
   const [arranging, setArranging] = useState(false);
   const [currentSegment, setCurrentSegment] = useState(0);
   const [eagerPosters, setEagerPosters] = useState(false);
+  const [uniformReactionWrap, setUniformReactionWrap] = useState(false);
   const serverOrderKey = items.map((item) => `${item.database_id}:${item.updated_at || ''}:${item.star_rating ?? ''}:${item.list_positions?.[shelf.shelf_id] ?? ''}:${(item.interests || []).map((person) => person.id || person.username).sort().join(',')}:${(item.likes || []).map((person) => person.id).sort().join(',')}:${(item.priorities || []).map((person) => person.id).sort().join(',')}`).join('|');
   useEffect(() => { setDisplayItems(items); }, [serverOrderKey]);
   const displaySegments = pairedShelfSegments(displayItems);
@@ -1902,6 +1915,17 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
     const bounds = shelfRef.current?.getBoundingClientRect();
     setEagerPosters(Boolean(bounds && bounds.top < window.innerHeight * 1.15 && bounds.bottom > 0));
   }, [shelf.shelf_id]);
+  useLayoutEffect(() => {
+    const shelfElement = shelfRef.current;
+    if (!shelfElement) return undefined;
+    const synchronizeReactionRows = () => setUniformReactionWrap(shelfNeedsUniformReactionWrap(shelfElement));
+    synchronizeReactionRows();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(synchronizeReactionRows);
+    observer.observe(shelfElement);
+    shelfElement.querySelectorAll('.reaction-controls').forEach((controls) => observer.observe(controls));
+    return () => observer.disconnect();
+  }, [serverOrderKey, displayItems]);
   const scrollSegment = (direction) => {
     const track = trackRef.current;
     if (!track) return;
@@ -1918,7 +1942,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
       if (Number.isFinite(previousTop) && Number.isFinite(nextTop)) window.scrollBy({ top: nextTop - previousTop, behavior: 'auto' });
     }));
   };
-  return <section ref={shelfRef} className="media-shelf fixed-set-shelf">
+  return <section ref={shelfRef} className={cls('media-shelf fixed-set-shelf', uniformReactionWrap && 'uniform-reaction-wrap')}>
     <div className="shelf-head">
       <div className="shelf-title"><span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2>{shelf.subtitle && <p className="shelf-subtitle">{shelf.subtitle}</p>}</span></div>
       <div className="shelf-actions">

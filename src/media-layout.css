@@ -573,6 +573,17 @@
   gap: 3px;
 }
 
+.fixed-set-shelf.uniform-reaction-wrap .media-card-rating-row {
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0;
+}
+
+.fixed-set-shelf.uniform-reaction-wrap .reaction-controls {
+  justify-content: flex-start;
+}
+
 .reaction-button {
   position: relative;
   width: 24px;
