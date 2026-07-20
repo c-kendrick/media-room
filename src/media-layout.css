@@ -546,6 +546,7 @@
 }
 
 .media-card-rating-row {
+  --reaction-inline-gap: 7px;
   display: flex;
   flex-wrap: wrap;
   width: 100%;
@@ -554,7 +555,7 @@
   min-height: 25px;
   align-items: center;
   justify-content: space-between;
-  column-gap: 7px;
+  column-gap: var(--reaction-inline-gap);
   row-gap: 0;
 }
 
@@ -986,7 +987,7 @@
 
 @container shelf-card (max-width: 120px) {
   .media-card-title { min-height: 30px; max-height: 30px; margin-top: 6px; font-size: 11px; }
-  .media-card-rating-row { min-height: 21px; gap: 4px; }
+  .media-card-rating-row { --reaction-inline-gap: 4px; min-height: 21px; gap: 4px; }
   .media-card-rating-row .star-rating { min-height: 16px; margin-top: 2px; }
   .media-card-rating-row .star-half { width: 7px; height: 16px; line-height: 16px; }
   .media-card-rating-row .star-half::before { width: 14px; font-size: 14px; line-height: 16px; }

@@ -1062,7 +1062,10 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.match(app, /people\.length > 0 && 'has-count'/);
   assert.match(styles, /\.media-card-rating-row \{[\s\S]*flex-wrap: wrap;[\s\S]*width: 100%;[\s\S]*max-width: 100%;/);
   assert.match(styles, /\.reaction-controls \{[\s\S]*flex: 0 0 auto;[\s\S]*flex-wrap: nowrap;[\s\S]*max-width: 100%;[\s\S]*margin-left: 0;/);
-  assert.match(app, /function shelfNeedsUniformReactionWrap\(shelfElement\)[\s\S]*starWidth \+ reactionWidth \+ columnGap > row\.clientWidth/);
+  assert.match(app, /const REACTION_WRAP_RELEASE_PX = 4/);
+  assert.match(app, /function shelfNeedsUniformReactionWrap\(shelfElement, currentlyWrapped = false\)[\s\S]*getPropertyValue\('--reaction-inline-gap'\)[\s\S]*currentlyWrapped \? REACTION_WRAP_RELEASE_PX : -0\.5/);
+  assert.match(app, /setUniformReactionWrap\(\(currentlyWrapped\) => shelfNeedsUniformReactionWrap\(shelfElement, currentlyWrapped\)\)/);
+  assert.match(styles, /--reaction-inline-gap: 7px;[\s\S]*column-gap: var\(--reaction-inline-gap\)/);
   assert.match(app, /new ResizeObserver\(synchronizeReactionRows\)[\s\S]*querySelectorAll\('\.reaction-controls'\)/);
   assert.match(app, /uniformReactionWrap && 'uniform-reaction-wrap'/);
   assert.match(styles, /\.fixed-set-shelf\.uniform-reaction-wrap \.media-card-rating-row \{[\s\S]*flex-direction: column;/);

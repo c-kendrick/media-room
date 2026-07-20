@@ -1886,15 +1886,19 @@ function SearchResultsSection({ items, onOpen, canRate, onRate }) {
   </section>;
 }
 
-function shelfNeedsUniformReactionWrap(shelfElement) {
+const REACTION_WRAP_RELEASE_PX = 4;
+
+function shelfNeedsUniformReactionWrap(shelfElement, currentlyWrapped = false) {
   return [...shelfElement.querySelectorAll('.media-card-rating-row')].some((row) => {
     const stars = row.querySelector('.star-rating');
     const reactions = row.querySelector('.reaction-controls');
     if (!stars || !reactions) return false;
-    const columnGap = Number.parseFloat(window.getComputedStyle(row).columnGap) || 0;
+    const rowStyles = window.getComputedStyle(row);
+    const inlineGap = Number.parseFloat(rowStyles.getPropertyValue('--reaction-inline-gap')) || 0;
     const starWidth = stars.getBoundingClientRect().width;
     const reactionWidth = Math.max(reactions.scrollWidth, reactions.getBoundingClientRect().width);
-    return starWidth + reactionWidth + columnGap > row.clientWidth + 0.5;
+    const releaseClearance = currentlyWrapped ? REACTION_WRAP_RELEASE_PX : -0.5;
+    return starWidth + reactionWidth + inlineGap > row.clientWidth - releaseClearance;
   });
 }
 
@@ -1918,7 +1922,7 @@ function MediaShelf({ shelf, items, onOpen, canEdit, canRate, onRate, canReorder
   useLayoutEffect(() => {
     const shelfElement = shelfRef.current;
     if (!shelfElement) return undefined;
-    const synchronizeReactionRows = () => setUniformReactionWrap(shelfNeedsUniformReactionWrap(shelfElement));
+    const synchronizeReactionRows = () => setUniformReactionWrap((currentlyWrapped) => shelfNeedsUniformReactionWrap(shelfElement, currentlyWrapped));
     synchronizeReactionRows();
     if (typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(synchronizeReactionRows);
