@@ -1992,7 +1992,12 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
   const errors = feedback.length ? feedback : validateShelfDraft(draft);
   return createPortal(<div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="media-edit-dialog arrange-dialog fixed-set-arranger" role="dialog" aria-modal="true" aria-labelledby="arrange-fixed-shelf-title"><button className="close" type="button" onClick={onClose} aria-label="Close arranger"><X /></button><span className="eyebrow">ARRANGE SHELF</span><h2 id="arrange-fixed-shelf-title">{shelf.name}</h2>
     <div className="arrange-history" role="toolbar" aria-label="Arrangement history"><button type="button" disabled={!history.past.length} onClick={undo}><Undo2 size={14} />Undo</button><button type="button" disabled={!history.future.length} onClick={redo}><Redo2 size={14} />Redo</button></div>
-    <div className="arrange-lanes"><h3 className="arrange-lane-heading">ROW 1 SETS</h3><h3 className="arrange-lane-heading">ROW 2 SETS</h3>{draft.sets.map(renderSet)}</div>
+    <div className="arrange-lanes">
+      <div className="arrange-lane-headings"><h3>ROW 1 SETS</h3><h3>ROW 2 SETS</h3></div>
+      {Array.from({ length: Math.ceil(draft.sets.length / 2) }, (_, pairIndex) => <div className="arrange-set-pair" key={pairIndex}>
+        {draft.sets.slice(pairIndex * 2, pairIndex * 2 + 2).map((set, offset) => renderSet(set, pairIndex * 2 + offset))}
+      </div>)}
+    </div>
     <button className="add-arrange-set" type="button" onClick={() => applyDraft(appendShelfSet)}><Plus size={13} />Add next set</button>
     {errors.length > 0 && <div className="arrange-validation" role="alert"><strong>Before this shelf can be saved:</strong><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></div>}
     <div className="dialog-actions"><button className="text-button" onClick={onClose}>Cancel</button><Button disabled={saving || errors.length > 0} onClick={async () => { const validation = validateShelfDraft(draft); setFeedback(validation); if (validation.length) return; setSaving(true); try { await onSave(serializeShelfDraft(draft)); onClose(); } catch { setFeedback(['The shelf order could not be saved. Your draft is still here; try again or cancel to restore the last saved order.']); } finally { setSaving(false); } }}>{saving ? 'Saving...' : 'Save order'}</Button></div>

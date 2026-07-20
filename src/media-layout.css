@@ -547,10 +547,15 @@
 
 .media-card-rating-row {
   display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 25px;
   align-items: center;
   justify-content: space-between;
-  gap: 7px;
+  column-gap: 7px;
+  row-gap: 0;
 }
 
 .media-card-rating-row > .star-rating {
@@ -559,9 +564,12 @@
 
 .reaction-controls {
   display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  max-width: 100%;
   align-items: center;
   justify-content: flex-end;
-  margin-left: auto;
+  margin-left: 0;
   gap: 3px;
 }
 
