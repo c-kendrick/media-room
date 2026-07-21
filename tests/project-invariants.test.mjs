@@ -170,7 +170,7 @@ test('numbered shelf ranks reserve the ownership row for every card', async () =
   assert.match(app, /media-owned-tag[\s\S]*shelfRank !== null[\s\S]*className="shelf-rank"/);
 });
 
-test('collection notes are section-specific while Main Watchlist mirrors Film & TV only', async () => {
+test('collection note storage remains compatible while note UI is removed from collections and Main Watchlist', async () => {
   const app = await read('src/App.jsx');
   const data = await read('src/supabase-data.js');
   const migration = await read('supabase/migrations/20260713080000_section_specific_collection_notes.sql');
@@ -183,8 +183,7 @@ test('collection notes are section-specific while Main Watchlist mirrors Film & 
   assert.equal(SECTION_NOTE_DEFAULTS.book, 'Books! (You can edit this)');
   assert.equal(SECTION_NOTE_DEFAULTS.game, 'Video Games goes brrr. (You can edit this)');
   assert.match(SECTION_NOTE_DEFAULTS.screen, /It will also be put in the Main Watchlist/);
-  assert.match(app, /onDescriptionChange\(section, description\)/);
-  assert.match(app, /SECTION_NOTE_COLUMNS\[section\]/);
+  assert.doesNotMatch(app, /EditableDescription|collection-note-preview|main-owner-intro/);
   assert.match(data, /owner_note: collection\?\.description \|\| SECTION_NOTE_DEFAULTS\.screen/);
   assert.match(migration, /add column if not exists book_description/);
   assert.match(migration, /add column if not exists game_description/);
@@ -198,7 +197,7 @@ test('opening Main Watchlist has no redundant All Watchlists tab', async () => {
   assert.match(app, /!data\.mainWatchlist && <div className="media-tabs" aria-busy=\{sectionLoading\}>/);
 });
 
-test('collection summary counts use live shelf UUIDs and owned flags', async () => {
+test('collection summary calculations remain valid while summary stats stay out of the collection header', async () => {
   const shelves = [{ shelf_id: 'watch-uuid', name: 'Anything', queueList: true }, { shelf_id: 'owned-uuid', name: 'Watchlist', queueList: false }];
   const items = [
     { lists: ['watch-uuid'], owned: false },
@@ -207,11 +206,11 @@ test('collection summary counts use live shelf UUIDs and owned flags', async () 
   ];
   assert.deepEqual(collectionSummaryStats(items, shelves, 'screen'), { queued: 2, owned: 2 });
   const app = await read('src/App.jsx');
-  assert.match(app, /collectionSummaryStats\(items, shelves, section\)/);
+  assert.doesNotMatch(app, /collectionSummaryStats\(items, shelves, section\)/);
   assert.doesNotMatch(app, /\['watchlist', 'reading_list'\]/);
 });
 
-test('personal queue totals use section wording and explicit queue shelves without name inference', async () => {
+test('personal queue calculations use explicit queue shelves without rendering header totals', async () => {
   const books = [
     { lists: ['reading'], owned: false },
     { lists: ['wishlist'], owned: false },
@@ -224,7 +223,7 @@ test('personal queue totals use section wording and explicit queue shelves witho
   ];
   assert.deepEqual(collectionSummaryStats(books, shelves, 'book'), { queued: 2, owned: 0 });
   const app = await read('src/App.jsx');
-  assert.match(app, /section === 'book' \? 'to read' : section === 'game' \? 'to play' : 'to watch'/);
+  assert.doesNotMatch(app, /const queueLabel/);
   assert.match(app, /is_queue_list: queueList/);
   assert.match(app, /Items on this shelf count toward “to read”/);
   assert.doesNotMatch(await read('src/collection-stats.js'), /watchlist|reading list|backlog|wishlist/i);
@@ -605,12 +604,13 @@ test('poster selection is optimistic and closes its chooser immediately', async 
   assert.match(app, /Previous artwork restored/);
 });
 
-test('branding and collection hero polish remain stable', async () => {
+test('branding and consolidated collection controls remain polished', async () => {
   const app = await read('src/App.jsx');
   const styles = await read('src/public.css');
   assert.doesNotMatch(app, /Screen, shelf & story|SCREEN, SHELF & STORY|EVERYONE’S NEXT WATCH/i);
   assert.match(styles, /\.sidebar \.brand\{[^}]*border-bottom:0/);
-  assert.match(styles, /\.page-hero \.collection-note-preview\{min-height:59px\}/);
+  assert.match(styles, /\.public-media-command\.dotted\{[^}]*background:#fbf3e9/);
+  assert.match(styles, /@media\(max-width:760px\)\{\.media-command-heading h1\{font-size:23px/);
 });
 
 test('active searches render one temporary deduplicated result grid above real shelves', async () => {
@@ -716,7 +716,7 @@ test('shared collection routing is read-only and completely isolated from Main W
   assert.match(app, /!sharedMode[\s\S]*account\?\.profile\?\.approved_at/);
   assert.match(app, /const isAdmin = isAdminAccount && viewAsAdmin && !sharedMode/);
   assert.match(app, /const canReact = Boolean\(!sharedMode/);
-  assert.match(app, /data\.shared \? 'SHARED COLLECTION · READ ONLY'/);
+  assert.match(app, /data\.shared && <span className="eyebrow">SHARED COLLECTION/);
   assert.match(app, /\{sharedMode && <div className="sidebar-bottom">[\s\S]*<small>Read-only link<\/small>/);
   assert.match(share, /share link is unavailable or has been revoked/i);
   assert.doesNotMatch(data, /loadSharedCollection|get_shared_collection/);
@@ -897,13 +897,16 @@ test('authenticated sessions can only attach the profile matching the Supabase A
   assert.match(auth, /catch \(error\) \{[\s\S]*storeSession\(null\);[\s\S]*throw error/);
 });
 
-test('Main Watchlist selection lives in the hero title without an extra content box', async () => {
+test('collection and Main Watchlist titles live inside the dotted media controls', async () => {
   const app = await read('src/App.jsx');
   const styles = await read('src/public.css');
   assert.match(app, /`\$\{selectedMainWatchlistClub\.name\} Watchlist`/);
   assert.match(app, /function WatchlistTitle/);
   assert.match(app, /if \(clubs\.length <= 1\) return <h1>\{title\}<\/h1>/);
-  assert.match(app, /titleControl=\{data\.mainWatchlist \? <WatchlistTitle/);
+  assert.match(app, /media-command public-media-command dotted/);
+  assert.match(app, /data\.mainWatchlist[\s\S]*<WatchlistTitle title=\{mainWatchlistTitle\}/);
+  assert.match(app, /<h1>\{data\.collectionTitle \|\| 'The media room'\}<\/h1>/);
+  assert.doesNotMatch(app, /<PageHero|function PageHero|hero-stat|collectionStats\.queued|mirrored shelves/);
   assert.match(app, /<ListOrdered size=\{17\} \/>Main Watchlist<\/button>/);
   assert.match(app, /const defaultClubId = memberClubs\[0\]\.id/);
   assert.doesNotMatch(app, /My Watchlist/);
@@ -911,6 +914,8 @@ test('Main Watchlist selection lives in the hero title without an extra content 
   assert.doesNotMatch(styles, /\.main-watchlist-scope/);
   assert.doesNotMatch(styles, /\.main-watchlist-nav/);
   assert.match(styles, /\.watchlist-title-selector/);
+  assert.match(styles, /\.public-media-command\.dotted:after/);
+  assert.match(styles, /\.media-command-heading h1\{[^}]*font-size:28px/);
 });
 
 test('Share Collection always manages the signed-in owner collection and no duplicate Friends button remains', async () => {
