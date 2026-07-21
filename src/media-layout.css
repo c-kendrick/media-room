@@ -869,7 +869,7 @@
     grid-template-columns: minmax(260px, 1fr) repeat(2, minmax(140px, 1fr));
   }
 
-  .media-search {
+  .media-filters .media-search {
     grid-column: 1 / -1;
   }
 }
@@ -936,7 +936,7 @@
     grid-template-columns: 1fr 1fr;
   }
 
-  .media-search {
+  .media-filters .media-search {
     grid-column: 1 / -1;
   }
 
@@ -1115,7 +1115,7 @@
     grid-template-columns: 1fr;
   }
 
-  .media-search {
+  .media-filters .media-search {
     grid-column: auto;
   }
 
