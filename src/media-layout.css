@@ -1011,22 +1011,74 @@
   .shelf-rank { margin-top: 3px; padding-top: 3px; font-size: 8px; }
 }
 
+@container shelf-card (max-width: 110px) {
+  .media-card-title { min-height: 27px; max-height: 27px; margin-top: 5px; font-size: 10px; line-height: 1.22; }
+  .media-card-rating-row { --reaction-inline-gap: 2px; min-height: 18px; gap: 2px; }
+  .media-card-rating-row .star-rating { min-height: 14px; margin-top: 1px; }
+  .media-card-rating-row .star-half { width: 5.5px; height: 14px; line-height: 14px; }
+  .media-card-rating-row .star-half::before { width: 11px; font-size: 11px; line-height: 14px; }
+  .media-card-rating-row .star-half[data-side="right"]::before { left: -5.5px; }
+  .reaction-controls { gap: 0; }
+  .reaction-button { width: 16px; min-width: 16px; height: 16px; }
+  .reaction-button.has-count:not(.labelled) { padding-inline: 1px; gap: 0; }
+  .reaction-button svg { width: 10px; height: 10px; }
+  .reaction-button:not(.labelled) small { font-size: 7px; }
+  .media-card-meta { min-height: 14px; margin-top: 2px; gap: 2px; font-size: 7px; }
+  .media-format-list { gap: 2px; }
+  .card-interest { font-size: 7px; }
+}
+
 @container shelf-card (max-width: 90px) {
-  .media-card-title { min-height: 25px; max-height: 25px; margin-top: 4px; font-size: 9px; line-height: 1.2; }
-  .media-card-rating-row { min-height: 0; align-items: flex-start; flex-direction: column; gap: 0; }
-  .media-card-rating-row .star-half { width: 6px; height: 14px; line-height: 14px; }
-  .media-card-rating-row .star-half::before { width: 12px; font-size: 12px; line-height: 14px; }
-  .media-card-rating-row .star-half[data-side="right"]::before { left: -6px; }
-  .reaction-controls { justify-content: flex-start; margin-left: 0; }
-  .reaction-button { width: 17px; min-width: 17px; height: 17px; }
-  .reaction-button svg { width: 11px; height: 11px; }
+  .media-card-title { min-height: 24px; max-height: 24px; margin-top: 4px; font-size: 9px; line-height: 1.18; }
+  .media-card-rating-row { --reaction-inline-gap: 1px; min-height: 16px; gap: 1px; }
+  .media-card-rating-row .star-rating { min-height: 12px; margin-top: 1px; }
+  .media-card-rating-row .star-half { width: 4.5px; height: 12px; line-height: 12px; }
+  .media-card-rating-row .star-half::before { width: 9px; font-size: 9px; line-height: 12px; }
+  .media-card-rating-row .star-half[data-side="right"]::before { left: -4.5px; }
+  .reaction-button { width: 14px; min-width: 14px; height: 14px; }
+  .reaction-button.has-count:not(.labelled) { padding-inline: 0; gap: 0; }
+  .reaction-button svg { width: 9px; height: 9px; }
+  .reaction-button:not(.labelled) small { font-size: 6px; }
   .media-card-meta { min-height: 14px; font-size: 7px; }
+}
+
+@container shelf-card (max-width: 70px) {
+  .media-card-rating-row { min-height: 0; align-items: flex-start; flex-direction: column; gap: 0; }
+  .reaction-controls { justify-content: flex-start; margin-left: 0; }
 }
 
 @media (max-width: 580px) {
   :root {
-    --shelf-card-min: 120px;
-    --shelf-segment-min: 926px;
+    --mobile-media-card-width: clamp(82px, calc((100vw - 76px) / 3), 108px);
+    --shelf-card-min: var(--mobile-media-card-width);
+    --shelf-segment-min: clamp(636px, calc(233.333vw - 115.333px), 818px);
+  }
+
+  .media-page .media-search-results { margin-bottom: 34px; padding: 12px 4px 15px; overflow: hidden; }
+  .media-search-results .search-results-heading { margin-inline: 8px; }
+  .media-search-results .search-results-grid {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: var(--mobile-media-card-width);
+    grid-template-columns: none;
+    justify-content: start;
+    gap: var(--media-column-gap);
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 1px 14px;
+    scrollbar-width: thin;
+    overscroll-behavior-inline: contain;
+  }
+  .search-results-grid .media-card {
+    width: var(--mobile-media-card-width);
+    max-width: var(--mobile-media-card-width);
+    container: shelf-card / inline-size;
+  }
+  .search-results-grid .media-card img,
+  .search-results-grid .media-card-open > .poster-fallback {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 2 / 2.96;
   }
 }
 
