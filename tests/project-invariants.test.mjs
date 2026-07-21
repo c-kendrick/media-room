@@ -1194,6 +1194,22 @@ test('mobile page width is constrained while poster shelves keep their own horiz
   assert.doesNotMatch(mediaStyles, /@media \(max-width: 760px\)[\s\S]*\.media-drawer \{[\s\S]*width: 100vw;/);
 });
 
+test('mobile shelves and search results share three-card sizing without sacrificing collision safety', async () => {
+  const app = await read('src/App.jsx');
+  const mediaStyles = await read('src/media-layout.css');
+
+  assert.match(mediaStyles, /--mobile-media-card-width: clamp\(82px, calc\(\(100vw - 76px\) \/ 3\), 108px\)/);
+  assert.match(mediaStyles, /--shelf-card-min: var\(--mobile-media-card-width\)/);
+  assert.match(mediaStyles, /\.media-page \.media-search-results \{[^}]*padding: 12px 4px 15px;/);
+  assert.match(mediaStyles, /\.media-search-results \.search-results-grid \{[\s\S]*grid-auto-flow: column;[\s\S]*grid-auto-columns: var\(--mobile-media-card-width\);[\s\S]*overflow-x: auto;[\s\S]*overflow-y: hidden;/);
+  assert.match(mediaStyles, /\.search-results-grid \.media-card \{[\s\S]*container: shelf-card \/ inline-size;/);
+  assert.match(mediaStyles, /@container shelf-card \(max-width: 110px\)[\s\S]*\.star-half \{ width: 5\.5px;[\s\S]*\.reaction-button \{ width: 16px;/);
+  assert.match(mediaStyles, /@container shelf-card \(max-width: 90px\)[\s\S]*\.star-half \{ width: 4\.5px;[\s\S]*\.reaction-button \{ width: 14px;/);
+  assert.match(mediaStyles, /@container shelf-card \(max-width: 70px\)[\s\S]*flex-direction: column/);
+  assert.match(app, /shelfNeedsUniformReactionWrap[\s\S]*starWidth \+ reactionWidth \+ inlineGap > row\.clientWidth/);
+  assert.match(app, /uniformReactionWrap && 'uniform-reaction-wrap'/);
+});
+
 test('reaction identities are visible only to self, Friends, and shared Club members', async () => {
   const migration = await read('supabase/migrations/20260720010000_restrict_media_reaction_visibility.sql');
   assert.match(migration, /create or replace function public\.can_view_media_reaction\(target_user_id uuid\)/);
@@ -1496,7 +1512,7 @@ test('numbered shelves and fixed segments are shelf-scoped, responsive and migra
   assert.match(layout, /grid-template-columns: repeat\(7, minmax\(var\(--shelf-card-min\), 1fr\)\)/);
   assert.match(layout, /--shelf-card-min: 68px/);
   assert.match(layout, /@container shelf-card \(max-width: 120px\)/);
-  assert.match(layout, /@media \(max-width: 580px\)[\s\S]*--shelf-card-min: 120px/);
+  assert.match(layout, /@media \(max-width: 580px\)[\s\S]*--shelf-card-min: var\(--mobile-media-card-width\)/);
   assert.match(layout, /poster-segment\.has-divider::after[\s\S]*top: 3px;[\s\S]*bottom: 3px;/);
   assert.match(migration, /add column if not exists is_numbered boolean not null default false/);
   assert.match(migration, /row_number\(\) over \(partition by shelf_id order by segment_index, lane_index, lane_offset/);
