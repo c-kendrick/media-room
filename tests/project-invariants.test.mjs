@@ -114,9 +114,16 @@ test('star ratings use owner-only half-star values from 0.5 through 5', async ()
 
 test('the KM browser icon is included in the Vite document', async () => {
   const document = await read('index.html');
-  const icon = await read('public/favicon.svg');
-  assert.match(document, /%BASE_URL%favicon\.svg/);
-  assert.match(icon, />KM<\/text>/);
+  const styles = await read('src/styles.css');
+  const publicStyles = await read('src/public.css');
+  const icon = await readFile(new URL('../public/icons/media-room-192.png', import.meta.url));
+  assert.match(document, /type="image\/png" sizes="192x192" href="%BASE_URL%icons\/media-room-192\.png"/);
+  assert.ok(icon.byteLength > 0);
+  assert.match(styles, /@font-face\{font-family:'EB Garamond'/);
+  assert.match(styles, /--brand-brown:#6f432f;--brand-serif:'EB Garamond',Garamond/);
+  assert.match(styles, /\.brand-mark\{[^}]*color:var\(--brand-brown\)[^}]*font-family:var\(--brand-serif\)/);
+  assert.match(styles, /\.brand strong\{[^}]*color:var\(--brand-brown\)[^}]*font-family:var\(--brand-serif\)/);
+  assert.match(publicStyles, /\.skeleton-brand-mark\{[^}]*font-family:var\(--brand-serif\)[^}]*color:var\(--brand-brown\)/);
 });
 
 test('rating filters match only explicitly selected half-star values', async () => {
@@ -915,7 +922,7 @@ test('collection and Main Watchlist titles live inside the dotted media controls
   assert.doesNotMatch(styles, /\.main-watchlist-nav/);
   assert.match(styles, /\.watchlist-title-selector/);
   assert.match(styles, /\.public-media-command\.dotted:after/);
-  assert.match(styles, /\.media-command-heading h1\{[^}]*font-size:28px/);
+  assert.match(styles, /\.media-command-heading h1\{[^}]*color:var\(--brand-brown\)[^}]*font-family:var\(--brand-serif\)[^}]*font-size:28px/);
 });
 
 test('Share Collection always manages the signed-in owner collection and no duplicate Friends button remains', async () => {
