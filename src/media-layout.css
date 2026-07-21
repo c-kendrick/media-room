@@ -994,6 +994,19 @@
   }
 }
 
+@container shelf-card (max-width: 150px) {
+  .media-card-rating-row { --reaction-inline-gap: 3px; min-height: 23px; gap: 3px; }
+  .media-card-rating-row .star-rating { min-height: 18px; margin-top: 2px; }
+  .media-card-rating-row .star-half { width: 7.5px; height: 18px; line-height: 18px; }
+  .media-card-rating-row .star-half::before { width: 15px; font-size: 15px; line-height: 18px; }
+  .media-card-rating-row .star-half[data-side="right"]::before { left: -7.5px; }
+  .reaction-controls { gap: 1px; }
+  .reaction-button { width: 21px; min-width: 21px; height: 21px; }
+  .reaction-button.has-count:not(.labelled) { padding-inline: 1px; gap: 1px; }
+  .reaction-button svg { width: 13px; height: 13px; }
+  .reaction-button:not(.labelled) small { font-size: 8px; }
+}
+
 @container shelf-card (max-width: 120px) {
   .media-card-title { min-height: 30px; max-height: 30px; margin-top: 6px; font-size: 11px; }
   .media-card-rating-row { --reaction-inline-gap: 4px; min-height: 21px; gap: 4px; }
@@ -1042,7 +1055,20 @@
   .media-card-meta { min-height: 14px; font-size: 7px; }
 }
 
-@container shelf-card (max-width: 70px) {
+@container shelf-card (max-width: 76px) {
+  .media-card-rating-row { --reaction-inline-gap: 1px; min-height: 13px; gap: 1px; }
+  .media-card-rating-row .star-rating { min-height: 10px; margin-top: 0; }
+  .media-card-rating-row .star-half { width: 3px; height: 10px; line-height: 10px; }
+  .media-card-rating-row .star-half::before { width: 6px; font-size: 7px; line-height: 10px; }
+  .media-card-rating-row .star-half[data-side="right"]::before { left: -3px; }
+  .reaction-button { width: 11px; min-width: 11px; height: 11px; }
+  .reaction-button svg { width: 7px; height: 7px; }
+  .reaction-button:not(.labelled) small { font-size: 5px; }
+  .media-card-meta { min-height: 12px; font-size: 6px; }
+  .card-interest { font-size: 6px; }
+}
+
+@container shelf-card (max-width: 56px) {
   .media-card-rating-row { min-height: 0; align-items: flex-start; flex-direction: column; gap: 0; }
   .reaction-controls { justify-content: flex-start; margin-left: 0; }
 }
@@ -1061,7 +1087,9 @@
     grid-auto-flow: column;
     grid-auto-columns: var(--mobile-media-card-width);
     grid-template-columns: none;
+    grid-template-rows: repeat(2, auto);
     justify-content: start;
+    align-items: start;
     gap: var(--media-column-gap);
     overflow-x: auto;
     overflow-y: hidden;
