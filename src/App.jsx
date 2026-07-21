@@ -1985,6 +1985,8 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canRa
   const [displayItems, setDisplayItems] = useState(items);
   const [arranging, setArranging] = useState(false);
   const [currentSegment, setCurrentSegment] = useState(0);
+  const [mobileShelfPaging, setMobileShelfPaging] = useState(false);
+  const [mobileScrollState, setMobileScrollState] = useState({ canPrevious: false, canNext: false });
   const [eagerPosters, setEagerPosters] = useState(false);
   const [uniformReactionWrap, setUniformReactionWrap] = useState(false);
   const serverOrderKey = items.map((item) => `${item.database_id}:${item.updated_at || ''}:${item.star_rating ?? ''}:${item.list_positions?.[shelf.shelf_id] ?? ''}:${(item.interests || []).map((person) => person.id || person.username).sort().join(',')}:${(item.likes || []).map((person) => person.id).sort().join(',')}:${(item.priorities || []).map((person) => person.id).sort().join(',')}`).join('|');
@@ -1992,6 +1994,27 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canRa
   const displaySegments = pairedShelfSegments(displayItems);
   const segmentCount = displaySegments.length;
   useEffect(() => { setCurrentSegment((segment) => Math.min(segment, Math.max(segmentCount - 1, 0))); }, [segmentCount]);
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 580px)');
+    const synchronizeMode = () => setMobileShelfPaging(mediaQuery.matches);
+    synchronizeMode();
+    mediaQuery.addEventListener?.('change', synchronizeMode);
+    return () => mediaQuery.removeEventListener?.('change', synchronizeMode);
+  }, []);
+  useLayoutEffect(() => {
+    const track = trackRef.current;
+    if (!track) return undefined;
+    const synchronizeMobilePaging = () => {
+      const maximumScroll = Math.max(track.scrollWidth - track.clientWidth, 0);
+      setMobileScrollState({ canPrevious: track.scrollLeft > 1, canNext: track.scrollLeft < maximumScroll - 1 });
+    };
+    synchronizeMobilePaging();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(synchronizeMobilePaging);
+    observer.observe(track);
+    track.querySelectorAll('.poster-segment').forEach((segment) => observer.observe(segment));
+    return () => observer.disconnect();
+  }, [segmentCount, serverOrderKey, mobileShelfPaging]);
   useLayoutEffect(() => {
     const bounds = shelfRef.current?.getBoundingClientRect();
     setEagerPosters(Boolean(bounds && bounds.top < window.innerHeight * 1.15 && bounds.bottom > 0));
@@ -2010,6 +2033,13 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canRa
   const scrollSegment = (direction) => {
     const track = trackRef.current;
     if (!track) return;
+    if (mobileShelfPaging) {
+      const maximumScroll = Math.max(track.scrollWidth - track.clientWidth, 0);
+      const target = Math.max(0, Math.min(track.scrollLeft + direction * track.clientWidth, maximumScroll));
+      setMobileScrollState({ canPrevious: target > 1, canNext: target < maximumScroll - 1 });
+      track.scrollTo({ left: target, behavior: 'smooth' });
+      return;
+    }
     const nextSegment = Math.max(0, Math.min(currentSegment + direction, Math.max(segmentCount - 1, 0)));
     setCurrentSegment(nextSegment);
     const segment = track.querySelector('.poster-segment');
@@ -2030,10 +2060,10 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canRa
         <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && arrangeItems.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
         <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => moveShelfWithViewport(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => moveShelfWithViewport(1)}><ArrowDown size={15} /></button>}</span>
         <span className="shelf-action-group shelf-edit-actions">{canEdit && <button aria-label={`Edit ${shelf.name}`} onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Move ${shelf.name} to Bin`} onClick={onDelete}><Trash2 size={15} /></button>}</span>
-        <span className="shelf-action-group shelf-set-actions"><button aria-label={`Show previous sets in ${shelf.name}`} disabled={currentSegment <= 0 || segmentCount <= 1} onClick={() => scrollSegment(-1)}><ChevronLeft /></button>{segmentCount > 1 && <small>Sets {currentSegment * 2 + 1}{displaySegments[currentSegment]?.[1]?.length ? `\u2013${currentSegment * 2 + 2}` : ''}</small>}<button aria-label={`Show next sets in ${shelf.name}`} disabled={currentSegment >= segmentCount - 1 || segmentCount <= 1} onClick={() => scrollSegment(1)}><ChevronRight /></button></span>
+        <span className="shelf-action-group shelf-set-actions"><button aria-label={mobileShelfPaging ? `Show previous items in ${shelf.name}` : `Show previous sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canPrevious : currentSegment <= 0 || segmentCount <= 1} onClick={() => scrollSegment(-1)}><ChevronLeft /></button>{mobileShelfPaging ? <small>More items</small> : segmentCount > 1 && <small>Sets {currentSegment * 2 + 1}{displaySegments[currentSegment]?.[1]?.length ? `\u2013${currentSegment * 2 + 2}` : ''}</small>}<button aria-label={mobileShelfPaging ? `Show next items in ${shelf.name}` : `Show next sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canNext : currentSegment >= segmentCount - 1 || segmentCount <= 1} onClick={() => scrollSegment(1)}><ChevronRight /></button></span>
       </div>
     </div>
-    <div className="poster-track" ref={trackRef} onScroll={(event) => { const segment = event.currentTarget.querySelector('.poster-segment'); const width = (segment?.offsetWidth || event.currentTarget.clientWidth) + 24; if (width > 0) setCurrentSegment(Math.max(0, Math.min(Math.round(event.currentTarget.scrollLeft / width), Math.max(segmentCount - 1, 0)))); }}>
+    <div className="poster-track" ref={trackRef} onScroll={(event) => { const track = event.currentTarget; const segment = track.querySelector('.poster-segment'); const width = (segment?.offsetWidth || track.clientWidth) + 24; const maximumScroll = Math.max(track.scrollWidth - track.clientWidth, 0); setMobileScrollState({ canPrevious: track.scrollLeft > 1, canNext: track.scrollLeft < maximumScroll - 1 }); if (width > 0) setCurrentSegment(Math.max(0, Math.min(Math.round(track.scrollLeft / width), Math.max(segmentCount - 1, 0)))); }}>
       {displaySegments.map((segmentRows, segmentIndex) => <div className={cls('poster-segment', segmentIndex < displaySegments.length - 1 && 'has-divider')} key={segmentIndex}>{segmentRows.map((row, rowIndex) => row.length > 0 && <div className="poster-set-row" data-set={segmentIndex * 2 + rowIndex + 1} key={rowIndex}>{row.map((item, itemIndex) => <MediaCard key={item.item_id} item={item} shelfRank={shelf.numbered ? segmentIndex * 14 + rowIndex * 7 + itemIndex + 1 : null} eagerPoster={eagerPosters && segmentIndex === 0 && rowIndex === 0} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} />)}</div>)}</div>)}
       {!displayItems.length && <div className="empty-poster">No items on this shelf yet.</div>}
     </div>

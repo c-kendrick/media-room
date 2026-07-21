@@ -1194,9 +1194,10 @@ test('mobile page width is constrained while poster shelves keep their own horiz
   assert.doesNotMatch(mediaStyles, /@media \(max-width: 760px\)[\s\S]*\.media-drawer \{[\s\S]*width: 100vw;/);
 });
 
-test('mobile shelves and search results share three-card sizing without sacrificing collision safety', async () => {
+test('mobile shelves and two-row search results share three-card sizing without sacrificing collision safety', async () => {
   const app = await read('src/App.jsx');
   const mediaStyles = await read('src/media-layout.css');
+  const publicStyles = await read('src/public.css');
 
   assert.match(mediaStyles, /--mobile-media-card-width: clamp\(82px, calc\(\(100vw - 76px\) \/ 3\), 108px\)/);
   assert.match(mediaStyles, /--shelf-card-min: var\(--mobile-media-card-width\)/);
@@ -1205,7 +1206,10 @@ test('mobile shelves and search results share three-card sizing without sacrific
   assert.match(mediaStyles, /\.search-results-grid \.media-card \{[\s\S]*container: shelf-card \/ inline-size;/);
   assert.match(mediaStyles, /@container shelf-card \(max-width: 110px\)[\s\S]*\.star-half \{ width: 5\.5px;[\s\S]*\.reaction-button \{ width: 16px;/);
   assert.match(mediaStyles, /@container shelf-card \(max-width: 90px\)[\s\S]*\.star-half \{ width: 4\.5px;[\s\S]*\.reaction-button \{ width: 14px;/);
-  assert.match(mediaStyles, /@container shelf-card \(max-width: 70px\)[\s\S]*flex-direction: column/);
+  assert.match(mediaStyles, /@container shelf-card \(max-width: 76px\)[\s\S]*\.star-half \{ width: 3px/);
+  assert.match(mediaStyles, /@container shelf-card \(max-width: 56px\)[\s\S]*flex-direction: column/);
+  assert.match(mediaStyles, /grid-template-rows: repeat\(2, auto\)/);
+  assert.match(publicStyles, /\.media-tabs\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)!important\}/);
   assert.match(app, /shelfNeedsUniformReactionWrap[\s\S]*starWidth \+ reactionWidth \+ inlineGap > row\.clientWidth/);
   assert.match(app, /uniformReactionWrap && 'uniform-reaction-wrap'/);
 });
@@ -1506,13 +1510,20 @@ test('numbered shelves and fixed segments are shelf-scoped, responsive and migra
   assert.match(app, /Numbered shelf/);
   assert.match(app, /shelfRank=\{shelf\.numbered \?/);
   assert.match(app, /segmentIndex \* 14 \+ rowIndex \* 7 \+ itemIndex \+ 1/);
+  assert.match(app, /window\.matchMedia\('\(max-width: 580px\)'\)/);
+  assert.match(app, /mobileShelfPaging[\s\S]*direction \* track\.clientWidth/);
+  assert.match(app, /mobileShelfPaging \? <small>More items<\/small>/);
   assert.match(app, /setDisplayItems\(nextItems\.filter\([\s\S]*try \{ await onReorder[\s\S]*setDisplayItems\(previous\); throw error/);
   assert.match(app, /Your draft is still here; try again or cancel to restore the last saved order/);
   assert.match(data, /numbered: Boolean\(shelf\.is_numbered\)/);
   assert.match(layout, /grid-template-columns: repeat\(7, minmax\(var\(--shelf-card-min\), 1fr\)\)/);
   assert.match(layout, /--shelf-card-min: 68px/);
   assert.match(layout, /@container shelf-card \(max-width: 120px\)/);
+  assert.match(layout, /@container shelf-card \(max-width: 150px\)[\s\S]*--reaction-inline-gap: 3px/);
+  assert.match(layout, /@container shelf-card \(max-width: 76px\)[\s\S]*\.star-half \{ width: 3px/);
+  assert.match(layout, /@container shelf-card \(max-width: 56px\)[\s\S]*flex-direction: column/);
   assert.match(layout, /@media \(max-width: 580px\)[\s\S]*--shelf-card-min: var\(--mobile-media-card-width\)/);
+  assert.match(layout, /\.media-search-results \.search-results-grid[\s\S]*grid-auto-flow: column;[\s\S]*grid-template-rows: repeat\(2, auto\)/);
   assert.match(layout, /poster-segment\.has-divider::after[\s\S]*top: 3px;[\s\S]*bottom: 3px;/);
   assert.match(migration, /add column if not exists is_numbered boolean not null default false/);
   assert.match(migration, /row_number\(\) over \(partition by shelf_id order by segment_index, lane_index, lane_offset/);
