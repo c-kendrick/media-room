@@ -1553,8 +1553,11 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /window\.history\.pushState\(marker, '', window\.location\.href\)/);
   assert.match(app, /window\.addEventListener\('popstate', closeFromHistory\)/);
   assert.match(app, /mediaRoomDialogEntry/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-edit-actions\{grid-column:2;grid-row:1/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-order-actions\{grid-column:1;grid-row:2/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\{[^}]*grid-template-columns:repeat\(3,auto\);justify-content:end!important/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-content-actions\{grid-column:1\/-1;grid-row:1;[^}]*justify-self:end/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-edit-actions\{grid-column:1;grid-row:2;[^}]*margin-right:12px/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-order-actions\{grid-column:2;grid-row:2/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-set-actions\{grid-column:3;grid-row:2/);
   assert.match(styles, /\.shelf-add-button svg\{position:absolute;left:50%;top:50%/);
 });
 
