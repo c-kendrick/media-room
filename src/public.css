@@ -631,6 +631,7 @@
 .add-arrange-set{align-self:flex-start;display:inline-flex;align-items:center;gap:5px;margin-top:8px;border:1px solid #ccbdae;background:#f6ede2;padding:8px 10px;color:#6f6157;cursor:pointer;font-size:9px;font-weight:700}
 .arrange-validation{margin-top:10px;padding:10px 12px;border:1px solid #d2a18e;background:#f8e9e2;color:#7f3f30;font-size:9px}.arrange-validation strong{font-size:10px}.arrange-validation ul{display:grid;gap:3px;margin:6px 0 0;padding-left:18px}
 .shelf-set-actions small{min-width:58px;text-align:center;font-size:8px;color:#817468}
+.main-watchlist-shelf .shelf-heading-copy>small{font-size:10px}
 
 @media(max-width:760px){.arrange-lane-headings{display:none}.arrange-set-pair{grid-template-columns:1fr}.fixed-set-arranger{max-height:96vh}.arrange-entry{grid-template-columns:16px 31px 27px minmax(0,1fr) auto;gap:6px;padding-inline:7px}}
 

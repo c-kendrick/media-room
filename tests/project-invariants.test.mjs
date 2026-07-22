@@ -258,6 +258,7 @@ test('shelf title and subtitle saves close immediately and update optimistically
 test('Main Watchlist includes one virtual priority and shared-demand shelf', async () => {
   const data = await read('src/supabase-data.js');
   assert.match(data, /id: 'main-priority-watchlist'/);
+  assert.match(data, /id: 'main-priority-watchlist'[\s\S]*owner_name: 'Main'/);
   assert.match(data, /demand\.length < 2/);
   assert.match(data, /interestedIdentities\.has\(identity\)/);
   assert.match(data, /const shelfIds = shelves\.map\(\(shelf\) => shelf\.id\)/);
@@ -1553,6 +1554,7 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /window\.history\.pushState\(marker, '', window\.location\.href\)/);
   assert.match(app, /window\.addEventListener\('popstate', closeFromHistory\)/);
   assert.match(app, /mediaRoomDialogEntry/);
+  assert.match(app, /function MediaDrawer[\s\S]*useEscape\(onClose, !editing && !posterReviewOpen && !detailReviewOpen\)/);
   assert.match(app, /const pagerOnlyActions = !canRemoveMirror && !canEdit && !canCurateMain && !canReorderShelf/);
   assert.match(app, /className=\{cls\('shelf-actions', pagerOnlyActions && 'pager-only'\)\}/);
   assert.match(styles, /\.shelf-head h2 span\{background:var\(--brand-brown\)\}/);
@@ -1580,6 +1582,7 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.main-watchlist-shelf \.shelf-title\{width:auto;min-width:0;justify-content:flex-start;text-align:left\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.main-watchlist-shelf \.shelf-actions\{width:auto;margin-left:0;align-self:center\}/);
   assert.match(styles, /\.shelf-add-button svg\{position:absolute;left:50%;top:50%/);
+  assert.match(styles, /\.main-watchlist-shelf \.shelf-heading-copy>small\{font-size:10px\}/);
 });
 
 test('numbered ranks stay on memberships and can differ between source shelves', () => {

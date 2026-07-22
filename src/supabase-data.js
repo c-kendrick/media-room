@@ -373,7 +373,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
   const virtualMediaItems = [...representativeByIdentity.values()];
   const virtualShelf = {
     id: 'main-priority-watchlist', section: 'screen', name: 'Watchlist', subtitle: 'Priority picks and titles wanted by more than one person.',
-    position: -1, deleted_at: null, virtual: true,
+    owner_name: 'Main', position: -1, deleted_at: null, virtual: true,
   };
   const virtualMemberships = virtualMediaItems.map((item, index) => ({ shelf_id: virtualShelf.id, media_item_id: item.id, position: (index + 1) * 1000 }));
   const snapshot = mapSnapshot(

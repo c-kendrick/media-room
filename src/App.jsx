@@ -2218,6 +2218,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
   const [posterReviewError, setPosterReviewError] = useState('');
   const [posterReviewOpen, setPosterReviewOpen] = useState(false);
   const [detailReviewOpen, setDetailReviewOpen] = useState(false);
+  useEscape(onClose, !editing && !posterReviewOpen && !detailReviewOpen);
   useEffect(() => { setOptimisticOwned(Boolean(item.owned)); }, [item.owned, item.database_id]);
   useEffect(() => { optimisticShelvesRef.current = item.lists || []; setOptimisticShelves(item.lists || []); }, [item.lists, item.database_id]);
   const tags = mediaDisplayTags(item);
