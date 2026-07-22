@@ -345,7 +345,7 @@
 @media(max-width:760px){
   .collection-tools{min-width:0;align-items:stretch;flex-direction:column}.collection-tools p{white-space:normal}.collection-tool-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));justify-content:stretch}.collection-tool-actions .quiet-button{min-width:0;justify-content:flex-start}
   .inline-create{width:100%}.inline-create input{min-width:0;flex:1}
-  .shelf-add-button{box-sizing:border-box!important;flex:0 0 40px!important;width:40px!important;min-width:40px!important;height:40px!important;padding:0!important;gap:0!important;display:grid!important;place-items:center!important;font-size:0!important;line-height:0!important}.shelf-add-button svg{display:block;margin:0;flex:0 0 auto}
+  .shelf-add-button{box-sizing:border-box!important;flex:0 0 40px!important;width:40px!important;min-width:40px!important;height:40px!important;padding:0!important;gap:0!important;position:relative!important;display:grid!important;place-items:center!important;font-size:0!important;line-height:0!important}.shelf-add-button svg{position:absolute;left:50%;top:50%;display:block;margin:0;transform:translate(-50%,-50%)}
   .media-edit-dialog{padding:26px 20px!important}
   .drawer-danger-zone{flex-wrap:wrap}
   .optional-media-section{padding:14px 12px}
@@ -356,6 +356,14 @@
   .arrange-rows{grid-template-columns:1fr}
   .arrange-row .arrange-list{max-height:36vh}
   .arrange-help{align-items:flex-start;flex-wrap:wrap}
+}
+
+@media(max-width:580px){
+  .shelf-actions{display:grid!important;grid-template-columns:minmax(0,auto) auto;justify-content:start!important;align-items:center!important}
+  .shelf-content-actions{grid-column:1;grid-row:1;min-width:0}
+  .shelf-edit-actions{grid-column:2;grid-row:1;justify-self:start}
+  .shelf-order-actions{grid-column:1;grid-row:2;justify-self:start}
+  .shelf-set-actions{grid-column:2;grid-row:2;justify-self:start}
 }
 
 @media(max-width:1100px) and (min-width:761px){.collection-tools{align-items:flex-start;flex-direction:column}.collection-tool-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}}
