@@ -1557,6 +1557,7 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /className=\{cls\('shelf-actions', pagerOnlyActions && 'pager-only'\)\}/);
   assert.match(styles, /\.shelf-head h2 span\{background:var\(--brand-brown\)\}/);
   assert.match(app, /className="shelf-action-group shelf-add-actions"/);
+  assert.match(app, /className="shelf-mobile-top-row"[\s\S]*shelf-edit-actions[\s\S]*shelf-order-actions[\s\S]*className="shelf-mobile-bottom-row"[\s\S]*shelf-content-actions[\s\S]*shelf-add-actions[\s\S]*shelf-set-actions/);
   assert.match(styles, /\.shelf-heading-copy h2\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);
   assert.match(styles, /\.media-command-heading h1\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);
   assert.match(styles, /\.main-owner-intro h2\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);
@@ -1564,12 +1565,9 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(styles, /@media\(max-width:580px\)\{\.shelf-heading-copy h2,\.media-command-heading h1\{font-size:25px\}\.media-command-heading h1,\.main-owner-intro h2\{text-align:right\}\.watchlist-title-selector\{margin-left:auto\}\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-title\{width:100%;justify-content:flex-end;text-align:right\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-heading-copy\{justify-items:end\}/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\{[^}]*grid-template-columns:max-content max-content max-content;justify-content:end!important;[^}]*column-gap:7px!important;row-gap:7px!important;[^}]*padding-left:0!important/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-edit-actions\{grid-column:2;grid-row:1/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-order-actions\{grid-column:3;grid-row:1/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-content-actions\{grid-column:1;grid-row:2/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-add-actions\{grid-column:2;grid-row:2/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-set-actions\{grid-column:3;grid-row:2/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\{[^}]*display:flex!important;flex-direction:column;flex-wrap:nowrap!important;align-items:flex-end!important;[^}]*gap:7px!important;[^}]*padding-left:0!important/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-mobile-top-row,\.shelf-mobile-bottom-row\{display:flex;align-items:center;justify-content:flex-end;gap:7px;max-width:100%\}/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\.pager-only \.shelf-mobile-top-row\{display:none\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\.pager-only\{justify-content:end!important\}/);
   assert.match(styles, /\.shelf-add-button svg\{position:absolute;left:50%;top:50%/);
 });

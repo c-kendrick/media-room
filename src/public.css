@@ -221,6 +221,8 @@
 .remove-main-mirror{background:transparent!important;border:1px solid #d8c9bb!important;color:#8d5147!important}
 .remove-main-mirror:hover{background:#f3dfda!important}
 .shelf-actions{display:flex!important;align-items:center!important;justify-content:flex-end;flex-wrap:wrap;gap:7px!important;margin-left:auto}
+.shelf-mobile-top-row,.shelf-mobile-bottom-row{display:contents}
+.shelf-content-actions{order:1}.shelf-add-actions{order:2}.shelf-order-actions{order:3}.shelf-edit-actions{order:4}.shelf-set-actions{order:5}
 .shelf-action-group{height:40px;box-sizing:border-box;display:inline-flex;align-items:center;gap:3px;padding:3px;border:1px solid #e0d5c8;border-radius:7px;background:rgba(255,250,242,.72)}
 .shelf-action-group:empty{display:none}
 .shelf-action-group>button:not(.button):not(.shelf-control-button):not(.remove-main-mirror){width:32px;height:32px;border:0;border-radius:5px;background:transparent;color:#71675e;display:grid;place-items:center;cursor:pointer}
@@ -364,12 +366,12 @@
   .shelf-title{width:100%;justify-content:flex-end;text-align:right}
   .shelf-heading-copy{justify-items:end}
   .shelf-heading-copy h2{justify-content:flex-end}
-  .shelf-actions{display:grid!important;grid-template-columns:max-content max-content max-content;justify-content:end!important;align-items:center!important;column-gap:7px!important;row-gap:7px!important;box-sizing:border-box;padding-left:0!important}
-  .shelf-edit-actions{grid-column:2;grid-row:1;justify-self:end}
-  .shelf-order-actions{grid-column:3;grid-row:1;justify-self:start}
-  .shelf-content-actions{grid-column:1;grid-row:2;min-width:0;justify-self:end}
-  .shelf-add-actions{grid-column:2;grid-row:2;justify-self:center}
-  .shelf-set-actions{grid-column:3;grid-row:2;justify-self:start}
+  .shelf-actions{display:flex!important;flex-direction:column;flex-wrap:nowrap!important;align-items:flex-end!important;justify-content:flex-start!important;gap:7px!important;box-sizing:border-box;padding-left:0!important}
+  .shelf-mobile-top-row,.shelf-mobile-bottom-row{display:flex;align-items:center;justify-content:flex-end;gap:7px;max-width:100%}
+  .shelf-mobile-top-row{order:1}
+  .shelf-mobile-bottom-row{order:2}
+  .shelf-mobile-top-row .shelf-edit-actions,.shelf-mobile-top-row .shelf-order-actions,.shelf-mobile-bottom-row .shelf-content-actions,.shelf-mobile-bottom-row .shelf-add-actions,.shelf-mobile-bottom-row .shelf-set-actions{order:initial}
+  .shelf-actions.pager-only .shelf-mobile-top-row{display:none}
   .shelf-actions.pager-only{justify-content:end!important}
 }
 
