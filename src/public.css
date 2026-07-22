@@ -649,11 +649,12 @@
   .main-watchlist-shelf .shelf-actions{width:auto;margin-left:0;align-self:center}
 }
 
-@media(min-width:581px){
+@media(min-width:761px){
   .main-watchlist-page .main-watchlist-shelf .shelf-actions.pager-only{
-    margin-right:10%;
-    transform:translateY(8px);
+    margin-right:3.5%;
+    align-self:flex-end;
   }
+  .collection-page .shelf-actions{margin-right:3.5%}
 }
 
 @media(max-width:580px){

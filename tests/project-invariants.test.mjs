@@ -1584,7 +1584,8 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.main-watchlist-shelf \.shelf-actions\{width:auto;margin-left:0;align-self:center\}/);
   assert.match(styles, /\.shelf-add-button svg\{position:absolute;left:50%;top:50%/);
   assert.match(styles, /\.main-watchlist-shelf \.shelf-heading-copy>small\{font-size:10px\}/);
-  assert.match(styles, /@media\(min-width:581px\)[\s\S]*\.main-watchlist-page \.main-watchlist-shelf \.shelf-actions\.pager-only\{[^}]*margin-right:10%;[^}]*transform:translateY\(8px\)/);
+  assert.match(styles, /@media\(min-width:761px\)[\s\S]*\.main-watchlist-page \.main-watchlist-shelf \.shelf-actions\.pager-only\{[^}]*margin-right:3\.5%;[^}]*align-self:flex-end/);
+  assert.match(styles, /@media\(min-width:761px\)[\s\S]*\.collection-page \.shelf-actions\{margin-right:3\.5%\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.main-watchlist-page \.media-command-heading h1\{text-align:left\}[\s\S]*\.main-watchlist-page \.watchlist-title-selector\{margin-left:0\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.collection-page \.shelf-title\{justify-content:flex-start;text-align:left\}[\s\S]*\.collection-page \.shelf-actions\{justify-content:flex-start!important\}/);
 });
