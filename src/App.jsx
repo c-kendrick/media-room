@@ -114,6 +114,13 @@ function writeLastPage(userId, collectionId, section = 'screen') {
 }
 
 function useEscape(onClose, active = true) {
+  const onCloseRef = useRef(onClose);
+  const activeRef = useRef(active);
+  const dialogEntryIdRef = useRef(`media-room-dialog-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const historyCleanupRef = useRef(null);
+  onCloseRef.current = onClose;
+  activeRef.current = active;
+
   useEffect(() => {
     if (!active) return undefined;
     const close = (event) => {
@@ -125,6 +132,27 @@ function useEscape(onClose, active = true) {
     window.addEventListener('keydown', close, true);
     return () => window.removeEventListener('keydown', close, true);
   }, [active, onClose]);
+
+  useEffect(() => {
+    const dialogEntryId = dialogEntryIdRef.current;
+    const marker = { ...(window.history.state || {}), mediaRoomDialogEntry: dialogEntryId };
+    let closedByHistory = false;
+    window.clearTimeout(historyCleanupRef.current);
+    if (window.history.state?.mediaRoomDialogEntry !== dialogEntryId) window.history.pushState(marker, '', window.location.href);
+
+    const closeFromHistory = (event) => {
+      if (event.state?.mediaRoomDialogEntry === dialogEntryId || !activeRef.current) return;
+      closedByHistory = true;
+      onCloseRef.current();
+    };
+    window.addEventListener('popstate', closeFromHistory);
+    return () => {
+      window.removeEventListener('popstate', closeFromHistory);
+      if (!closedByHistory) historyCleanupRef.current = window.setTimeout(() => {
+        if (window.history.state?.mediaRoomDialogEntry === dialogEntryId) window.history.back();
+      }, 0);
+    };
+  }, []);
 }
 
 function exportCollection(snapshot) {
@@ -1975,7 +2003,7 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canRa
         <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && arrangeItems.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
         <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => moveShelfWithViewport(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => moveShelfWithViewport(1)}><ArrowDown size={15} /></button>}</span>
         <span className="shelf-action-group shelf-edit-actions">{canEdit && <button aria-label={`Edit ${shelf.name}`} onClick={onRename}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Move ${shelf.name} to Bin`} onClick={onDelete}><Trash2 size={15} /></button>}</span>
-        <span className="shelf-action-group shelf-set-actions"><button aria-label={mobileShelfPaging ? `Show previous items in ${shelf.name}` : `Show previous sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canPrevious : currentSegment <= 0 || segmentCount <= 1} onClick={() => scrollSegment(-1)}><ChevronLeft /></button>{mobileShelfPaging ? <small>More items</small> : segmentCount > 1 && <small>Sets {currentSegment * 2 + 1}{displaySegments[currentSegment]?.[1]?.length ? `\u2013${currentSegment * 2 + 2}` : ''}</small>}<button aria-label={mobileShelfPaging ? `Show next items in ${shelf.name}` : `Show next sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canNext : currentSegment >= segmentCount - 1 || segmentCount <= 1} onClick={() => scrollSegment(1)}><ChevronRight /></button></span>
+        <span className="shelf-action-group shelf-set-actions"><button aria-label={mobileShelfPaging ? `Show previous items in ${shelf.name}` : `Show previous sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canPrevious : currentSegment <= 0 || segmentCount <= 1} onClick={() => scrollSegment(-1)}><ChevronLeft /></button>{!mobileShelfPaging && segmentCount > 1 && <small>Sets {currentSegment * 2 + 1}{displaySegments[currentSegment]?.[1]?.length ? `\u2013${currentSegment * 2 + 2}` : ''}</small>}<button aria-label={mobileShelfPaging ? `Show next items in ${shelf.name}` : `Show next sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canNext : currentSegment >= segmentCount - 1 || segmentCount <= 1} onClick={() => scrollSegment(1)}><ChevronRight /></button></span>
       </div>
     </div>
     <div className="poster-track" ref={trackRef} onScroll={(event) => { const track = event.currentTarget; const segment = track.querySelector('.poster-segment'); const width = (segment?.offsetWidth || track.clientWidth) + 24; const maximumScroll = Math.max(track.scrollWidth - track.clientWidth, 0); setMobileScrollState({ canPrevious: track.scrollLeft > 1, canNext: track.scrollLeft < maximumScroll - 1 }); if (width > 0) setCurrentSegment(Math.max(0, Math.min(Math.round(track.scrollLeft / width), Math.max(segmentCount - 1, 0)))); }}>

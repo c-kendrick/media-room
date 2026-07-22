@@ -1527,7 +1527,8 @@ test('numbered shelves and fixed segments are shelf-scoped, responsive and migra
   assert.match(app, /segmentIndex \* 14 \+ rowIndex \* 7 \+ itemIndex \+ 1/);
   assert.match(app, /window\.matchMedia\('\(max-width: 580px\)'\)/);
   assert.match(app, /mobileShelfPaging[\s\S]*direction \* track\.clientWidth/);
-  assert.match(app, /mobileShelfPaging \? <small>More items<\/small>/);
+  assert.doesNotMatch(app, /<small>More items<\/small>/);
+  assert.match(app, /!mobileShelfPaging && segmentCount > 1 && <small>Sets/);
   assert.match(app, /setDisplayItems\(nextItems\.filter\([\s\S]*try \{ await onReorder[\s\S]*setDisplayItems\(previous\); throw error/);
   assert.match(app, /Your draft is still here; try again or cancel to restore the last saved order/);
   assert.match(data, /numbered: Boolean\(shelf\.is_numbered\)/);
@@ -1544,6 +1545,17 @@ test('numbered shelves and fixed segments are shelf-scoped, responsive and migra
   assert.match(migration, /row_number\(\) over \(partition by shelf_id order by segment_index, lane_index, lane_offset/);
   assert.match(migration, /public\.can_manage_collection\(collection_id\)/);
   assert.doesNotMatch(writes.match(/export async function reorderShelfMedia[\s\S]*?\n\}/)?.[0] || '', /for \(let index/);
+});
+
+test('dialogs use browser history and shelf controls keep the requested phone layout', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /window\.history\.pushState\(marker, '', window\.location\.href\)/);
+  assert.match(app, /window\.addEventListener\('popstate', closeFromHistory\)/);
+  assert.match(app, /mediaRoomDialogEntry/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-edit-actions\{grid-column:2;grid-row:1/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-order-actions\{grid-column:1;grid-row:2/);
+  assert.match(styles, /\.shelf-add-button svg\{position:absolute;left:50%;top:50%/);
 });
 
 test('numbered ranks stay on memberships and can differ between source shelves', () => {
