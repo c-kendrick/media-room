@@ -1800,7 +1800,7 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
   };
 
   return (
-    <div className="page media-page">
+    <div className={cls('page media-page', data.mainWatchlist ? 'main-watchlist-page' : 'collection-page')}>
       <div className={cls('media-command public-media-command dotted', data.mainWatchlist && 'has-title-control')}>
         <div className="media-command-heading">
           {data.shared && <span className="eyebrow">SHARED COLLECTION · READ ONLY</span>}
