@@ -922,7 +922,7 @@ test('collection and Main Watchlist titles live inside the dotted media controls
   assert.doesNotMatch(styles, /\.main-watchlist-nav/);
   assert.match(styles, /\.watchlist-title-selector/);
   assert.match(styles, /\.public-media-command\.dotted:after/);
-  assert.match(styles, /\.media-command-heading h1\{[^}]*color:var\(--brand-brown\)[^}]*font-family:var\(--brand-serif\)[^}]*font-size:28px/);
+  assert.match(styles, /\.media-command-heading h1\{[^}]*color:var\(--brand-brown\)[^}]*font-family:var\(--brand-serif\)[^}]*font-size:30px/);
 });
 
 test('Share Collection always manages the signed-in owner collection and no duplicate Friends button remains', async () => {
@@ -1553,14 +1553,24 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /window\.history\.pushState\(marker, '', window\.location\.href\)/);
   assert.match(app, /window\.addEventListener\('popstate', closeFromHistory\)/);
   assert.match(app, /mediaRoomDialogEntry/);
+  assert.match(app, /const pagerOnlyActions = !canRemoveMirror && !canEdit && !canCurateMain && !canReorderShelf/);
+  assert.match(app, /className=\{cls\('shelf-actions', pagerOnlyActions && 'pager-only'\)\}/);
   assert.match(styles, /\.shelf-head h2 span\{background:var\(--brand-brown\)\}/);
+  assert.match(app, /className="shelf-action-group shelf-add-actions"/);
+  assert.match(styles, /\.shelf-heading-copy h2\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);
+  assert.match(styles, /\.media-command-heading h1\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);
+  assert.match(styles, /\.main-owner-intro h2\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);
+  assert.match(styles, /@media\(max-width:560px\)[\s\S]*\.main-owner-intro h2\{font-size:25px\}/);
+  assert.match(styles, /@media\(max-width:580px\)\{\.shelf-heading-copy h2,\.media-command-heading h1\{font-size:25px\}\.media-command-heading h1,\.main-owner-intro h2\{text-align:right\}\.watchlist-title-selector\{margin-left:auto\}\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-title\{width:100%;justify-content:flex-end;text-align:right\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-heading-copy\{justify-items:end\}/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\{[^}]*grid-template-columns:auto auto;justify-content:center!important/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-edit-actions\{grid-column:1;grid-row:1/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-content-actions\{grid-column:2;grid-row:1/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-order-actions\{grid-column:1;grid-row:2/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\{[^}]*grid-template-columns:auto auto auto;justify-content:center!important/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-edit-actions\{grid-column:2;grid-row:1/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-order-actions\{grid-column:3;grid-row:1/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-content-actions\{grid-column:1;grid-row:2/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-set-actions\{grid-column:2;grid-row:2/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-add-actions\{grid-column:3;grid-row:2/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\.pager-only\{justify-content:end!important\}/);
   assert.match(styles, /\.shelf-add-button svg\{position:absolute;left:50%;top:50%/);
 });
 
