@@ -1564,12 +1564,12 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(styles, /@media\(max-width:580px\)\{\.shelf-heading-copy h2,\.media-command-heading h1\{font-size:25px\}\.media-command-heading h1,\.main-owner-intro h2\{text-align:right\}\.watchlist-title-selector\{margin-left:auto\}\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-title\{width:100%;justify-content:flex-end;text-align:right\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-heading-copy\{justify-items:end\}/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\{[^}]*grid-template-columns:auto auto auto;justify-content:center!important/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\{[^}]*grid-template-columns:auto auto auto;justify-content:end!important/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-edit-actions\{grid-column:2;grid-row:1/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-order-actions\{grid-column:3;grid-row:1/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-content-actions\{grid-column:1;grid-row:2/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-set-actions\{grid-column:2;grid-row:2/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-add-actions\{grid-column:3;grid-row:2/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-add-actions\{grid-column:2;grid-row:2/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-set-actions\{grid-column:3;grid-row:2/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\.pager-only\{justify-content:end!important\}/);
   assert.match(styles, /\.shelf-add-button svg\{position:absolute;left:50%;top:50%/);
 });
