@@ -648,3 +648,21 @@
   .main-watchlist-shelf .shelf-heading-copy h2{justify-content:flex-start}
   .main-watchlist-shelf .shelf-actions{width:auto;margin-left:0;align-self:center}
 }
+
+@media(min-width:581px){
+  .main-watchlist-page .main-watchlist-shelf .shelf-actions.pager-only{
+    margin-right:10%;
+    transform:translateY(8px);
+  }
+}
+
+@media(max-width:580px){
+  .main-watchlist-page .media-command-heading h1{text-align:left}
+  .main-watchlist-page .watchlist-title-selector{margin-left:0}
+  .collection-page .media-command-heading h1{text-align:left}
+  .collection-page .shelf-title{justify-content:flex-start;text-align:left}
+  .collection-page .shelf-heading-copy{justify-items:start}
+  .collection-page .shelf-heading-copy h2{justify-content:flex-start}
+  .collection-page .shelf-actions{justify-content:flex-start!important}
+  .collection-page .shelf-mobile-top-row,.collection-page .shelf-mobile-bottom-row{justify-content:flex-start}
+}
