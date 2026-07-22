@@ -633,3 +633,17 @@
 .shelf-set-actions small{min-width:58px;text-align:center;font-size:8px;color:#817468}
 
 @media(max-width:760px){.arrange-lane-headings{display:none}.arrange-set-pair{grid-template-columns:1fr}.fixed-set-arranger{max-height:96vh}.arrange-entry{grid-template-columns:16px 31px 27px minmax(0,1fr) auto;gap:6px;padding-inline:7px}}
+
+.shelf-edit-mobile-actions{display:none}
+
+@media(max-width:580px){
+  .shelf-actions{display:flex!important;flex-direction:row;flex-wrap:nowrap!important;align-items:center!important;justify-content:flex-end!important;gap:7px!important;box-sizing:border-box;padding-left:0!important}
+  .shelf-mobile-bottom-row .shelf-content-actions{display:none}
+  .shelf-edit-mobile-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid #e0d5c8}
+  .shelf-edit-mobile-actions .shelf-control-button{width:100%!important}
+  .main-watchlist-shelf .shelf-head{display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:center!important;gap:12px}
+  .main-watchlist-shelf .shelf-title{width:auto;min-width:0;justify-content:flex-start;text-align:left}
+  .main-watchlist-shelf .shelf-heading-copy{justify-items:start}
+  .main-watchlist-shelf .shelf-heading-copy h2{justify-content:flex-start}
+  .main-watchlist-shelf .shelf-actions{width:auto;margin-left:0;align-self:center}
+}
