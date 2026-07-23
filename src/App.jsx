@@ -2649,16 +2649,13 @@ function ShelfEditDialog({ shelf, canArrange, onArrange, canCurateMain, onToggle
   useEscape(onClose);
   const [name, setName] = useState(shelf.name);
   const [subtitle, setSubtitle] = useState(shelf.subtitle || '');
-  const [queueList, setQueueList] = useState(Boolean(shelf.queueList));
   const [numbered, setNumbered] = useState(Boolean(shelf.numbered));
   const [mainWatchlist, setMainWatchlist] = useState(Boolean(shelf.showInMainWatchlist));
-  const queueCopy = shelf.section === 'book' ? ['Reading List', 'Items on this shelf count toward “to read”.'] : shelf.section === 'game' ? ['Backlog / To Play shelf', 'Items on this shelf count toward “to play”.'] : ['Watchlist / To Watch shelf', 'Items on this shelf count toward “to watch”.'];
-  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog" onSubmit={(event) => { event.preventDefault(); const cleanedName = name.trim(); const cleanedSubtitle = subtitle.trim(); if ((!shelf.required && !cleanedName) || cleanedSubtitle.length > 180) return; onSave({ ...(shelf.required ? {} : { name: cleanedName }), subtitle: cleanedSubtitle || null, is_queue_list: queueList, is_numbered: numbered }); onClose(); }}>
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog" onSubmit={(event) => { event.preventDefault(); const cleanedName = name.trim(); const cleanedSubtitle = subtitle.trim(); if ((!shelf.required && !cleanedName) || cleanedSubtitle.length > 180) return; onSave({ ...(shelf.required ? {} : { name: cleanedName }), subtitle: cleanedSubtitle || null, is_numbered: numbered }); onClose(); }}>
     <button className="close" type="button" onClick={onClose} aria-label="Close shelf editor"><X /></button>
     <span className="eyebrow">EDIT SHELF</span><h2>{shelf.name}</h2>
     {!shelf.required && <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>}
     <label>Subtitle <span className="field-hint">Optional</span><input autoFocus={shelf.required} value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
-    <label className="reading-list-designation"><input type="checkbox" checked={queueList} onChange={(event) => setQueueList(event.target.checked)} /><span><b>{queueCopy[0]}</b><small>{queueCopy[1]}</small></span></label>
     <label className="reading-list-designation"><input type="checkbox" checked={numbered} onChange={(event) => setNumbered(event.target.checked)} /><span><b>Numbered shelf</b><small>Show each item's shelf position beneath its card.</small></span></label>
     {(canArrange || canCurateMain) && <div className="shelf-edit-mobile-actions">
       {canArrange && <button className="shelf-control-button arrange-button" type="button" onClick={onArrange}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}
@@ -2673,16 +2670,13 @@ function CreateShelfDialog({ section, onClose, onSave }) {
   useEscape(onClose);
   const [name, setName] = useState('');
   const [subtitle, setSubtitle] = useState('');
-  const [queueList, setQueueList] = useState(false);
   const [mainWatchlist, setMainWatchlist] = useState(false);
   const [numbered, setNumbered] = useState(false);
-  const queueCopy = section === 'book' ? ['Reading List', 'Count this shelf toward “to read”.'] : section === 'game' ? ['Backlog / To Play shelf', 'Count this shelf toward “to play”.'] : ['Watchlist / To Watch shelf', 'Count this shelf toward “to watch”.'];
-  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog create-shelf-dialog" onSubmit={(event) => { event.preventDefault(); if (!name.trim()) return; onSave({ name: name.trim(), subtitle: subtitle.trim() || null, is_queue_list: queueList, is_numbered: numbered, ...(section === 'screen' ? { show_in_main_watchlist: mainWatchlist } : {}) }); }}>
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog create-shelf-dialog" onSubmit={(event) => { event.preventDefault(); if (!name.trim()) return; onSave({ name: name.trim(), subtitle: subtitle.trim() || null, is_numbered: numbered, ...(section === 'screen' ? { show_in_main_watchlist: mainWatchlist } : {}) }); }}>
     <button className="close" type="button" onClick={onClose} aria-label="Close create shelf"><X /></button>
     <span className="eyebrow">NEW SHELF</span><h2>Create a Shelf</h2>
     <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>
     <label>Subtitle <span className="field-hint">Optional</span><input value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
-    <label className="reading-list-designation"><input type="checkbox" checked={queueList} onChange={(event) => setQueueList(event.target.checked)} /><span><b>{queueCopy[0]}</b><small>{queueCopy[1]}</small></span></label>
     <label className="reading-list-designation"><input type="checkbox" checked={numbered} onChange={(event) => setNumbered(event.target.checked)} /><span><b>Numbered shelf</b><small>Show each item's shelf position beneath its card.</small></span></label>
     {section === 'screen' && <label className="reading-list-designation"><input type="checkbox" checked={mainWatchlist} onChange={(event) => setMainWatchlist(event.target.checked)} /><span><b>Include in Main Watchlist</b><small>Mirror this shelf publicly in the shared Main Watchlist.</small></span></label>}
     <small className="character-count">{subtitle.length} / 180</small>
