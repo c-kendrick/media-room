@@ -217,7 +217,7 @@ test('collection summary calculations remain valid while summary stats stay out 
   assert.doesNotMatch(app, /\['watchlist', 'reading_list'\]/);
 });
 
-test('personal queue calculations use explicit queue shelves without rendering header totals', async () => {
+test('personal queue calculations stay data-driven without exposing queue controls in shelf dialogs', async () => {
   const books = [
     { lists: ['reading'], owned: false },
     { lists: ['wishlist'], owned: false },
@@ -231,8 +231,8 @@ test('personal queue calculations use explicit queue shelves without rendering h
   assert.deepEqual(collectionSummaryStats(books, shelves, 'book'), { queued: 2, owned: 0 });
   const app = await read('src/App.jsx');
   assert.doesNotMatch(app, /const queueLabel/);
-  assert.match(app, /is_queue_list: queueList/);
-  assert.match(app, /Items on this shelf count toward “to read”/);
+  assert.doesNotMatch(app, /is_queue_list: queueList/);
+  assert.doesNotMatch(app, /Items on this shelf count toward|Count this shelf toward/);
   assert.doesNotMatch(await read('src/collection-stats.js'), /watchlist|reading list|backlog|wishlist/i);
 });
 
@@ -568,13 +568,13 @@ test('the collection navigation auto-collapses at medium viewport widths without
   assert.match(app, /onClick=\{\(\) => setNavCollapsed\(\(current\) => !current\)\}/);
 });
 
-test('queue shelf settings are explicit in every section and independent from Main Watchlist', async () => {
+test('queue shelf metadata remains compatible while shelf dialogs omit its designation control', async () => {
   const app = await read('src/App.jsx');
   const data = await read('src/supabase-data.js');
   const migration = await read('supabase/migrations/20260715030000_queue_shelves.sql');
-  assert.match(app, /Backlog \/ To Play shelf/);
-  assert.match(app, /Watchlist \/ To Watch shelf/);
-  assert.match(app, /is_queue_list: queueList/);
+  assert.doesNotMatch(app, /Backlog \/ To Play shelf/);
+  assert.doesNotMatch(app, /Watchlist \/ To Watch shelf/);
+  assert.doesNotMatch(app, /is_queue_list: queueList/);
   assert.match(app, /show_in_main_watchlist: mainWatchlist/);
   assert.match(data, /queueList: Boolean\(shelf\.is_queue_list\)/);
   assert.match(migration, /add column if not exists is_queue_list boolean not null default false/);
