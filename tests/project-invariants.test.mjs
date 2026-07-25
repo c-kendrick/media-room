@@ -16,6 +16,7 @@ import { mapSnapshot, mergeSectionSnapshot } from '../src/supabase-data.js';
 import { completeShelfOrder } from '../src/media-write.js';
 import { canPersistSnapshot, sectionSnapshot } from '../src/section-cache.js';
 import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
+import { getDrawerNavigationTargets } from '../src/media-drawer-navigation.js';
 import { parseLightweightInline, parseLightweightMarkdown } from '../src/lightweight-markdown.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -1653,4 +1654,22 @@ test('numbered ranks stay on memberships and can differ between source shelves',
   );
   assert.equal(mapped.mediaShelves.every((shelf) => shelf.numbered), true);
   assert.deepEqual(mapped.media[0].list_positions, { 'shelf-a': 2000, 'shelf-b': 5000 });
+});
+test('media drawer navigation follows item and shelf display order while skipping empty shelves', () => {
+  const shelves = [
+    { shelfId: 'first', itemIds: ['one', 'two'] },
+    { shelfId: 'empty', itemIds: [] },
+    { shelfId: 'last', itemIds: ['three', 'four'] },
+  ];
+
+  assert.deepEqual(getDrawerNavigationTargets({ shelfId: 'first', shelves }, 'two'), {
+    previous: { itemId: 'one', shelfId: 'first' },
+    next: { itemId: 'three', shelfId: 'last' },
+  });
+  assert.deepEqual(getDrawerNavigationTargets({ shelfId: 'last', shelves }, 'three'), {
+    previous: { itemId: 'two', shelfId: 'first' },
+    next: { itemId: 'four', shelfId: 'last' },
+  });
+  assert.deepEqual(getDrawerNavigationTargets({ shelfId: 'first', shelves }, 'one').previous, null);
+  assert.deepEqual(getDrawerNavigationTargets({ shelfId: 'last', shelves }, 'four').next, null);
 });

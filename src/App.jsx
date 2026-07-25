@@ -57,6 +57,7 @@ import { applyReactionToSnapshot, mediaReactionIdentity, setMediaLoveBatch, setM
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from './identity.js';
 import { clearCachedAccount, readCachedSection, writeCachedSnapshot } from './section-cache.js';
 import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershipIdentity, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, SHELF_SET_SIZE, validateShelfDraft } from './shelf-order.js';
+import { getDrawerNavigationTargets } from './media-drawer-navigation.js';
 import { LightweightMarkdown } from './LightweightMarkdown.jsx';
 
 function cls(...values) {
@@ -416,6 +417,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMediaId, setSelectedMediaId] = useState(null);
+  const [selectedMediaNavigation, setSelectedMediaNavigation] = useState(null);
   const [account, setAccount] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [accountOpen, setAccountOpen] = useState(() => new URLSearchParams(window.location.search).get('auth') === 'signin');
@@ -800,6 +802,7 @@ export default function App() {
       : collections.find((row) => row.id === nextCollectionId);
     setCollectionId(nextCollectionId);
     setSelectedMediaId(null);
+    setSelectedMediaNavigation(null);
     setError('');
     const immediate = cached || collectionShell(navigationCollection, rememberedSection.current);
     dataRef.current = immediate;
@@ -1056,6 +1059,7 @@ export default function App() {
       if (event.key === 'Escape') {
         setSearchOpen(false);
         setSelectedMediaId(null);
+        setSelectedMediaNavigation(null);
         setMobileNav(false);
       }
     };
@@ -1070,6 +1074,12 @@ export default function App() {
   }, [toast]);
 
   const selectedMedia = data?.media?.find((item) => item.item_id === selectedMediaId);
+  const drawerNavigationTargets = getDrawerNavigationTargets(selectedMediaNavigation, selectedMediaId);
+  const navigateDrawer = (target) => {
+    if (!target) return;
+    setSelectedMediaId(target.itemId);
+    setSelectedMediaNavigation((navigation) => navigation && { ...navigation, shelfId: target.shelfId });
+  };
   useEffect(() => {
     if (!selectedMedia?.database_id || selectedMedia.details_loaded || data?.storage !== 'supabase') return;
     const mediaItemId = selectedMedia.database_id;
@@ -1286,7 +1296,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={setSelectedMediaId} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} />
+          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={(itemId, navigation = null) => { setSelectedMediaId(itemId); setSelectedMediaNavigation(navigation); }} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} />
         </main>
         <footer><span>Published from Kit’s Local Media Room.</span><span className="provider-credits">Poster data from <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>, <a href="https://books.google.com/" target="_blank" rel="noreferrer">Google Books</a>, <a href="https://openlibrary.org/" target="_blank" rel="noreferrer">Open Library</a> and <a href="https://www.steamgriddb.com/" target="_blank" rel="noreferrer">SteamGridDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</span></footer>
       </div>
@@ -1295,7 +1305,11 @@ export default function App() {
         <MediaDrawer
           item={selectedMedia}
           shelves={data.mainWatchlist ? data.mediaShelves : mediaShelvesForSection(data, mediaSection(selectedMedia))}
-          onClose={() => setSelectedMediaId(null)}
+          onClose={() => { setSelectedMediaId(null); setSelectedMediaNavigation(null); }}
+          previousItem={drawerNavigationTargets.previous}
+          nextItem={drawerNavigationTargets.next}
+          onPrevious={() => navigateDrawer(drawerNavigationTargets.previous)}
+          onNext={() => navigateDrawer(drawerNavigationTargets.next)}
           canEdit={canEditCollection}
           onStarRatingChange={(starRating) => saveStarRating(selectedMedia.database_id, starRating)}
           canReviewPoster={Boolean((canEditCollection || isAdmin) && !data.mainWatchlist)}
@@ -1437,6 +1451,7 @@ export default function App() {
           onOpen={(id) => {
             setSearchOpen(false);
             setSelectedMediaId(id);
+            setSelectedMediaNavigation(null);
           }}
         />
       )}
@@ -1628,6 +1643,14 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
     ? [...new Map(randomPool.map((item) => [item.database_id || item.item_id, item])).values()]
     : [];
   const visibleShelves = shelves.filter((shelf) => !listFilters.length || listFilters.includes(shelf.shelf_id));
+  const drawerShelves = visibleShelves.map((shelf) => ({
+    shelfId: shelf.shelf_id,
+    itemIds: sortShelfItems(
+      contentFiltered.filter((item) => item.lists?.includes(shelf.shelf_id)),
+      shelf.shelf_id,
+      data.media,
+    ).map((item) => item.item_id),
+  }));
   const sectionLabel = data.mainWatchlist ? 'Main Watchlist' : section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games';
   const singularLabel = data.mainWatchlist ? 'item' : section === 'screen' ? 'film or TV show' : section === 'book' ? 'book' : 'video game';
   const canReorderShelves = canEdit || Boolean(data.mainWatchlist && isAdmin);
@@ -1857,7 +1880,7 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
             data.media,
           );
           if (!shelfItems.length && queryLower) return null;
-          return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} arrangeItems={arrangeItems} onOpen={openMedia} canEdit={canEdit && !shelf.virtual} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); void refresh({ fresh: true }).catch(() => notify('The order was saved, but the latest collection could not be refreshed. Reload to see the saved order everywhere.')); } catch (error) { notify(error?.message ? `Item order could not be saved: ${error.message}` : 'Item order could not be saved.'); throw error; } }} onRename={(editorActions) => setShelfEditor({ ...shelf, ...editorActions, canCurateMain, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id), onToggleMain: (enabled) => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }, enabled) })} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} />;
+          return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} arrangeItems={arrangeItems} onOpen={(itemId) => openMedia(itemId, { shelfId: shelf.shelf_id, shelves: drawerShelves })} canEdit={canEdit && !shelf.virtual} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); void refresh({ fresh: true }).catch(() => notify('The order was saved, but the latest collection could not be refreshed. Reload to see the saved order everywhere.')); } catch (error) { notify(error?.message ? `Item order could not be saved: ${error.message}` : 'Item order could not be saved.'); throw error; } }} onRename={(editorActions) => setShelfEditor({ ...shelf, ...editorActions, canCurateMain, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id), onToggleMain: (enabled) => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }, enabled) })} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} />;
         })}
       </div>
 
@@ -2211,7 +2234,7 @@ function MediaCard({ item, shelfRank = null, eagerPoster = false, onClick, canRa
   );
 }
 
-function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, sourceCollectionTitle, canImport, onImport, onDelete, onRestore }) {
+function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPrevious, onNext, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, sourceCollectionTitle, canImport, onImport, onDelete, onRestore }) {
   const [editing, setEditing] = useState(false);
   const [optimisticShelves, setOptimisticShelves] = useState(item.lists || []);
   const optimisticShelvesRef = useRef(item.lists || []);
@@ -2251,6 +2274,10 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
             {item.poster_url
               ? <img src={item.poster_url} alt={`${title} poster`} />
               : <div className="poster-fallback"><Clapperboard /><span>{title}</span></div>}
+            <nav className="drawer-navigation" aria-label="Media shelf navigation">
+              <button type="button" aria-label="Previous media item" title="Previous" disabled={!previousItem} onClick={onPrevious}><ChevronLeft /></button>
+              <button type="button" aria-label="Next media item" title="Next" disabled={!nextItem} onClick={onNext}><ChevronRight /></button>
+            </nav>
           </div>
           <div className="drawer-copy">
             <span className="eyebrow">{item.type}{item.runtime ? ` · ${item.runtime} min` : ''}</span>
