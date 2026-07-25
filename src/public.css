@@ -343,7 +343,7 @@
 .drawer-item-actions>*+*::before{content:"\00b7";margin-right:3px;color:#b2a79b}
 .drawer-item-actions button{border:0;background:transparent;padding:5px 0;color:inherit;font:inherit;cursor:pointer}
 .drawer-item-actions button:hover{color:#8e3d35}
-.drawer-collection-name{padding-block:5px;color:#6f655b;font-weight:700}
+.drawer-collection-name{padding-block:5px;color:var(--brand-brown);font-weight:700}
 .shelf-membership-dialog{width:min(560px,calc(100vw - 32px))!important}
 .shelf-membership-dialog .drawer-lists{margin-top:0}
 .shelf-membership-dialog .public-shelf-list{align-items:stretch}

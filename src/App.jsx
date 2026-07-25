@@ -2278,7 +2278,7 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-item-actions">
               <span className="drawer-collection-name">{sourceCollectionTitle}</span>
-              <button type="button" aria-label="Shelves" onClick={() => setShelvesOpen(true)}>Shelves</button>
+              <button type="button" aria-label="Shelves" onClick={() => setShelvesOpen(true)}><ListOrdered size={14} />Shelves</button>
               {canEdit && !item.poster_url && canReviewPoster && <button aria-label="Enrich poster" onClick={() => setPosterReviewOpen(true)}><Search size={14} />Enrich poster</button>}
               {canEdit && canReviewPoster && <button aria-label="Enrich details" onClick={() => setDetailReviewOpen(true)}><Search size={14} />Enrich details</button>}
               {canEdit && (item.deleted_at ? <button aria-label="Restore from Bin" onClick={onRestore}>Restore from Bin</button> : <button aria-label="Move to Bin" onClick={onDelete}><Trash2 size={14} />Move to Bin</button>)}
