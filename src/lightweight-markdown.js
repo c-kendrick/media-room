@@ -21,6 +21,21 @@ function safeHttpsUrl(value) {
   }
 }
 
+function closingMarkerIndex(source, marker, contentStart) {
+  if (marker !== '*') return source.indexOf(marker, contentStart);
+
+  for (let index = contentStart; index < source.length; index += 1) {
+    if (!source.startsWith('*', index)) continue;
+    if (!source.startsWith('**', index)) return index;
+
+    const nestedBoldEnd = source.indexOf('**', index + 2);
+    if (nestedBoldEnd <= index + 2) return index;
+    index = nestedBoldEnd + 1;
+  }
+
+  return -1;
+}
+
 export function parseLightweightInline(value = '') {
   const source = String(value);
   const nodes = [];
@@ -40,7 +55,7 @@ export function parseLightweightInline(value = '') {
     const format = INLINE_MARKERS.find(({ marker }) => source.startsWith(marker, index));
     if (format) {
       const contentStart = index + format.marker.length;
-      const contentEnd = source.indexOf(format.marker, contentStart);
+      const contentEnd = closingMarkerIndex(source, format.marker, contentStart);
       if (contentEnd > contentStart) {
         nodes.push({
           type: format.type,

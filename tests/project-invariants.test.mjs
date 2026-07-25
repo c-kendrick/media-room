@@ -30,6 +30,20 @@ test('lightweight Markdown supports only the approved inline formatting', () => 
   assert.equal(nodes.find((node) => node.type === 'link').href, 'https://example.com/');
 });
 
+test('lightweight Markdown supports bold nested within italic text', () => {
+  const nodes = parseLightweightInline('*italic text **italic and bold text***');
+  assert.deepEqual(nodes, [{
+    type: 'emphasis',
+    children: [
+      { type: 'text', value: 'italic text ' },
+      {
+        type: 'strong',
+        children: [{ type: 'text', value: 'italic and bold text' }],
+      },
+    ],
+  }]);
+});
+
 test('lightweight Markdown recognises approved blocks and paragraph breaks', () => {
   const blocks = parseLightweightMarkdown('First paragraph\ncontinues here\n\n- one\n- two\n\n1. first\n2. second\n\n> quoted');
   assert.deepEqual(blocks.map((block) => block.type), [
