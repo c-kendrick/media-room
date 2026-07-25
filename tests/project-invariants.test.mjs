@@ -1557,6 +1557,8 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /function MediaDrawer[\s\S]*useEscape\(onClose, !editing && !posterReviewOpen && !detailReviewOpen && !shelvesOpen\)/);
   assert.match(app, /item\.description \|\| 'No description has been added yet\.'[\s\S]*item\.notes\?\.trim\(\) && <p className="drawer-description drawer-notes">/);
   assert.match(app, /className="drawer-item-actions"[\s\S]*drawer-collection-name[\s\S]*>Shelves<[\s\S]*Enrich poster[\s\S]*Enrich details[\s\S]*Move to Bin/);
+  assert.match(app, /aria-label="Shelves"[\s\S]*<ListOrdered size=\{14\} \/>Shelves/);
+  assert.match(styles, /\.drawer-collection-name\{[^}]*color:var\(--brand-brown\)/);
   assert.match(app, /function ShelfMembershipDialog[\s\S]*role="dialog"[\s\S]*visibleShelves\.map[\s\S]*onToggle\(shelf\.shelf_id\)/);
   assert.match(app, /const pagerOnlyActions = !canRemoveMirror && !canEdit && !canCurateMain && !canReorderShelf/);
   assert.match(app, /className=\{cls\('shelf-actions', pagerOnlyActions && 'pager-only'\)\}/);
