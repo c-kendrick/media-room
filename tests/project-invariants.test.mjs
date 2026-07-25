@@ -1590,6 +1590,20 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.collection-page \.shelf-title\{justify-content:flex-start;text-align:left\}[\s\S]*\.collection-page \.shelf-actions\{justify-content:flex-start!important\}/);
 });
 
+test('sign in password visibility can be toggled accessibly', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /const \[passwordVisible, setPasswordVisible\] = useState\(false\)/);
+  assert.match(app, /type=\{passwordVisible \? 'text' : 'password'\}/);
+  assert.match(app, /<label htmlFor="account-password">Password<\/label>/);
+  assert.match(app, /<input id="account-password"/);
+  assert.match(app, /aria-label=\{passwordVisible \? 'Hide password' : 'Show password'\}/);
+  assert.match(app, /aria-pressed=\{passwordVisible\}/);
+  assert.match(app, /setPasswordVisible\(\(visible\) => !visible\)/);
+  assert.match(styles, /\.password-visibility-toggle\s*\{/);
+  assert.match(styles, /\.password-visibility-toggle:focus-visible\s*\{/);
+});
+
 test('numbered ranks stay on memberships and can differ between source shelves', () => {
   const mapped = mapSnapshot(
     { id: 'collection', owner_id: 'owner', title: 'Collection' },
