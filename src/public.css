@@ -337,6 +337,17 @@
 .owned-toggle span{width:19px;height:19px;border:1px solid #a99e91;border-radius:50%;display:grid;place-items:center;color:#81786c}
 .owned-toggle.active{color:#514a43}
 .owned-toggle.active span{background:#ddd5ca;border-color:#9a9084;color:#514a43}
+.drawer-notes{margin-top:12px;padding-top:12px;border-top:1px solid #e5dacd;color:#6f655b}
+.drawer-item-actions{margin-top:30px;padding-top:12px;border-top:1px solid #e0d5c7;display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;color:#8a7f73;font-size:9px}
+.drawer-item-actions>*{display:inline-flex;align-items:center;gap:5px}
+.drawer-item-actions>*+*::before{content:"\00b7";margin-right:3px;color:#b2a79b}
+.drawer-item-actions button{border:0;background:transparent;padding:5px 0;color:inherit;font:inherit;cursor:pointer}
+.drawer-item-actions button:hover{color:#8e3d35}
+.drawer-collection-name{padding-block:5px;color:#6f655b;font-weight:700}
+.shelf-membership-dialog{width:min(560px,calc(100vw - 32px))!important}
+.shelf-membership-dialog .drawer-lists{margin-top:0}
+.shelf-membership-dialog .public-shelf-list{align-items:stretch}
+.shelf-membership-dialog .public-shelf-chip{justify-content:flex-start}
 .drawer-danger-zone{margin-top:30px;padding-top:12px;border-top:1px solid #e0d5c7;display:flex;align-items:center;gap:14px}
 .drawer-danger-zone button{border:0;background:transparent;padding:5px 0;color:#8a7f73;display:inline-flex;align-items:center;gap:5px;font-size:9px;cursor:pointer}
 .drawer-danger-zone button:hover{color:#8e3d35}
