@@ -12,6 +12,8 @@ import {
   ChevronRight,
   Clapperboard,
   Film,
+  Eye,
+  EyeOff,
   Download,
   Gamepad2,
   GripVertical,
@@ -2697,6 +2699,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
   useEscape(onClose);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [forgotten, setForgotten] = useState(false);
@@ -2783,7 +2786,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
             <form onSubmit={forgotten ? async (event) => { event.preventDefault(); setSubmitting(true); setError(''); await requestPasswordRecovery(email.trim()); setSubmitting(false); notify('If an account exists for that email, a recovery link has been sent.'); setForgotten(false); } : registering ? register : submit}>
               {registering && <><label>Recognisable name<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} pattern="[a-z0-9_-]{3,32}" required /></label></>}
               <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
-              {!forgotten && <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} required /></label>}
+              {!forgotten && <div className="password-field"><label htmlFor="account-password">Password</label><span className="password-input"><input id="account-password" type={passwordVisible ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} required /><button type="button" className="password-visibility-toggle" aria-label={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} title={passwordVisible ? 'Hide password' : 'Show password'} onClick={() => setPasswordVisible((visible) => !visible)}>{passwordVisible ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}</button></span></div>}
               {registering && <p>Use a recognisable real name for this private group, and do not reuse an important password.</p>}
               {error && <p className="auth-error">{error}{signupRetrySeconds > 0 ? ` Try again in ${signupRetrySeconds}s.` : ''}</p>}
               <Button type="submit" icon={LogIn} disabled={submitting || (registering && signupRetrySeconds > 0)}>{submitting ? 'Working…' : forgotten ? 'Send recovery email' : registering ? signupRetrySeconds > 0 ? `Try again in ${signupRetrySeconds}s` : 'Create account' : 'Sign in'}</Button>

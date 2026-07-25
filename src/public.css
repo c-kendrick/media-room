@@ -141,6 +141,47 @@
   font: inherit;
 }
 
+.password-field {
+  display: grid;
+  gap: 6px;
+}
+
+.password-input {
+  position: relative;
+  display: block;
+}
+
+.account-dialog .password-input input {
+  padding-right: 44px;
+}
+
+.password-visibility-toggle {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #746a60;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.password-visibility-toggle:hover {
+  background: #eee4d8;
+  color: #332b25;
+}
+
+.password-visibility-toggle:focus-visible {
+  outline: 2px solid #8e6655;
+  outline-offset: 1px;
+}
+
 .account-dialog .auth-error {
   color: #8d2d28;
   font-size: 12px;
