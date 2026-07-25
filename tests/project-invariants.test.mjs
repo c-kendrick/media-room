@@ -16,8 +16,37 @@ import { mapSnapshot, mergeSectionSnapshot } from '../src/supabase-data.js';
 import { completeShelfOrder } from '../src/media-write.js';
 import { canPersistSnapshot, sectionSnapshot } from '../src/section-cache.js';
 import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
+import { parseLightweightInline, parseLightweightMarkdown } from '../src/lightweight-markdown.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+
+test('lightweight Markdown supports only the approved inline formatting', () => {
+  const nodes = parseLightweightInline('***both*** **bold** *italic* ~~gone~~ [site](https://example.com) `code` # heading');
+  assert.deepEqual(nodes.map((node) => node.type), [
+    'strong-emphasis', 'text', 'strong', 'text', 'emphasis', 'text',
+    'strikethrough', 'text', 'link', 'text',
+  ]);
+  assert.equal(nodes.at(-1).value, ' `code` # heading');
+  assert.equal(nodes.find((node) => node.type === 'link').href, 'https://example.com/');
+});
+
+test('lightweight Markdown recognises approved blocks and paragraph breaks', () => {
+  const blocks = parseLightweightMarkdown('First paragraph\ncontinues here\n\n- one\n- two\n\n1. first\n2. second\n\n> quoted');
+  assert.deepEqual(blocks.map((block) => block.type), [
+    'paragraph', 'bullet-list', 'numbered-list', 'blockquote',
+  ]);
+  assert.equal(blocks[0].children[0].value, 'First paragraph continues here');
+  assert.equal(blocks[1].items.length, 2);
+  assert.equal(blocks[2].start, 1);
+});
+
+test('lightweight Markdown leaves unsafe links and HTML as inert text', () => {
+  const nodes = parseLightweightInline('<img src=x onerror=alert(1)> [bad](javascript:alert(1)) [also bad](http://example.com) ![image](https://example.com/image.jpg)');
+  assert.deepEqual(nodes, [{
+    type: 'text',
+    value: '<img src=x onerror=alert(1)> [bad](javascript:alert(1)) [also bad](http://example.com) ![image](https://example.com/image.jpg)',
+  }]);
+});
 
 test('Main Watchlist remains Film & TV only', async () => {
   const source = await read('src/supabase-data.js');
@@ -1555,7 +1584,7 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /window\.addEventListener\('popstate', closeFromHistory\)/);
   assert.match(app, /mediaRoomDialogEntry/);
   assert.match(app, /function MediaDrawer[\s\S]*useEscape\(onClose, !editing && !posterReviewOpen && !detailReviewOpen && !shelvesOpen\)/);
-  assert.match(app, /item\.description \|\| 'No description has been added yet\.'[\s\S]*item\.notes\?\.trim\(\) && <p className="drawer-description drawer-notes">/);
+  assert.match(app, /<LightweightMarkdown className="drawer-description">\{item\.description \|\| 'No description has been added yet\.'\}<\/LightweightMarkdown>[\s\S]*item\.notes\?\.trim\(\) && <LightweightMarkdown className="drawer-description drawer-notes">/);
   assert.match(app, /className="drawer-item-actions"[\s\S]*drawer-collection-name[\s\S]*>Shelves<[\s\S]*Enrich poster[\s\S]*Enrich details[\s\S]*Move to Bin/);
   assert.match(app, /aria-label="Shelves"[\s\S]*<ListOrdered size=\{14\} \/>Shelves/);
   assert.match(styles, /\.drawer-collection-name\{[^}]*color:var\(--brand-brown\)/);

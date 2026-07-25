@@ -57,6 +57,7 @@ import { applyReactionToSnapshot, mediaReactionIdentity, setMediaLoveBatch, setM
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from './identity.js';
 import { clearCachedAccount, readCachedSection, writeCachedSnapshot } from './section-cache.js';
 import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershipIdentity, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, SHELF_SET_SIZE, validateShelfDraft } from './shelf-order.js';
+import { LightweightMarkdown } from './LightweightMarkdown.jsx';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -2273,8 +2274,8 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
             {canEdit && <div className="drawer-owner-actions">
               <Button className="drawer-edit-button primary" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>
             </div>}
-            <p className="drawer-description">{item.description || 'No description has been added yet.'}</p>
-            {item.notes?.trim() && <p className="drawer-description drawer-notes">{item.notes}</p>}
+            <LightweightMarkdown className="drawer-description">{item.description || 'No description has been added yet.'}</LightweightMarkdown>
+            {item.notes?.trim() && <LightweightMarkdown className="drawer-description drawer-notes">{item.notes}</LightweightMarkdown>}
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-item-actions">
               <span className="drawer-collection-name">{sourceCollectionTitle}</span>
