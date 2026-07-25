@@ -2220,7 +2220,8 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
   const [posterReviewError, setPosterReviewError] = useState('');
   const [posterReviewOpen, setPosterReviewOpen] = useState(false);
   const [detailReviewOpen, setDetailReviewOpen] = useState(false);
-  useEscape(onClose, !editing && !posterReviewOpen && !detailReviewOpen);
+  const [shelvesOpen, setShelvesOpen] = useState(false);
+  useEscape(onClose, !editing && !posterReviewOpen && !detailReviewOpen && !shelvesOpen);
   useEffect(() => { setOptimisticOwned(Boolean(item.owned)); }, [item.owned, item.database_id]);
   useEffect(() => { optimisticShelvesRef.current = item.lists || []; setOptimisticShelves(item.lists || []); }, [item.lists, item.database_id]);
   const tags = mediaDisplayTags(item);
@@ -2272,21 +2273,16 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
             {canEdit && <div className="drawer-owner-actions">
               <Button className="drawer-edit-button primary" icon={Pencil} onClick={() => setEditing(true)}>Edit details</Button>
             </div>}
-            <p className="drawer-description">{item.description || item.notes || 'No description has been added yet.'}</p>
+            <p className="drawer-description">{item.description || 'No description has been added yet.'}</p>
+            {item.notes?.trim() && <p className="drawer-description drawer-notes">{item.notes}</p>}
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
-            <div className="drawer-lists public-shelf-list">
-              <span className="eyebrow drawer-shelf-heading">{sourceCollectionTitle} - SHELVES</span>
-              {(canEdit ? shelves : shelves.filter((shelf) => optimisticShelves.includes(shelf.shelf_id))).length
-                ? (canEdit ? shelves : shelves.filter((shelf) => optimisticShelves.includes(shelf.shelf_id))).map((shelf) => canEdit
-                  ? <button type="button" className={cls('public-shelf-chip', optimisticShelves.includes(shelf.shelf_id) && 'active')} aria-pressed={optimisticShelves.includes(shelf.shelf_id)} onClick={() => toggleShelf(shelf.shelf_id)} key={shelf.shelf_id}>{optimisticShelves.includes(shelf.shelf_id) ? <Check size={13} /> : <Plus size={13} />}{shelf.name}</button>
-                  : <span className="public-shelf-chip active" key={shelf.shelf_id}><Check size={13} />{shelf.name}</span>)
-                : <small>No public shelf membership.</small>}
+            <div className="drawer-item-actions">
+              <span className="drawer-collection-name">{sourceCollectionTitle}</span>
+              <button type="button" aria-label="Shelves" onClick={() => setShelvesOpen(true)}>Shelves</button>
+              {canEdit && !item.poster_url && canReviewPoster && <button aria-label="Enrich poster" onClick={() => setPosterReviewOpen(true)}><Search size={14} />Enrich poster</button>}
+              {canEdit && canReviewPoster && <button aria-label="Enrich details" onClick={() => setDetailReviewOpen(true)}><Search size={14} />Enrich details</button>}
+              {canEdit && (item.deleted_at ? <button aria-label="Restore from Bin" onClick={onRestore}>Restore from Bin</button> : <button aria-label="Move to Bin" onClick={onDelete}><Trash2 size={14} />Move to Bin</button>)}
             </div>
-            {canEdit && <div className="drawer-danger-zone">
-              {!item.poster_url && canReviewPoster && <button onClick={() => setPosterReviewOpen(true)}><Search size={14} />Enrich poster</button>}
-              {canReviewPoster && <button onClick={() => setDetailReviewOpen(true)}><Search size={14} />Enrich details</button>}
-              {item.deleted_at ? <button onClick={onRestore}>Restore from Bin</button> : <button onClick={onDelete}><Trash2 size={14} />Move to Bin</button>}
-            </div>}
             {canImport && <div className="drawer-import-actions"><Button className="drawer-import-button" icon={Download} onClick={onImport}>Import to Your Collection</Button></div>}
           </div>
         </div>
@@ -2295,9 +2291,34 @@ function MediaDrawer({ item, shelves, onClose, canEdit, onStarRatingChange, canR
         await onUpdate(changes);
         setEditing(false);
       }} />}
+      {shelvesOpen && <ShelfMembershipDialog collectionTitle={sourceCollectionTitle} itemTitle={title} shelves={shelves} selectedShelfIds={optimisticShelves} canEdit={canEdit} onToggle={toggleShelf} onClose={() => setShelvesOpen(false)} />}
       {posterReviewOpen && <PosterEnrichmentDialog item={item} candidates={posterCandidates} busy={posterReviewBusy} error={posterReviewError} onClose={() => setPosterReviewOpen(false)} onLoad={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); setPosterCandidates(result?.candidates || []); } catch (error) { setPosterReviewError(error?.message || 'Provider candidates could not be loaded.'); } finally { setPosterReviewBusy(false); } }} onChoose={(candidate) => { setPosterReviewOpen(false); setPosterReviewBusy(false); setPosterReviewError(''); onChoosePoster(candidate.poster_url).catch(() => null); }} />}
       {detailReviewOpen && <DetailEnrichmentDialog item={item} onClose={() => setDetailReviewOpen(false)} onLoad={onFindDetails} onChoose={async (candidate) => { await onChooseDetails(candidate); setDetailReviewOpen(false); }} />}
     </div>
+  );
+}
+
+function ShelfMembershipDialog({ collectionTitle, itemTitle, shelves, selectedShelfIds, canEdit, onToggle, onClose }) {
+  useEscape(onClose);
+  const visibleShelves = canEdit ? shelves : shelves.filter((shelf) => selectedShelfIds.includes(shelf.shelf_id));
+  return createPortal(
+    <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="media-edit-dialog shelf-membership-dialog" role="dialog" aria-modal="true" aria-labelledby="shelf-membership-title">
+        <button className="close" type="button" onClick={onClose} aria-label="Close shelves"><X /></button>
+        <span className="eyebrow">{collectionTitle}</span>
+        <h2 id="shelf-membership-title">Shelves</h2>
+        <p className="dialog-intro">{canEdit ? `Choose the shelves containing ${itemTitle}.` : `Shelves containing ${itemTitle}.`}</p>
+        <div className="drawer-lists public-shelf-list">
+          {visibleShelves.length
+            ? visibleShelves.map((shelf) => canEdit
+              ? <button type="button" className={cls('public-shelf-chip', selectedShelfIds.includes(shelf.shelf_id) && 'active')} aria-pressed={selectedShelfIds.includes(shelf.shelf_id)} onClick={() => onToggle(shelf.shelf_id)} key={shelf.shelf_id}>{selectedShelfIds.includes(shelf.shelf_id) ? <Check size={13} /> : <Plus size={13} />}{shelf.name}</button>
+              : <span className="public-shelf-chip active" key={shelf.shelf_id}><Check size={13} />{shelf.name}</span>)
+            : <small>No public shelf membership.</small>}
+        </div>
+        <div className="dialog-actions"><Button className="primary" onClick={onClose}>Done</Button></div>
+      </section>
+    </div>,
+    document.body,
   );
 }
 

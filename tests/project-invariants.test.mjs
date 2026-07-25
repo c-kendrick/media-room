@@ -136,7 +136,7 @@ test('rating filters match only explicitly selected half-star values', async () 
   assert.match(app, /label="Film & TV"[\s\S]*label="Rating"[\s\S]*All platforms/);
 });
 
-test('shelf membership toggles directly in the drawer and updates all visible state optimistically', async () => {
+test('shelf membership toggles in the drawer dialog and updates all visible state optimistically', async () => {
   const snapshot = {
     collectionId: 'collection-a',
     media: [{ database_id: 'media-a', lists: ['shelf-a'], list_positions: { 'shelf-a': 4 } }],
@@ -148,7 +148,7 @@ test('shelf membership toggles directly in the drawer and updates all visible st
 
   const app = await read('src/App.jsx');
   assert.match(app, /const toggleShelf = \(shelfId\) =>[\s\S]*setOptimisticShelves\(nextShelves\)[\s\S]*onUpdateShelves\(previousShelves, nextShelves\)\.catch/);
-  assert.match(app, /aria-pressed=\{optimisticShelves\.includes\(shelf\.shelf_id\)\}/);
+  assert.match(app, /aria-pressed=\{selectedShelfIds\.includes\(shelf\.shelf_id\)\}/);
   assert.doesNotMatch(app, /disabled=\{shelfBusy\}/);
   assert.doesNotMatch(app, /Edit shelves|SHELF MEMBERSHIP|Save shelves/);
   assert.match(app, /const optimisticData = applyShelfMemberships[\s\S]*setData\(optimisticData\)[\s\S]*replaceMediaShelfMemberships/);
@@ -987,7 +987,7 @@ test('all single-item additions require a shelf and foreign imports open and sav
   assert.match(app, /The item could not be imported\. Your collection was restored/);
   assert.match(app, /permanentlyDeleteMedia\(accessToken, createdId\)/);
   assert.match(app, /currentDestination\.media\.filter\(\(entry\) => entry\.database_id !== temporaryId\)/);
-  assert.match(app, /\{sourceCollectionTitle\} - SHELVES/);
+  assert.match(app, /ShelfMembershipDialog collectionTitle=\{sourceCollectionTitle\}/);
   assert.match(styles, /\.drawer-import-button\{[^}]*min-height:32px[^}]*background:transparent/);
   assert.doesNotMatch(styles, /\.drawer-import-button\{[^}]*background:#6f302d/);
   assert.doesNotMatch(importFlow, /setMediaReaction|media_interest|MAIN_WATCHLIST_ID.*createMediaItem/);
@@ -1554,7 +1554,10 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /window\.history\.pushState\(marker, '', window\.location\.href\)/);
   assert.match(app, /window\.addEventListener\('popstate', closeFromHistory\)/);
   assert.match(app, /mediaRoomDialogEntry/);
-  assert.match(app, /function MediaDrawer[\s\S]*useEscape\(onClose, !editing && !posterReviewOpen && !detailReviewOpen\)/);
+  assert.match(app, /function MediaDrawer[\s\S]*useEscape\(onClose, !editing && !posterReviewOpen && !detailReviewOpen && !shelvesOpen\)/);
+  assert.match(app, /item\.description \|\| 'No description has been added yet\.'[\s\S]*item\.notes\?\.trim\(\) && <p className="drawer-description drawer-notes">/);
+  assert.match(app, /className="drawer-item-actions"[\s\S]*drawer-collection-name[\s\S]*>Shelves<[\s\S]*Enrich poster[\s\S]*Enrich details[\s\S]*Move to Bin/);
+  assert.match(app, /function ShelfMembershipDialog[\s\S]*role="dialog"[\s\S]*visibleShelves\.map[\s\S]*onToggle\(shelf\.shelf_id\)/);
   assert.match(app, /const pagerOnlyActions = !canRemoveMirror && !canEdit && !canCurateMain && !canReorderShelf/);
   assert.match(app, /className=\{cls\('shelf-actions', pagerOnlyActions && 'pager-only'\)\}/);
   assert.match(app, /cls\('page media-page', data\.mainWatchlist \? 'main-watchlist-page' : 'collection-page'\)/);
