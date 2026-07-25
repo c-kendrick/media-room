@@ -338,6 +338,13 @@
 .owned-toggle.active{color:#514a43}
 .owned-toggle.active span{background:#ddd5ca;border-color:#9a9084;color:#514a43}
 .drawer-notes{margin-top:12px;padding-top:12px;border-top:1px solid #e5dacd;color:#6f655b}
+.drawer-description>p,.drawer-description>blockquote,.drawer-description>ul,.drawer-description>ol{margin:0 0 .8em}
+.drawer-description>:last-child{margin-bottom:0}
+.drawer-description>ul,.drawer-description>ol{padding-left:1.5em}
+.drawer-description li+li{margin-top:.25em}
+.drawer-description blockquote{padding-left:1em;border-left:2px solid #cdbdac;color:#6f655b}
+.drawer-description a{color:#765548;text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}
+.drawer-description a:hover{color:#8e3d35}
 .drawer-item-actions{margin-top:30px;padding-top:12px;border-top:1px solid #e0d5c7;display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;color:#8a7f73;font-size:9px}
 .drawer-item-actions>*{display:inline-flex;align-items:center;gap:5px}
 .drawer-item-actions>*+*::before{content:"\00b7";margin-right:3px;color:#b2a79b}
