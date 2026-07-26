@@ -17,7 +17,7 @@ import { completeShelfOrder } from '../src/media-write.js';
 import { canPersistSnapshot, sectionSnapshot } from '../src/section-cache.js';
 import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
 import { getDrawerNavigationTargets } from '../src/media-drawer-navigation.js';
-import { stampRequestProgress, watchlistRequestMessage } from '../src/watchlist-requests.js';
+import { watchlistRequestMessage } from '../src/watchlist-requests.js';
 import { parseLightweightInline, parseLightweightMarkdown } from '../src/lightweight-markdown.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -1491,7 +1491,7 @@ test('the Media Room ships an installable standalone web app shell without cachi
 
 const shelfItems = (count, title = (index) => `Item ${index + 1}`) => Array.from({ length: count }, (_, index) => ({ database_id: `media-${index + 1}`, title: title(index) }));
 
-test('watchlist request copy and progress use the specified user-facing language', () => {
+test('watchlist request copy uses the specified user-facing language without progress summaries', async () => {
   assert.equal(watchlistRequestMessage({
     request_type: 'priority_stamp_removal',
     requester_name: 'Alex',
@@ -1502,7 +1502,11 @@ test('watchlist request copy and progress use the specified user-facing language
     requester_name: 'Kit',
     media_title: 'Past Lives',
   }), 'Kit has marked Past Lives as watched and asked you to move it out of your watchlist.');
-  assert.equal(stampRequestProgress({ cleared: 1, awaiting: 2 }), '1 cleared · 2 awaiting response');
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.doesNotMatch(app, /stampRequestProgress|watchlist-request-progress/);
+  assert.doesNotMatch(styles, /watchlist-request-progress/);
+  assert.doesNotMatch(app, /\d+\s+cleared|awaiting response/i);
 });
 
 test('persistent watchlist requests are server-authoritative and ownership safe', async () => {
@@ -1531,6 +1535,9 @@ test('persistent watchlist requests are server-authoritative and ownership safe'
   assert.doesNotMatch(usersDialog, /watchlistRequests|WATCHLIST REQUESTS|account-watchlist-requests/);
   assert.match(accountDialog, /<AccountWatchlistRequests requests=\{watchlistRequests\}/);
   assert.match(accountRequestUi, /account-watchlist-requests/);
+  assert.match(accountRequestUi, /className="account-watchlist-dotted-strip" aria-hidden="true"/);
+  assert.match(accountRequestUi, /className="account-watchlist-summary"/);
+  assert.match(accountRequestUi, /account-watchlist-dotted-strip[\s\S]*account-watchlist-summary[\s\S]*requests\.map/);
   assert.match(accountRequestUi, /requests\.map/);
   assert.match(app, /function AccountWatchlistRequestRow/);
   assert.match(app, /function AccountWatchlistRequests/);
@@ -1544,6 +1551,8 @@ test('persistent watchlist requests are server-authoritative and ownership safe'
   assert.match(styles, /\.signed-in-account\{position:relative;overflow:visible!important\}/);
   assert.match(styles, /\.account-dialog-body\{[^}]*overflow-y:auto;[^}]*env\(safe-area-inset-bottom\)/);
   assert.match(styles, /\.account-watchlist-requests\{[^}]*overflow:visible/);
+  assert.match(styles, /\.account-watchlist-dotted-strip\{[^}]*min-height:22px[^}]*radial-gradient/);
+  assert.match(styles, /\.account-watchlist-summary\{[^}]*background:#f8efe5[^}]*grid-template-columns:auto minmax\(0,1fr\) auto/);
   assert.match(styles, /\.account-request-copy strong\{[^}]*overflow-wrap:anywhere/);
   assert.match(styles, /\.watchlist-request-dialog\{[^}]*grid-template-rows:36px auto minmax\(0,1fr\)/);
   assert.match(styles, /\.watchlist-request-dotted-strip\{min-height:36px/);
