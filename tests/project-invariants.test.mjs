@@ -17,6 +17,7 @@ import { completeShelfOrder } from '../src/media-write.js';
 import { canPersistSnapshot, sectionSnapshot } from '../src/section-cache.js';
 import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
 import { getDrawerNavigationTargets } from '../src/media-drawer-navigation.js';
+import { stampRequestProgress, watchlistRequestMessage } from '../src/watchlist-requests.js';
 import { parseLightweightInline, parseLightweightMarkdown } from '../src/lightweight-markdown.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -1174,7 +1175,7 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.match(loveBatchMigration, /grant execute on function public\.set_media_love_batch\(jsonb\) to authenticated/);
   assert.match(loveBatchMigration, /revoke all on function public\.set_media_love_batch\(jsonb\) from public, anon/);
 
-  assert.match(data, /reactions\.filter\(\(reaction\) => scopedProfileIds\.has\(reaction\.user_id\)\)/);
+  assert.match(data, /reactions\.filter\(\(reaction\) => scopedProfileIds\.has\(reaction\.user_id\) && \(!reaction\.state \|\| reaction\.state === 'active'\)\)/);
   assert.match(app, /function ReactionButton/);
   assert.match(app, /const Icon = isLike \? Heart : Stamp/);
   assert.match(app, /const tooltip = isLike \? summary : \['Priority Watch Stamp', \.\.\.names\]\.join\('\\n'\)/);
@@ -1482,6 +1483,40 @@ test('the Media Room ships an installable standalone web app shell without cachi
 
 const shelfItems = (count, title = (index) => `Item ${index + 1}`) => Array.from({ length: count }, (_, index) => ({ database_id: `media-${index + 1}`, title: title(index) }));
 
+test('watchlist request copy and progress use the specified user-facing language', () => {
+  assert.equal(watchlistRequestMessage({
+    request_type: 'priority_stamp_removal',
+    requester_name: 'Alex',
+    media_title: 'Arrival',
+  }), 'Alex has asked you to remove your priority stamp from Arrival.');
+  assert.equal(watchlistRequestMessage({
+    request_type: 'move_watched_item',
+    requester_name: 'Kit',
+    media_title: 'Past Lives',
+  }), 'Kit has marked Past Lives as watched and asked you to move it out of your watchlist.');
+  assert.equal(stampRequestProgress({ cleared: 1, awaiting: 2 }), '1 cleared · 2 awaiting response');
+});
+
+test('persistent watchlist requests are server-authoritative and ownership safe', async () => {
+  const migration = await read('supabase/migrations/20260726010000_watchlist_requests.sql');
+  const app = await read('src/App.jsx');
+  assert.match(migration, /create table public\.watchlist_requests/);
+  assert.match(migration, /status text not null default 'pending' check \(status in \('pending', 'accepted', 'declined'\)\)/);
+  assert.match(migration, /state text not null default 'active'[\s\S]*'removal_requested'/);
+  assert.match(migration, /create policy "Request participants can read watchlist requests"/);
+  assert.match(migration, /target_user_id = auth\.uid\(\) and status = 'pending'/);
+  assert.match(migration, /not s\.show_in_main_watchlist/);
+  assert.match(migration, /insert into public\.shelf_media_items[\s\S]*delete from public\.shelf_media_items/);
+  assert.match(migration, /response = 'not_now'[\s\S]*return jsonb_build_object\('status', 'pending'\)/);
+  assert.match(migration, /state = 'active'[\s\S]*final_response = 'keep_stamp'/);
+  assert.doesNotMatch(migration, /grant (insert|update|delete) on public\.watchlist_requests to authenticated/);
+  assert.match(app, /Request priority stamp removal/);
+  assert.match(app, /Move to another shelf/);
+  assert.match(app, /Not now/);
+  assert.match(app, /Keep in watchlist/);
+  assert.match(app, /You have \{requests\.length\} watchlist requests\./);
+});
+
 test('legacy shelf groups convert to the alternating canonical set order', () => {
   const items = shelfItems(30);
   assert.deepEqual(legacyVisualOrderToCanonical(items).map((item) => item.database_id), [
@@ -1598,7 +1633,7 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /window\.history\.pushState\(marker, '', window\.location\.href\)/);
   assert.match(app, /window\.addEventListener\('popstate', closeFromHistory\)/);
   assert.match(app, /mediaRoomDialogEntry/);
-  assert.match(app, /function MediaDrawer[\s\S]*useEscape\(onClose, !editing && !posterReviewOpen && !detailReviewOpen && !shelvesOpen\)/);
+  assert.match(app, /function MediaDrawer[\s\S]*useEscape\(onClose, !editing && !posterReviewOpen && !detailReviewOpen && !shelvesOpen && !watchlistRequest\)/);
   assert.match(app, /<LightweightMarkdown className="drawer-description">\{item\.description \|\| 'No description has been added yet\.'\}<\/LightweightMarkdown>[\s\S]*item\.notes\?\.trim\(\) && <LightweightMarkdown className="drawer-description drawer-notes">/);
   assert.match(app, /className="drawer-item-actions"[\s\S]*drawer-collection-name[\s\S]*>Shelves<[\s\S]*Enrich poster[\s\S]*Enrich details[\s\S]*Move to Bin/);
   assert.match(app, /aria-label="Shelves"[\s\S]*<ListOrdered size=\{14\} \/>Shelves/);
