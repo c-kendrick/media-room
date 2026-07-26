@@ -144,6 +144,40 @@ export function deleteShelf(accessToken, shelfId) {
     headers: { Authorization: 'Bearer ' + accessToken, Prefer: 'return=representation' } });
 }
 
+export function createLibrary(accessToken, library) {
+  return supabaseRequest('/rest/v1/libraries', { method: 'POST', fresh: true, body: library,
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'return=representation' } });
+}
+
+export function updateLibrary(accessToken, libraryId, changes) {
+  return supabaseRequest('/rest/v1/libraries?id=eq.' + encodeURIComponent(libraryId), {
+    method: 'PATCH', fresh: true, body: changes,
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+  });
+}
+
+export function permanentlyDeleteLibrary(accessToken, libraryId) {
+  return supabaseRequest('/rest/v1/libraries?id=eq.' + encodeURIComponent(libraryId), {
+    method: 'DELETE', fresh: true,
+    headers: { Authorization: 'Bearer ' + accessToken, Prefer: 'return=representation' },
+  });
+}
+
+export function moveShelfToLibrary(accessToken, shelfId, libraryId) {
+  return supabaseRequest('/rest/v1/rpc/move_shelf_to_library', {
+    method: 'POST', fresh: true, body: { source_shelf_id: shelfId, destination_library_id: libraryId },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+  });
+}
+
+export function copyShelfToLibrary(accessToken, shelfId, libraryId, name, shareToken = null) {
+  return supabaseRequest('/rest/v1/rpc/copy_shelf_to_library', {
+    method: 'POST', fresh: true,
+    body: { source_shelf_id: shelfId, destination_library_id: libraryId, destination_name: name, share_token: shareToken },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+  });
+}
+
 export function completeShelfOrder(orderedMediaIds, membershipRows, activeMediaRows) {
   const activeIds = new Set(activeMediaRows.map((row) => row.id));
   const includedIds = new Set(orderedMediaIds);
@@ -201,6 +235,13 @@ export async function reorderShelves(accessToken, collectionId, section, ordered
   }
 }
 
+export function reorderLibraryShelves(accessToken, libraryId, orderedShelfIds) {
+  return supabaseRequest('/rest/v1/rpc/reorder_library_shelves', {
+    method: 'POST', fresh: true, body: { target_library_id: libraryId, ordered_shelf_ids: orderedShelfIds },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+  });
+}
+
 export function reorderMainWatchlist(accessToken, orderedShelfIds) {
   return supabaseRequest('/rest/v1/rpc/reorder_main_watchlist', { method: 'POST', fresh: true, body: { ordered_shelf_ids: orderedShelfIds },
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
@@ -223,9 +264,9 @@ export function importCollectionBackup(accessToken, collectionId, backup) {
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
-export function enrichSectionPosters(accessToken, collectionId, section) {
+export function enrichSectionPosters(accessToken, collectionId, section, libraryId = null) {
   return supabaseRequest('/functions/v1/enrich-poster', { method: 'POST', fresh: true,
-    body: { collection_id: collectionId, enrich_section: section },
+    body: { collection_id: collectionId, library_id: libraryId, enrich_section: section },
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
@@ -240,9 +281,9 @@ export function choosePosterCandidate(accessToken, mediaItemId, posterUrl) {
     body: { media_item_id: mediaItemId, choose_url: posterUrl }, headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 
-export function enrichSectionDetails(accessToken, collectionId, section) {
+export function enrichSectionDetails(accessToken, collectionId, section, libraryId = null) {
   return supabaseRequest('/functions/v1/enrich-details', { method: 'POST', fresh: true,
-    body: { collection_id: collectionId, enrich_section: section },
+    body: { collection_id: collectionId, library_id: libraryId, enrich_section: section },
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' } });
 }
 

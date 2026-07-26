@@ -19,8 +19,65 @@ import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanoni
 import { getDrawerNavigationTargets } from '../src/media-drawer-navigation.js';
 import { watchlistRequestMessage } from '../src/watchlist-requests.js';
 import { parseLightweightInline, parseLightweightMarkdown } from '../src/lightweight-markdown.js';
+import { chooseLibrary, copiedShelfName, libraryDefaults, libraryRouteUrl, validateLibraryDraft } from '../src/library-system.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+
+test('custom library helpers provide deterministic defaults, routing, validation, and copy names', () => {
+  assert.deepEqual(libraryDefaults('other'), {
+    label: 'Other',
+    singular: 'Item',
+    plural: 'Items',
+    creator: 'Creator',
+    mediaTypes: ['other'],
+  });
+  const libraries = [
+    { id: 'custom', name: 'Anime', type: 'screen', protected: false, position: 40 },
+    { id: 'film', name: 'Film & TV', type: 'screen', protected: true, position: 10 },
+    { id: 'deleted', name: 'Old', type: 'other', protected: false, position: 1, deleted_at: '2026-01-01' },
+  ];
+  assert.equal(chooseLibrary(libraries, 'custom', 'film').id, 'custom');
+  assert.equal(chooseLibrary(libraries, 'missing', 'custom').id, 'custom');
+  assert.equal(chooseLibrary(libraries, 'missing', 'missing').id, 'film');
+  assert.equal(libraryRouteUrl('/collection?share=abc#top', 'custom'), '/collection?share=abc&library=custom#top');
+  assert.equal(copiedShelfName('Favourites', ['Favourites (Copy)', 'favourites (copy 2)']), 'Favourites (Copy 3)');
+  assert.equal(validateLibraryDraft({
+    name: ' anime ',
+    type: 'screen',
+    singular: 'Title',
+    plural: 'Titles',
+    creator: 'Director',
+  }, libraries).errors.name, 'Library names must be unique within this collection.');
+  assert.equal(validateLibraryDraft({
+    name: 'Anime',
+    type: 'other',
+    singular: 'Item',
+    plural: 'Items',
+    creator: 'Creator',
+  }, libraries, 'custom').valid, true);
+});
+
+test('custom libraries are migrated non-destructively and shelf transfers stay atomic and scoped', async () => {
+  const migration = await read('supabase/migrations/20260727010000_custom_libraries.sql');
+  const otherType = await read('supabase/migrations/20260727005000_add_other_media_type.sql');
+  assert.match(otherType, /alter type public\.media_type add value if not exists 'other'/);
+  assert.match(migration, /create table if not exists public\.libraries/);
+  assert.match(migration, /create unique index if not exists libraries_active_name_lower_key[\s\S]*lower\(trim\(name\)\)/);
+  assert.match(migration, /add column if not exists library_id uuid/);
+  assert.match(migration, /alter column library_id set not null/);
+  assert.match(migration, /foreign key \(library_id, collection_id\)/);
+  assert.match(migration, /create or replace function public\.ensure_default_libraries/);
+  assert.match(migration, /create or replace function public\.load_collection_library/);
+  assert.match(migration, /create or replace function public\.move_shelf_to_library/);
+  assert.match(migration, /create or replace function public\.copy_shelf_to_library/);
+  assert.match(migration, /Shelf owner access required/);
+  assert.match(migration, /Shelf moves require the same library type/);
+  assert.match(migration, /Shelf copies require the same library type/);
+  assert.match(migration, /source\.is_required[\s\S]*Protected shelves cannot be moved/);
+  assert.match(migration, /false,false,null[\s\S]*returning id into copied_shelf/);
+  assert.match(migration, /case when include_private then source\.notes else null end/);
+  assert.doesNotMatch(migration, /insert into public\.media_reactions|insert into public\.watchlist_requests/);
+});
 
 test('lightweight Markdown supports only the approved inline formatting', () => {
   const nodes = parseLightweightInline('***both*** **bold** *italic* ~~gone~~ [site](https://example.com) `code` # heading');
@@ -243,10 +300,10 @@ test('collection note storage remains compatible while note UI is removed from c
 
 test('opening Main Watchlist has no redundant All Watchlists tab', async () => {
   const app = await read('src/App.jsx');
-  assert.match(app, /<MediaView key=\{data\.collectionId\}/);
-  assert.match(app, /useState\(\(\) => MEDIA_SECTIONS\.has\(initialSection\) \? initialSection : 'screen'\)/);
+  assert.match(app, /<MediaView key=\{`\$\{data\.collectionId\}:\$\{data\.selectedLibrary\?\.id \|\| 'legacy'\}`\}/);
+  assert.match(app, /const \[section, setSection\] = useState\(\(\) => data\.selectedLibrary\?\.type/);
   assert.doesNotMatch(app, />All Watchlists</);
-  assert.match(app, /!data\.mainWatchlist && <div className="media-tabs" aria-busy=\{sectionLoading\}>/);
+  assert.match(app, /!data\.mainWatchlist && <div className="library-header-controls" aria-busy=\{sectionLoading\}>/);
 });
 
 test('collection summary calculations remain valid while summary stats stay out of the collection header', async () => {
@@ -502,9 +559,9 @@ test('add and edit share contextual media details while only shelf placement is 
   assert.match(app, /Add as much or as little detail as you like, then choose at least one shelf/);
   assert.match(app, />OPTIONAL</);
   for (const label of ['Director', 'Format', 'Platforms', 'Genres', 'Runtime', 'Poster URL', 'Description', 'Notes']) assert.match(app, new RegExp(`>${label}`));
-  assert.match(app, /section === 'book' && <label>Author<input value=\{form\.creator\}/);
-  assert.match(app, /section === 'game' && <label>Developer and\/or Publisher<input value=\{form\.creator\}/);
-  assert.doesNotMatch(app, /<label>Creator<input/);
+  assert.match(app, /section === 'book' && <label>\{terminology\?\.creator \|\| 'Author'\}<input value=\{form\.creator\}/);
+  assert.match(app, /section === 'game' && <label>\{terminology\?\.creator \|\| 'Developer'\} and\/or Publisher<input value=\{form\.creator\}/);
+  assert.match(app, /section === 'other' && <label>\{terminology\?\.creator \|\| 'Creator'\}<input value=\{form\.creator\}/);
   assert.match(app, /Mark as Owned/);
   assert.match(app, /section === 'screen'[\s\S]*Mark Priority Watch/);
   assert.match(app, /if \(priorityWatch && currentUserId\) await setMediaReaction\(accessToken, created\[0\]\.id, 'priority', true\)/);
@@ -707,7 +764,7 @@ test('private clubs restrict collection visibility and stay admin-only', async (
   assert.match(migration, /if not public\.is_admin\(\) then raise exception 'Admin access required'/);
 
   assert.match(client, /Authorization: 'Bearer ' \+ \(accessToken \|\| SUPABASE_PUBLISHABLE_KEY\)/);
-  assert.match(data, /loadMediaSnapshot\(\{ fresh = false, collectionId, section = 'screen', accessToken, mainWatchlistOwnerIds \}/);
+  assert.match(data, /loadMediaSnapshot\(\{ fresh = false, collectionId, libraryId = null, section = 'screen', accessToken, mainWatchlistOwnerIds \}/);
   assert.match(supabaseData, /loadMainWatchlistFromSupabase\(\{ fresh = false, accessToken, ownerIds \}/);
   assert.match(supabaseData, /\.filter\(\(interest\) => scopedProfileIds\.has\(interest\.user_id\)\)/);
   assert.match(supabaseData, /collection_id: 'in\.\(' \+ collectionIds\.join\(','\) \+ '\)'/);
@@ -773,7 +830,7 @@ test('shared collection routing is read-only and completely isolated from Main W
   assert.match(app, /\{sharedMode && <div className="sidebar-bottom">[\s\S]*<small>Read-only link<\/small>/);
   assert.match(share, /share link is unavailable or has been revoked/i);
   assert.doesNotMatch(data, /loadSharedCollection|get_shared_collection/);
-  assert.match(share, /mapSnapshot\(payload\.collection, payload\.shelves \|\| \[\], payload\.media \|\| \[\], payload\.memberships \|\| \[\]\)/);
+  assert.match(share, /mapSnapshot\(payload\.collection, payload\.shelves \|\| \[\], payload\.media \|\| \[\], payload\.memberships \|\| \[\],[\s\S]*libraries, selected\)/);
   assert.match(share, /shared: true/);
 });
 
@@ -1033,7 +1090,7 @@ test('all single-item additions require a shelf and foreign imports open and sav
   assert.match(app, /if \(!shelfIds\.length\) \{ setError\('Choose at least one shelf\.'/);
   assert.match(app, /disabled=\{saving \|\| shelvesLoading \|\| Boolean\(shelvesError\) \|\| !shelfIds\.length\}/);
   assert.match(app, /Choose at least one shelf <span>Required<\/span>/);
-  assert.match(app, /createMediaItem\(accessToken, \{ \.\.\.item, collection_id: draft\.destination\.collectionId \}\)/);
+  assert.match(app, /createMediaItem\(accessToken, \{ \.\.\.item, collection_id: draft\.destination\.collectionId, library_id: draft\.destination\.selectedLibrary\?\.id \}\)/);
   assert.match(app, /createdId = created\[0\]\.id;[\s\S]*replaceMediaShelfMemberships\(accessToken, createdId, \[\], shelfIds\)/);
   assert.match(app, /cacheSnapshot\(optimisticDestination, draft\.destination\.collectionId\)/);
   assert.match(app, /added to your collection\.`\);[\s\S]*createMediaItem/);
@@ -1690,7 +1747,8 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /className="shelf-action-group shelf-add-actions"/);
   assert.match(app, /className="shelf-mobile-top-row"[\s\S]*shelf-edit-actions[\s\S]*shelf-order-actions[\s\S]*className="shelf-mobile-bottom-row"[\s\S]*shelf-content-actions[\s\S]*shelf-add-actions[\s\S]*shelf-set-actions/);
   assert.match(app, /shelf\.ownerName && 'main-watchlist-shelf'/);
-  assert.match(app, /function ShelfEditDialog\(\{ shelf, canArrange, onArrange, canCurateMain, onToggleMain, onClose, onSave \}\)/);
+  assert.match(app, /function ShelfEditDialog\(\{ shelf, canArrange, onArrange, canCurateMain, onToggleMain, canTransfer, onTransfer, onClose, onSave \}\)/);
+  assert.match(app, /canTransfer && <details className="shelf-transfer-section">/);
   assert.match(app, /className="shelf-edit-mobile-actions"[\s\S]*>Arrange Shelf<[\s\S]*onToggleMain\(enabled\)/);
   assert.match(app, /const previous = mainWatchlist; const enabled = !previous; setMainWatchlist\(enabled\); try \{ await onToggleMain\(enabled\); \} catch \{ setMainWatchlist\(previous\); \}/);
   assert.match(styles, /\.shelf-heading-copy h2\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);

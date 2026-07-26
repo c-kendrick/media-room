@@ -1,6 +1,7 @@
 import { mapSnapshot } from './supabase-data.js';
 import { SUPABASE_PUBLISHABLE_KEY, supabaseRequest } from './supabase.js';
 import { appSiteUrl } from './auth.js';
+import { chooseLibrary, normalizeLibrary } from './library-system.js';
 
 export const SHARE_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -55,8 +56,12 @@ export async function loadSharedCollection(token) {
   if (!SHARE_TOKEN_PATTERN.test(token)) throw new Error('This share link is unavailable.');
   const payload = await rpc('get_shared_collection', { share_token: token });
   if (!payload?.collection) throw new Error('This share link is unavailable or has been revoked.');
+  const libraries = (payload.libraries || []).map(normalizeLibrary);
+  const selected = chooseLibrary(libraries, new URLSearchParams(window.location.search).get('library'));
+  const snapshot = mapSnapshot(payload.collection, payload.shelves || [], payload.media || [], payload.memberships || [], [], [], [], selected ? [selected.type] : null, libraries, selected);
   return {
-    ...mapSnapshot(payload.collection, payload.shelves || [], payload.media || [], payload.memberships || []),
+    ...snapshot,
+    loadedLibraries: libraries.map((library) => library.id),
     shared: true,
   };
 }
@@ -65,8 +70,12 @@ export async function loadPublicCollection(username) {
   if (!/^[a-z0-9_.-]{1,60}$/i.test(username)) throw new Error('This public collection is unavailable.');
   const payload = await rpc('get_public_collection_by_username', { public_username: username });
   if (!payload?.collection) throw new Error('This public collection is unavailable or the account is Closed.');
+  const libraries = (payload.libraries || []).map(normalizeLibrary);
+  const selected = chooseLibrary(libraries, new URLSearchParams(window.location.search).get('library'));
+  const snapshot = mapSnapshot(payload.collection, payload.shelves || [], payload.media || [], payload.memberships || [], [], [], [], selected ? [selected.type] : null, libraries, selected);
   return {
-    ...mapSnapshot(payload.collection, payload.shelves || [], payload.media || [], payload.memberships || []),
+    ...snapshot,
+    loadedLibraries: libraries.map((library) => library.id),
     shared: true,
   };
 }
