@@ -1514,7 +1514,13 @@ test('persistent watchlist requests are server-authoritative and ownership safe'
   assert.match(app, /Move to another shelf/);
   assert.match(app, /Not now/);
   assert.match(app, /Keep in watchlist/);
-  assert.match(app, /You have \{requests\.length\} watchlist requests\./);
+  assert.match(app, /SIGNED IN · WATCHLIST/);
+  assert.match(app, /account-request-badge/);
+  const usersDialog = app.slice(app.indexOf('function UsersDialog'), app.indexOf('function ClubHubCard'));
+  const accountDialog = app.slice(app.indexOf('function AccountDialog'), app.indexOf('function mediaForm'));
+  assert.doesNotMatch(usersDialog, /watchlistRequests|WATCHLIST REQUESTS|account-watchlist-requests/);
+  assert.match(accountDialog, /account-watchlist-requests/);
+  assert.match(accountDialog, /watchlistRequests\.map/);
 });
 
 test('legacy shelf groups convert to the alternating canonical set order', () => {
