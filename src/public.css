@@ -981,9 +981,10 @@
 .collection-page .collection-library-heading{
   display:flex;
   align-items:center;
-  justify-content:flex-start;
+  justify-content:space-between;
   gap:9px;
   flex-wrap:wrap;
+  z-index:2;
 }
 .collection-library-heading>h1{flex:0 1 auto;margin-right:5px}
 .collection-library-heading>.eyebrow{flex:1 0 100%}
@@ -997,9 +998,10 @@
   box-shadow:none;
   display:flex;
   align-items:center;
-  justify-content:flex-start;
+  justify-content:flex-end;
   gap:7px;
   flex-wrap:nowrap;
+  margin-left:auto;
 }
 .library-create-button{
   min-height:40px!important;
@@ -1048,7 +1050,7 @@
   position:absolute;
   z-index:50;
   top:calc(100% + 7px);
-  left:0;
+  right:0;
   width:max(100%,250px);
   max-height:min(420px,calc(100dvh - 110px));
   overflow-y:auto;
@@ -1085,7 +1087,7 @@
 @media(max-width:760px){
   .collection-page .collection-library-heading{align-items:flex-start}
   .collection-library-heading>h1{flex:1 0 100%;margin-right:0}
-  .collection-page .library-header-controls{width:100%;flex-wrap:wrap}
+  .collection-page .library-header-controls{width:100%;justify-content:flex-end;flex-wrap:wrap}
   .library-title-selector{flex:1 1 190px;max-width:none}
   .library-create-button{flex:0 0 auto!important}
 }
