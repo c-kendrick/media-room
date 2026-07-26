@@ -366,6 +366,63 @@ function WatchlistTitle({ title, clubs, selectedClubId, onChange }) {
   </details>;
 }
 
+function LibrarySelector({ libraries = [], selectedLibrary, onChange }) {
+  const selectorRef = useRef(null);
+  const summaryRef = useRef(null);
+  const SelectedTypeIcon = selectedLibrary?.type === 'screen' ? Film : selectedLibrary?.type === 'book' ? BookOpen : selectedLibrary?.type === 'game' ? Gamepad2 : ListOrdered;
+  const closeSelector = (restoreFocus = false) => {
+    if (selectorRef.current) selectorRef.current.open = false;
+    if (restoreFocus) summaryRef.current?.focus();
+  };
+  useEffect(() => {
+    const selector = selectorRef.current;
+    const summary = summaryRef.current;
+    const syncExpanded = () => summary?.setAttribute('aria-expanded', String(Boolean(selector?.open)));
+    const closeOutside = (event) => {
+      if (selector?.open && !selector.contains(event.target)) closeSelector();
+    };
+    selector?.addEventListener('toggle', syncExpanded);
+    document.addEventListener('pointerdown', closeOutside);
+    syncExpanded();
+    return () => {
+      selector?.removeEventListener('toggle', syncExpanded);
+      document.removeEventListener('pointerdown', closeOutside);
+    };
+  }, []);
+
+  return <details ref={selectorRef} className="library-title-selector" onKeyDown={(event) => {
+    if ((event.key === 'Enter' || event.key === ' ') && event.target === summaryRef.current) {
+      event.preventDefault();
+      if (selectorRef.current) selectorRef.current.open = !selectorRef.current.open;
+    } else if (event.key === 'Escape' && selectorRef.current?.open) {
+      event.preventDefault();
+      closeSelector(true);
+    } else if (event.key === 'ArrowDown' && event.target === summaryRef.current) {
+      event.preventDefault();
+      if (selectorRef.current) selectorRef.current.open = true;
+      window.requestAnimationFrame(() => selectorRef.current?.querySelector('.library-title-menu button')?.focus());
+    }
+  }}>
+    <summary ref={summaryRef} aria-haspopup="menu"><span className="library-selector-label"><SelectedTypeIcon size={15} /><span>{selectedLibrary?.name || 'Choose library'}</span></span><ChevronDown size={19} /></summary>
+    <div className="library-title-menu" role="menu">
+      {libraries.filter((library) => !library.deleted_at).map((library) => {
+        const TypeIcon = library.type === 'screen' ? Film : library.type === 'book' ? BookOpen : library.type === 'game' ? Gamepad2 : ListOrdered;
+        return <button
+          type="button"
+          role="menuitemradio"
+          aria-checked={library.id === selectedLibrary?.id}
+          className={library.id === selectedLibrary?.id ? 'selected' : ''}
+          key={library.id}
+          onClick={() => {
+            closeSelector(true);
+            if (library.id !== selectedLibrary?.id) onChange(library.id);
+          }}
+        ><TypeIcon size={15} /><span>{library.name}</span></button>;
+      })}
+    </div>
+  </details>;
+}
+
 function MultiSelect({ label, values, options, onChange }) {
   const selected = new Set(values);
   const display = !values.length
@@ -2246,24 +2303,19 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
   return (
     <div className={cls('page media-page', data.mainWatchlist ? 'main-watchlist-page' : 'collection-page')}>
       <div className={cls('media-command public-media-command dotted', data.mainWatchlist && 'has-title-control')}>
-        <div className="media-command-heading">
+        <div className={cls('media-command-heading', !data.mainWatchlist && 'collection-library-heading')}>
           {data.shared && <span className="eyebrow">SHARED COLLECTION · READ ONLY</span>}
           {data.mainWatchlist
             ? <WatchlistTitle title={mainWatchlistTitle} clubs={mainWatchlistClubs} selectedClubId={mainWatchlistClubId} onChange={onMainWatchlistClubChange} />
-            : <h1>{data.collectionTitle || 'The media room'}</h1>}
+            : <><h1>{data.collectionTitle || 'The media room'}</h1><div className="library-header-controls" aria-busy={sectionLoading}>
+          {(canEdit || isAdmin) && <Button className="shelf-control-button shelf-add-button library-create-button" icon={Plus} onClick={() => setLibraryEditor({ type: currentLibrary?.type || 'other' })}>Create Library</Button>}
+          {(canEdit || isAdmin) && currentLibrary && <span className="shelf-action-group shelf-edit-actions library-edit-actions">
+            <button type="button" aria-label={`Edit ${currentLibrary.name}`} title={`Edit ${currentLibrary.name}`} onClick={() => setLibraryEditor(currentLibrary)}><Pencil size={15} /></button>
+            <button className="delete-shelf" type="button" aria-label={`Move ${currentLibrary.name} to Bin`} disabled={currentLibrary.protected} title={currentLibrary.protected ? 'Default libraries cannot be deleted' : `Move ${currentLibrary.name} to Bin`} onClick={requestLibraryDeletion}><Trash2 size={15} /></button>
+          </span>}
+          <LibrarySelector libraries={data.libraries || []} selectedLibrary={currentLibrary} onChange={switchLibrary} />
+        </div></>}
         </div>
-        {!data.mainWatchlist && <div className="library-header-controls" aria-busy={sectionLoading}>
-          {(canEdit || isAdmin) && <Button className="library-create-button" icon={Plus} onClick={() => setLibraryEditor({ type: currentLibrary?.type || 'other' })}>Create Library</Button>}
-          {(canEdit || isAdmin) && currentLibrary && <button className="library-text-action" type="button" onClick={() => setLibraryEditor(currentLibrary)}><Pencil size={15} />Edit</button>}
-          {(canEdit || isAdmin) && currentLibrary && <button className="library-text-action danger" type="button" disabled={currentLibrary.protected} title={currentLibrary.protected ? 'Default libraries cannot be deleted' : `Delete ${currentLibrary.name}`} onClick={requestLibraryDeletion}><Trash2 size={15} />Delete</button>}
-          <label className="library-selector">
-            <span className="sr-only">Library</span>
-            <select value={currentLibrary?.id || ''} onChange={(event) => switchLibrary(event.target.value)} aria-label="Choose library">
-              {(data.libraries || []).filter((library) => !library.deleted_at).map((library) => <option value={library.id} key={library.id}>{library.name}{library.protected || library.name === LIBRARY_TYPE_DETAILS[library.type]?.label ? '' : ` — ${LIBRARY_TYPE_DETAILS[library.type]?.label}`}</option>)}
-            </select>
-            <ChevronDown size={16} aria-hidden="true" />
-          </label>
-        </div>}
 
         <div className="media-search-row">
           <label className="media-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${sectionLabel.toLowerCase()}…`} /></label>
@@ -2339,12 +2391,18 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
           return result;
         }
         setShelfTransfer(null);
+        if (mode === 'move') {
+          if (sourceLibraryId) await onLoadLibrary(sourceLibraryId, { fresh: true, select: false });
+          if (result.library_id !== sourceLibraryId) await onLoadLibrary(result.library_id, { fresh: true, select: false });
+          notify(`${shelf.name} moved.`);
+          return result;
+        }
         if (sourceLibraryId && sourceLibraryId !== result.library_id) {
           await onLoadLibrary(sourceLibraryId, { fresh: true, select: false });
         }
         await onLoadLibrary(result.library_id, { fresh: true });
         window.setTimeout(() => document.getElementById(`shelf-${result.shelf_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
-        notify(mode === 'move' ? `${shelf.name} moved.` : `${name} copied.`);
+        notify(`${name} copied.`);
         return result;
       }} onViewResult={onViewCopiedShelf} />}
       {bulkImportType && <BulkImportDialog type={bulkImportType} shelves={shelves} onClose={() => setBulkImportType(null)} onImport={(shelfIds, rows) => {

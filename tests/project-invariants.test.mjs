@@ -84,8 +84,12 @@ test('custom libraries are migrated non-destructively and shelf transfers stay a
   assert.match(app, /const openBin = \(\) => \{\s*setBinOpen\(true\);\s*setBinLoading\(true\);/);
   assert.match(app, /onLoadLibrary\?\.\(library\.id, \{ select: false \}\)/);
   assert.match(app, /onLoadLibrary\(sourceLibraryId, \{ fresh: true, select: false \}\)/);
+  assert.match(app, /if \(mode === 'move'\) \{[\s\S]*onLoadLibrary\(result\.library_id, \{ fresh: true, select: false \}\);[\s\S]*return result;/);
   assert.match(app, /libraries: snapshot\.libraries \|\| \[\]/);
-  assert.match(styles, /\.library-header-controls[\s\S]*background-image:radial-gradient/);
+  assert.match(app, /shelf-control-button shelf-add-button library-create-button/);
+  assert.match(app, /shelf-action-group shelf-edit-actions library-edit-actions/);
+  assert.match(app, /const TypeIcon = library\.type === 'screen' \? Film/);
+  assert.match(styles, /\.collection-page \.library-header-controls\{[\s\S]*background:transparent/);
   assert.match(styles, /\.library-editor-dialog[\s\S]*grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/);
 });
 
@@ -313,7 +317,8 @@ test('opening Main Watchlist has no redundant All Watchlists tab', async () => {
   assert.match(app, /<MediaView key=\{data\.collectionId\}/);
   assert.match(app, /const \[section, setSection\] = useState\(\(\) => data\.selectedLibrary\?\.type/);
   assert.doesNotMatch(app, />All Watchlists</);
-  assert.match(app, /!data\.mainWatchlist && <div className="library-header-controls" aria-busy=\{sectionLoading\}>/);
+  assert.match(app, /!data\.mainWatchlist && 'collection-library-heading'/);
+  assert.match(app, /<LibrarySelector libraries=\{data\.libraries \|\| \[\]\} selectedLibrary=\{currentLibrary\}/);
 });
 
 test('collection summary calculations remain valid while summary stats stay out of the collection header', async () => {
