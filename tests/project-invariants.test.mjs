@@ -1508,6 +1508,7 @@ test('watchlist request copy and progress use the specified user-facing language
 test('persistent watchlist requests are server-authoritative and ownership safe', async () => {
   const migration = await read('supabase/migrations/20260726010000_watchlist_requests.sql');
   const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
   assert.match(migration, /create table public\.watchlist_requests/);
   assert.match(migration, /status text not null default 'pending' check \(status in \('pending', 'accepted', 'declined'\)\)/);
   assert.match(migration, /state text not null default 'active'[\s\S]*'removal_requested'/);
@@ -1526,9 +1527,29 @@ test('persistent watchlist requests are server-authoritative and ownership safe'
   assert.match(app, /account-request-badge/);
   const usersDialog = app.slice(app.indexOf('function UsersDialog'), app.indexOf('function ClubHubCard'));
   const accountDialog = app.slice(app.indexOf('function AccountDialog'), app.indexOf('function mediaForm'));
+  const accountRequestUi = app.slice(app.indexOf('function AccountWatchlistRequestRow'), app.indexOf('function mediaForm'));
   assert.doesNotMatch(usersDialog, /watchlistRequests|WATCHLIST REQUESTS|account-watchlist-requests/);
-  assert.match(accountDialog, /account-watchlist-requests/);
-  assert.match(accountDialog, /watchlistRequests\.map/);
+  assert.match(accountDialog, /<AccountWatchlistRequests requests=\{watchlistRequests\}/);
+  assert.match(accountRequestUi, /account-watchlist-requests/);
+  assert.match(accountRequestUi, /requests\.map/);
+  assert.match(app, /function AccountWatchlistRequestRow/);
+  assert.match(app, /function AccountWatchlistRequests/);
+  assert.match(app, /openingRequestRef\.current = request\.id/);
+  assert.match(app, /const opened = await openPendingWatchlistRequest\(request\);[\s\S]*if \(opened\) setAccountOpen\(false\)/);
+  assert.match(app, /const openVersion = \+\+pendingRequestOpenVersion\.current/);
+  assert.match(app, /watchlist_requests: \(current\.watchlist_requests \|\| \[\]\)\.filter\(\(request\) => request\.id !== pendingWatchlistRequest\.id\)/);
+  assert.match(app, /className="watchlist-request-dotted-strip" aria-hidden="true"/);
+  assert.match(app, /className="watchlist-request-body"/);
+  assert.match(app, /className="watchlist-keep-tertiary"[\s\S]*className="watchlist-not-now"[\s\S]*className="watchlist-move-primary" icon=\{ListOrdered\}/);
+  assert.match(styles, /\.signed-in-account\{position:relative;overflow:visible!important\}/);
+  assert.match(styles, /\.account-dialog-body\{[^}]*overflow-y:auto;[^}]*env\(safe-area-inset-bottom\)/);
+  assert.match(styles, /\.account-watchlist-requests\{[^}]*overflow:visible/);
+  assert.match(styles, /\.account-request-copy strong\{[^}]*overflow-wrap:anywhere/);
+  assert.match(styles, /\.watchlist-request-dialog\{[^}]*grid-template-rows:36px auto minmax\(0,1fr\)/);
+  assert.match(styles, /\.watchlist-request-dotted-strip\{min-height:36px/);
+  assert.match(styles, /\.watchlist-request-body\{[^}]*overflow-y:auto/);
+  assert.match(styles, /\.watchlist-move-primary\{[^}]*background:#6f302d!important/);
+  assert.match(styles, /@media\(max-width:620px\)[\s\S]*\.move-actions \.watchlist-move-primary\{order:1\}[\s\S]*\.move-actions \.watchlist-keep-tertiary\{order:3/);
 });
 
 test('legacy shelf groups convert to the alternating canonical set order', () => {
