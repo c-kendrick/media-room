@@ -654,6 +654,7 @@ test('every shelf has a compact random picker scoped to its visible items', asyn
   assert.match(app, /function pickRandomItem\(items\)[\s\S]*Math\.floor\(Math\.random\(\) \* items\.length\)/);
   assert.match(app, /className="button random-pick shelf-pick-action"[\s\S]*disabled=\{!items\.length\}[\s\S]*onClick=\{\(\) => onOpen\(pickRandomItem\(items\)\.item_id\)\}><span>Pick<\/span><Shuffle size=\{15\} \/><\/button>/);
   assert.match(styles, /\.shelf-pick-action\{align-self:center;flex:0 0 auto\}/);
+  assert.match(styles, /@media\(min-width:581px\)\{\.shelf-pick-action\{flex-direction:row-reverse;font-size:11px\}\}/);
   assert.match(styles, /@media\(max-width:580px\)\{\.shelf-pick-action\{order:99;margin-left:auto\}/);
   assert.match(styles, /@media\(max-width:420px\)[\s\S]*\.shelf-pick-action span\{display:none\}/);
 });
