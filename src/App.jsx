@@ -66,7 +66,6 @@ import {
   requestPriorityStampRemoval,
   requestWatchedItemMove,
   respondWatchlistRequest,
-  stampRequestProgress,
   watchlistRequestMessage,
 } from './watchlist-requests.js';
 
@@ -2533,7 +2532,6 @@ function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPreviou
               {watchlistRequestActions?.can_request_stamp_removal && <button type="button" disabled={watchlistRequestBusy} onClick={onRequestStampRemoval}><Stamp size={14} />Request priority stamp removal</button>}
               {(watchlistRequestActions?.move_options || []).map((option) => <button type="button" disabled={watchlistRequestBusy} onClick={() => onRequestMove(option)} key={`${option.club_id}-${option.source_shelf_id}`}><ListOrdered size={14} />Ask {option.target_name} to move this watched item out of {option.source_shelf_name}</button>)}
             </div>
-            {stampRequestProgress(watchlistRequestActions) && <p className="watchlist-request-progress">{stampRequestProgress(watchlistRequestActions)}</p>}
             {canImport && <div className="drawer-import-actions"><Button className="drawer-import-button" icon={Download} onClick={onImport}>Import to Your Collection</Button></div>}
           </div>
         </div>
@@ -3062,7 +3060,8 @@ function AccountWatchlistRequestRow({ request, openingRequestId, onOpen }) {
 
 function AccountWatchlistRequests({ requests, openingRequestId, onOpen }) {
   return <section className="account-watchlist-requests" aria-labelledby="account-watchlist-title">
-    <header>
+    <div className="account-watchlist-dotted-strip" aria-hidden="true" />
+    <header className="account-watchlist-summary">
       <span className="account-request-mark"><Bell size={16} /></span>
       <span><small>WATCHLIST REQUESTS</small><strong id="account-watchlist-title">{requests.length === 1 ? 'One request needs your attention' : `${requests.length} requests need your attention`}</strong></span>
       <b aria-label={`${requests.length} pending watchlist ${requests.length === 1 ? 'request' : 'requests'}`}>{requests.length}</b>

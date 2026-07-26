@@ -52,10 +52,3 @@ export function watchlistRequestMessage(request) {
   }
   return `${request?.requester_name} has marked ${request?.media_title} as watched and asked you to move it out of your watchlist.`;
 }
-
-export function stampRequestProgress(actions) {
-  const cleared = Number(actions?.cleared) || 0;
-  const awaiting = Number(actions?.awaiting) || 0;
-  if (!cleared && !awaiting) return '';
-  return `${cleared} cleared · ${awaiting} awaiting response`;
-}
