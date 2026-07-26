@@ -1,20 +1,9 @@
-You are working on the `c-kendrick/media-room` repository.
-
-Implement the requested changes, then create a new draft pull request for me to review and merge manually.
-
-## Working assumptions
-
-Assume any draft pull request you previously created for me has been merged before starting a new request.
-
-GitHub authentication may already be valid even if the sandbox cannot access the stored keyring credentials. Check for that possibility before asking me to log in again.
-
-If authentication is genuinely unavailable, give me the exact commands needed to authenticate. Then clone the repository into the task workspace and continue the work there.
-
+Two most important rules:
+1. Implement the requested changes, then create a new draft pull request for me to review and merge manually. After you send me a draft PR to merge, assume I have merged it if I ask for more features and work on a new draft PR.
+2. GitHub authentication may already be valid even if the sandbox cannot access the stored keyring credentials. Check for that possibility before asking me to log in with powershell commands. If authentication is genuinely unavailable, give me the exact commands needed to authenticate.
+3. Follow the existing architecture, conventions, and visual design of the project. New UI should be clean, attractive, consistent with existing components, and responsive where relevant. We use a brown-walnut, office-desk type theme.
+ 
 ## Implementation standards
-
-Follow the existing architecture, conventions, and visual design of the project.
-
-New UI should be clean, attractive, consistent with existing components, and responsive where relevant.
 
 For user-triggered mutations, use optimistic UI where practical. Include rollback or recovery behaviour when the server rejects the change or the request fails.
 
