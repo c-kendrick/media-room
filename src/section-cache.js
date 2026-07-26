@@ -25,6 +25,15 @@ export function canPersistSnapshot(snapshot) {
   return Boolean(snapshot?.storage === 'supabase' && snapshot.collectionId && !snapshot.shared);
 }
 
+export function invalidateLibrarySnapshot(snapshot, libraryId) {
+  if (!snapshot || !libraryId) return snapshot;
+  return {
+    ...snapshot,
+    loadedLibraries: (snapshot.loadedLibraries || []).filter((loadedLibraryId) => loadedLibraryId !== libraryId),
+    detailedLibraries: (snapshot.detailedLibraries || []).filter((loadedLibraryId) => loadedLibraryId !== libraryId),
+  };
+}
+
 export function sectionSnapshot(snapshot, section) {
   if (!canPersistSnapshot(snapshot) || !SECTION_TYPES[section]) return null;
   const shelfIds = new Set((snapshot.mediaShelves || []).filter((shelf) => shelf.section === section).map((shelf) => shelf.shelf_id));
