@@ -92,17 +92,6 @@ export function copiedShelfName(name, destinationShelfNames = []) {
   return candidate;
 }
 
-export function libraryRouteId(search = '') {
-  return new URLSearchParams(search).get('library') || '';
-}
-
-export function libraryRouteUrl(url, libraryId) {
-  const next = new URL(url, 'http://media-room.local');
-  if (libraryId) next.searchParams.set('library', libraryId);
-  else next.searchParams.delete('library');
-  return `${next.pathname}${next.search}${next.hash}`;
-}
-
 export function libraryMemoryKey(collectionId) {
   return `media-room:last-library:${collectionId}`;
 }

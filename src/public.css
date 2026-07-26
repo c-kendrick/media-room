@@ -735,6 +735,151 @@
 }
 @media(max-width:420px){.shelf-transfer-actions{grid-template-columns:1fr}.copy-success{grid-template-columns:auto 1fr}.copy-success .button{grid-column:1/-1}}
 
+/* Refined library workspace ------------------------------------------------ */
+.collection-page .public-media-command{grid-template-columns:minmax(0,1fr)!important}
+.collection-page .media-command-heading,.collection-page .media-search-row,.collection-page .media-action-row,.library-header-controls{grid-column:1/-1!important}
+.library-header-controls{
+  box-sizing:border-box;
+  width:100%;
+  min-height:54px;
+  padding:7px 10px;
+  border:1px solid #dacbbd;
+  border-radius:6px;
+  background-color:#f0e4d8;
+  background-image:radial-gradient(#b69c8d 1px,transparent 1px);
+  background-size:10px 10px;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:4px;
+  box-shadow:0 4px 14px rgba(66,48,34,.035);
+}
+.library-selector{order:-1;margin-right:auto;min-width:min(270px,100%);max-width:390px}
+.library-selector select{
+  height:38px;
+  border-color:#cbb8a8;
+  border-radius:5px;
+  background:#fffaf2;
+  color:#4b3932;
+  box-shadow:0 1px 3px rgba(61,42,30,.06);
+}
+.library-create-button,.library-text-action{
+  box-sizing:border-box!important;
+  min-height:36px!important;
+  padding:0 10px!important;
+  border:0!important;
+  border-radius:4px!important;
+  background:rgba(255,250,242,.62)!important;
+  color:#665249!important;
+  font-size:9px!important;
+  font-weight:800!important;
+  box-shadow:none!important;
+}
+.library-create-button:hover,.library-text-action:hover{background:#fffaf2!important;color:#6f302d!important}
+.library-text-action.danger{color:#8c554e!important}
+.library-text-action:disabled{background:transparent!important;color:#a9978d!important;opacity:.72}
+
+.library-editor-dialog,.shelf-transfer-dialog{
+  box-sizing:border-box;
+  width:min(650px,calc(100vw - 32px))!important;
+  overflow-x:hidden!important;
+  padding:64px 38px 32px!important;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  align-items:start;
+  gap:14px 18px;
+  color:#4b423b;
+}
+.library-editor-dialog:before,.shelf-transfer-dialog:before{
+  content:"";
+  position:absolute;
+  inset:0 0 auto;
+  height:34px;
+  border-bottom:1px solid #d9c8b9;
+  background-color:#f0e4d8;
+  background-image:radial-gradient(#b69c8d 1px,transparent 1px);
+  background-size:10px 10px;
+}
+.library-editor-dialog>.close,.shelf-transfer-dialog>.close{top:42px!important;right:20px!important;color:#725f54!important}
+.library-editor-dialog>.eyebrow,.library-editor-dialog>h2,.library-editor-dialog>.field-error,.library-editor-dialog>.field-explanation,.library-editor-dialog>.library-terminology,.library-editor-dialog>.auth-error,.library-editor-dialog>.dialog-actions,
+.shelf-transfer-dialog>.eyebrow,.shelf-transfer-dialog>h2,.shelf-transfer-dialog>.dialog-intro,.shelf-transfer-dialog>.copy-source-summary,.shelf-transfer-dialog>.shelf-picker-state,.shelf-transfer-dialog>.field-explanation,.shelf-transfer-dialog>.auth-error,.shelf-transfer-dialog>.copy-success,.shelf-transfer-dialog>.dialog-actions{grid-column:1/-1}
+.library-editor-dialog>.eyebrow,.shelf-transfer-dialog>.eyebrow{margin-top:3px;color:#9a4e37}
+.library-editor-dialog>h2,.shelf-transfer-dialog>h2{margin:0 0 8px!important;color:#3f332d;font-size:30px}
+.library-editor-dialog>label,.shelf-transfer-dialog>label{
+  min-width:0;
+  display:grid;
+  align-content:start;
+  gap:7px;
+  color:#655950;
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:.04em;
+}
+.library-editor-dialog>label input,.library-editor-dialog>label select,.library-terminology-grid input,
+.shelf-transfer-dialog>label input,.shelf-transfer-dialog>label select{
+  box-sizing:border-box;
+  width:100%;
+  min-width:0;
+  height:42px;
+  border:1px solid #cfc0b1;
+  border-radius:5px;
+  background:#fffdf8;
+  padding:0 12px;
+  color:#493d36;
+  font:inherit;
+  font-size:12px;
+  font-weight:500;
+  outline:none;
+}
+.library-editor-dialog input:focus,.library-editor-dialog select:focus,.shelf-transfer-dialog input:focus,.shelf-transfer-dialog select:focus{
+  border-color:#966350;
+  box-shadow:0 0 0 3px rgba(150,99,80,.12);
+}
+.library-terminology{border:1px solid #ded0c2;border-radius:6px;background:rgba(255,250,242,.64);overflow:hidden}
+.library-terminology>summary{box-sizing:border-box;min-height:48px;padding:0 14px;color:#684b40}
+.library-terminology[open]>summary{border-bottom:1px solid #e2d5c8}
+.library-terminology-grid{padding:15px!important;gap:12px!important}
+.library-terminology-grid label{display:grid;gap:7px;color:#655950}
+.library-editor-dialog .field-explanation,.shelf-transfer-dialog .field-explanation{margin:0;padding:10px 12px;border-left:3px solid #a67662;background:#f2e7dc;color:#74665d}
+.library-editor-dialog .dialog-actions,.shelf-transfer-dialog .dialog-actions{margin-top:8px;padding-top:18px;border-top:1px solid #ded2c5}
+.library-editor-dialog .dialog-actions .button,.shelf-transfer-dialog .dialog-actions .button{
+  min-height:42px;
+  border-color:#6f302d!important;
+  background:#6f302d!important;
+  color:#fffaf2!important;
+}
+.library-editor-dialog .dialog-actions .button:hover,.shelf-transfer-dialog .dialog-actions .button:hover{background:#854238!important}
+.shelf-transfer-dialog .copy-source-summary{margin:0}
+.shelf-transfer-dialog .copy-source-summary span{border-radius:5px}
+.shelf-transfer-dialog .copy-success{border-radius:6px}
+.bin-loading,.bin-load-error{
+  min-height:86px;
+  padding:16px;
+  border:1px solid #d9ccbe;
+  border-radius:6px;
+  background:#fffaf2;
+  color:#6f6259;
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+.bin-loading>span,.bin-load-error>span{display:grid;gap:4px}.bin-loading strong,.bin-load-error strong{font-family:var(--serif);font-size:14px;color:#4b3d36}.bin-loading small,.bin-load-error small{font-size:9px;line-height:1.45}
+.bin-loading>svg{color:#8b503f;animation:bin-spin 1.2s linear infinite}
+.bin-load-error{border-color:#d5b8b1;color:#8d4a42}.bin-load-error button{margin-left:auto;min-height:34px;border:1px solid #c7a49c;border-radius:4px;background:transparent;color:#7d4039;padding:0 11px;cursor:pointer}
+@keyframes bin-spin{to{transform:rotate(360deg)}}
+
+@media(max-width:760px){
+  .library-header-controls{align-items:stretch;justify-content:flex-start}
+  .library-selector{order:-1;flex:1 1 100%;max-width:none;margin:0 0 2px}
+  .library-create-button,.library-text-action{flex:1 1 0;justify-content:center!important}
+  .library-editor-dialog,.shelf-transfer-dialog{grid-template-columns:1fr;padding:58px 20px max(24px,env(safe-area-inset-bottom))!important;gap:12px}
+  .library-editor-dialog>*,.shelf-transfer-dialog>*{grid-column:1!important}
+  .library-editor-dialog>.close,.shelf-transfer-dialog>.close{top:38px!important;right:12px!important}
+  .library-terminology-grid{grid-template-columns:1fr!important}
+  .library-editor-dialog .dialog-actions,.shelf-transfer-dialog .dialog-actions{align-items:stretch;flex-direction:column-reverse}
+  .library-editor-dialog .dialog-actions>*,.shelf-transfer-dialog .dialog-actions>*{width:100%;justify-content:center}
+}
+
 @media(max-width:520px){.share-url-row{grid-template-columns:1fr}.share-url-row .button{justify-self:start}.share-danger-zone>span{flex-wrap:wrap}.share-mode-tabs{grid-template-columns:1fr}.public-privacy-action{grid-template-columns:1fr}.public-privacy-action .button{justify-self:start}}
 
 @media(max-width:1200px) and (min-width:761px){
