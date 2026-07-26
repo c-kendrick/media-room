@@ -145,17 +145,6 @@ export async function loadCollectionLibraries({ collectionId, includeDeleted = f
   return rows.map(normalizeLibrary);
 }
 
-export async function loadLibraryById({ libraryId, fresh = false, accessToken } = {}) {
-  if (!libraryId) return null;
-  const rows = await supabaseSelect(query('libraries', {
-    id: 'eq.' + libraryId,
-    deleted_at: 'is.null',
-    select: 'id,collection_id,name,type,is_protected,position,item_term_singular,item_term_plural,creator_term,deleted_at,created_at,updated_at',
-    limit: '1',
-  }), { fresh, accessToken });
-  return rows[0] ? normalizeLibrary(rows[0]) : null;
-}
-
 export function mergeSectionSnapshot(current, sectionSnapshot) {
   if (!current || current.collectionId !== sectionSnapshot.collectionId) return sectionSnapshot;
   const incomingSections = new Set(sectionSnapshot.loadedSections || []);
@@ -178,9 +167,12 @@ export function mergeSectionSnapshot(current, sectionSnapshot) {
     ...sectionSnapshot,
     collectionDescriptions: { ...current.collectionDescriptions, ...sectionSnapshot.collectionDescriptions },
     libraries: sectionSnapshot.libraries?.length ? sectionSnapshot.libraries : current.libraries,
-    selectedLibrary: sectionSnapshot.selectedLibrary || current.selectedLibrary,
+    // Loading another library into the cache must never change what the user is
+    // viewing. The explicit selection path updates selectedLibrary afterwards.
+    selectedLibrary: current.selectedLibrary || sectionSnapshot.selectedLibrary,
     loadedLibraries: [...new Set([...(current.loadedLibraries || []), ...(sectionSnapshot.loadedLibraries || [])])],
     loadedSections: [...new Set([...(current.loadedSections || []), ...(sectionSnapshot.loadedSections || [])])],
+    detailedLibraries: [...new Set([...(current.detailedLibraries || []), ...(sectionSnapshot.detailedLibraries || [])])],
     mediaShelves: uniqueRows([
       ...(current.mediaShelves || []).filter((row) => !replacesIncomingSection(row)),
       ...(sectionSnapshot.mediaShelves || []),

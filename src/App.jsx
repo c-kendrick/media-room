@@ -44,7 +44,7 @@ import {
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
 import { appSiteUrl, consumeRecoverySessionFromUrl, loadAuthenticatedAccount, registerWithPassword, requestPasswordRecovery, signInWithPassword, signOut, signupRateLimitDetails, updateDisplayName, updatePassword } from './auth.js';
-import { loadCollectionLibraries, loadLibraryById, loadMediaDetails, loadPublicCollections, loadSectionDetails, mergeSectionSnapshot } from './supabase-data.js';
+import { loadCollectionLibraries, loadMediaDetails, loadPublicCollections, loadSectionDetails, mergeSectionSnapshot } from './supabase-data.js';
 import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, copyShelfToLibrary, createLibrary, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, moveShelfToLibrary, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderLibraryShelves, reorderMainWatchlist, reorderShelfMedia, searchDetailCandidates, searchPosterCandidates, setMediaDeleted, setMediaStarRating, updateLibrary, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, createClub, deactivateProfile, deleteClub, listClubs, listProfiles, rejectProfile, renameClub, restoreProfile, setUserClubs } from './admin.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
@@ -68,7 +68,7 @@ import {
   respondWatchlistRequest,
   watchlistRequestMessage,
 } from './watchlist-requests.js';
-import { copiedShelfName, filmLibrary, libraryDefaults, libraryMemoryKey, libraryRouteId, libraryRouteUrl, LIBRARY_TYPE_DETAILS, LIBRARY_TYPES, validateLibraryDraft } from './library-system.js';
+import { copiedShelfName, filmLibrary, libraryDefaults, libraryMemoryKey, LIBRARY_TYPE_DETAILS, LIBRARY_TYPES, validateLibraryDraft } from './library-system.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -179,14 +179,8 @@ function writeLastLibrary(collectionId, libraryId) {
   try { window.localStorage.setItem(libraryMemoryKey(collectionId), libraryId); } catch { /* Storage is optional. */ }
 }
 
-function updateLibraryRoute(libraryId, { replace = false } = {}) {
-  const next = libraryRouteUrl(window.location.href, libraryId);
-  if (replace) window.history.replaceState(window.history.state || {}, '', next);
-  else window.history.pushState(window.history.state || {}, '', next);
-}
-
 function exportCollection(snapshot) {
-  const payload = { exported_at: new Date().toISOString(), format: 'media-room/v1', collection: { id: snapshot.collectionId, title: snapshot.collectionTitle, owner_id: snapshot.ownerId, descriptions: snapshot.collectionDescriptions }, shelves: snapshot.mediaShelves, media: snapshot.media };
+  const payload = { exported_at: new Date().toISOString(), format: 'media-room/v1', collection: { id: snapshot.collectionId, title: snapshot.collectionTitle, owner_id: snapshot.ownerId, descriptions: snapshot.collectionDescriptions }, libraries: snapshot.libraries || [], shelves: snapshot.mediaShelves, media: snapshot.media };
   const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
   const link = document.createElement('a');
   link.href = url; link.download = `${snapshot.collectionTitle.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase()}-backup.json`; link.click(); URL.revokeObjectURL(url);
@@ -316,9 +310,9 @@ function sortShelfItems(items, shelfId, sourceOrder = []) {
   });
 }
 
-function Button({ children, className, icon: Icon, ...props }) {
+function Button({ children, className, icon: Icon, type = 'button', ...props }) {
   return (
-    <button className={cls('button', className)} {...props}>
+    <button type={type} className={cls('button', className)} {...props}>
       {Icon && <Icon size={15} />}
       {children}
     </button>
@@ -505,9 +499,15 @@ export default function App() {
   const [collectionId, setCollectionId] = useState(null);
   const [collectionLoading, setCollectionLoading] = useState(false);
   const [landingApplied, setLandingApplied] = useState(() => sharedMode);
-  const [routeLibraryResolving, setRouteLibraryResolving] = useState(() => Boolean(!sharedMode && libraryRouteId(window.location.search)));
   const snapshotCache = useRef(new Map());
   const mainWatchlistMemoryScope = useRef(null);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('library')) return;
+    url.searchParams.delete('library');
+    window.history.replaceState(window.history.state || {}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   useEffect(() => {
     const viewport = window.matchMedia?.(AUTO_COLLAPSE_NAV_QUERY);
@@ -536,7 +536,7 @@ export default function App() {
   const requestReturnToList = useRef(false);
   const pendingRequestOpenVersion = useRef(0);
   const rememberedSection = useRef('screen');
-  const rememberedLibrary = useRef(libraryRouteId(window.location.search));
+  const rememberedLibrary = useRef('');
   const accessToken = account?.session?.access_token;
   const accountScope = account?.profile?.id || 'public';
   const memberClubs = userHub?.clubs || [];
@@ -820,44 +820,45 @@ export default function App() {
     return network;
   };
 
-  const loadLibrary = async (libraryId, { collection: requestedCollectionId = dataRef.current?.collectionId, fresh = false, history = true } = {}) => {
+  const loadLibrary = async (libraryId, { collection: requestedCollectionId = dataRef.current?.collectionId, fresh = false, select = true } = {}) => {
     if (!requestedCollectionId || requestedCollectionId === MAIN_WATCHLIST_ID || !libraryId) return dataRef.current;
     const memory = dataRef.current?.collectionId === requestedCollectionId
       ? dataRef.current
       : snapshotCache.current.get(requestedCollectionId);
     if (!fresh && memory?.loadedLibraries?.includes(libraryId)) {
       const library = memory.libraries?.find((entry) => entry.id === libraryId);
-      if (!library) return loadLibrary(libraryId, { collection: requestedCollectionId, fresh: true, history });
+      if (!library) return loadLibrary(libraryId, { collection: requestedCollectionId, fresh: true, select });
+      if (!select) return memory;
       const selected = { ...memory, selectedLibrary: library };
       dataRef.current = selected;
       setData(selected);
       rememberedLibrary.current = libraryId;
       writeLastLibrary(requestedCollectionId, libraryId);
-      if (history) updateLibraryRoute(libraryId);
       return selected;
     }
-    setCollectionLoading(true);
-    try {
-      const loaded = await fetchSection(requestedCollectionId, 'screen', { fresh, libraryId });
-      const selected = { ...(snapshotCache.current.get(requestedCollectionId) || loaded), selectedLibrary: loaded.selectedLibrary };
-      dataRef.current = selected;
-      setData(selected);
-      rememberedLibrary.current = selected.selectedLibrary?.id || libraryId;
-      writeLastLibrary(requestedCollectionId, rememberedLibrary.current);
-      if (history) updateLibraryRoute(rememberedLibrary.current);
-      return selected;
-    } finally {
-      setCollectionLoading(false);
-    }
+    const loaded = await fetchSection(requestedCollectionId, 'screen', { fresh, libraryId });
+    const merged = snapshotCache.current.get(requestedCollectionId) || loaded;
+    if (!select) return merged;
+    const library = merged.libraries?.find((entry) => entry.id === libraryId)
+      || loaded.selectedLibrary;
+    const selected = { ...merged, selectedLibrary: library };
+    dataRef.current = selected;
+    setData(selected);
+    rememberedLibrary.current = library?.id || libraryId;
+    writeLastLibrary(requestedCollectionId, rememberedLibrary.current);
+    cacheSnapshot(selected, requestedCollectionId);
+    return selected;
   };
 
-  const ensureSectionDetails = async (section) => {
+  const ensureSectionDetails = async (section, requestedLibraryId = dataRef.current?.selectedLibrary?.id) => {
     const current = dataRef.current;
-    if (!current || current.storage !== 'supabase' || current.mainWatchlist || current.detailedSections?.includes(section)) return;
-    const requestKey = `${current.collectionId}:${current.selectedLibrary?.id || section}`;
+    if (!current || current.storage !== 'supabase' || current.mainWatchlist) return current;
+    if (requestedLibraryId && current.detailedLibraries?.includes(requestedLibraryId)) return current;
+    if (!requestedLibraryId && current.detailedSections?.includes(section)) return current;
+    const requestKey = `${current.collectionId}:${requestedLibraryId || section}`;
     let request = sectionDetailRequests.current.get(requestKey);
     if (!request) {
-      request = loadSectionDetails({ collectionId: current.collectionId, section, libraryId: current.selectedLibrary?.id, accessToken }).catch((error) => {
+      request = loadSectionDetails({ collectionId: current.collectionId, section, libraryId: requestedLibraryId, accessToken }).catch((error) => {
         sectionDetailRequests.current.delete(requestKey);
         throw error;
       });
@@ -868,6 +869,9 @@ export default function App() {
     const merged = {
       ...dataRef.current,
       detailedSections: [...new Set([...(dataRef.current.detailedSections || []), section])],
+      detailedLibraries: requestedLibraryId
+        ? [...new Set([...(dataRef.current.detailedLibraries || []), requestedLibraryId])]
+        : dataRef.current.detailedLibraries || [],
       media: dataRef.current.media.map((item) => detailsById.has(item.database_id)
         ? { ...item, ...detailsById.get(item.database_id), details_loaded: true }
         : item),
@@ -882,14 +886,12 @@ export default function App() {
     setSearchOpen(true);
     if (dataRef.current?.storage !== 'supabase' || dataRef.current.mainWatchlist || sharedMode) return;
     void (async () => {
-      const originalLibraryId = dataRef.current?.selectedLibrary?.id;
       const libraries = dataRef.current?.libraries || [];
       if (libraries.length) {
         for (const library of libraries) {
-          await loadLibrary(library.id, { history: false });
-          await ensureSectionDetails(library.type);
+          await loadLibrary(library.id, { select: false });
+          await ensureSectionDetails(library.type, library.id);
         }
-        if (originalLibraryId) await loadLibrary(originalLibraryId, { history: false });
       } else {
         for (const section of MEDIA_SECTIONS) {
           await loadSection(section);
@@ -911,7 +913,6 @@ export default function App() {
       rememberedSection.current = 'screen';
       rememberedLibrary.current = nextCollectionId === MAIN_WATCHLIST_ID ? '' : readLastLibrary(nextCollectionId);
       if (!sharedMode) writeLastPage(account?.profile?.id, nextCollectionId, 'screen');
-      updateLibraryRoute(rememberedLibrary.current);
     }
     const cached = nextCollectionId === MAIN_WATCHLIST_ID && mainWatchlistMemoryScope.current !== mainWatchlistScopeKey
       ? null
@@ -931,41 +932,12 @@ export default function App() {
   };
 
   useEffect(() => {
-    const onHistoryNavigation = () => {
-      const linkedLibrary = libraryRouteId(window.location.search);
-      if (!linkedLibrary || dataRef.current?.mainWatchlist) return;
-      if (sharedMode) {
-        rememberedLibrary.current = linkedLibrary;
-        void loadLibrary(linkedLibrary, { history: false });
-        return;
-      }
-      void loadLibraryById({ libraryId: linkedLibrary, fresh: true, accessToken }).then((library) => {
-        if (library?.collectionId && library.collectionId !== dataRef.current?.collectionId) {
-          rememberedLibrary.current = library.id;
-          writeLastLibrary(library.collectionId, library.id);
-          selectCollection(library.collectionId, { userInitiated: false });
-          return;
-        }
-        rememberedLibrary.current = linkedLibrary;
-        return loadLibrary(linkedLibrary, { history: false });
-      }).catch(() => {
-        const fallback = filmLibrary(dataRef.current?.libraries || []);
-        if (fallback) void loadLibrary(fallback.id, { history: false, fresh: true });
-      });
-    };
-    window.addEventListener('popstate', onHistoryNavigation);
-    return () => window.removeEventListener('popstate', onHistoryNavigation);
-  }, [accessToken]);
-
-  useEffect(() => {
     const viewCopiedShelf = (event) => {
       const result = event.detail || {};
       if (!result.collection_id) return;
       if (result.library_id) writeLastLibrary(result.collection_id, result.library_id);
       if (sharedMode) {
-        const destination = new URL(appSiteUrl());
-        if (result.library_id) destination.searchParams.set('library', result.library_id);
-        window.location.assign(destination.toString());
+        window.location.assign(appSiteUrl());
         return;
       }
       rememberedLibrary.current = result.library_id || readLastLibrary(result.collection_id);
@@ -1182,7 +1154,6 @@ export default function App() {
       if (snapshot?.selectedLibrary?.id && snapshot.collectionId !== MAIN_WATCHLIST_ID) {
         rememberedLibrary.current = snapshot.selectedLibrary.id;
         writeLastLibrary(snapshot.collectionId, snapshot.selectedLibrary.id);
-        updateLibraryRoute(snapshot.selectedLibrary.id, { replace: true });
       }
       setData(snapshot);
       setCollectionId(request.collection_id);
@@ -1231,22 +1202,9 @@ export default function App() {
   }, [viewAsAdmin, adminClubs, collections, data?.collectionId]);
 
   useEffect(() => {
-    if (sharedMode || !routeLibraryResolving || collectionsReadyFor !== accountScope || !collections.length) return;
-    const linkedLibraryId = libraryRouteId(window.location.search);
-    if (!linkedLibraryId) { setRouteLibraryResolving(false); return; }
-    loadLibraryById({ libraryId: linkedLibraryId, fresh: true, accessToken }).then((library) => {
-      if (!library || !displayedCollections.some((collection) => collection.id === library.collectionId)) return;
-      rememberedLibrary.current = library.id;
-      writeLastLibrary(library.collectionId, library.id);
-      setLandingApplied(true);
-      selectCollection(library.collectionId, { userInitiated: false });
-    }).catch(() => null).finally(() => setRouteLibraryResolving(false));
-  }, [sharedMode, routeLibraryResolving, collectionsReadyFor, accountScope, collections.length, accessToken]);
-
-  useEffect(() => {
     const visibilityPending = account?.profile?.role === 'admin' && adminClubsReadyFor !== account.profile.id;
     const collectionsPending = collectionsReadyFor !== accountScope;
-    if (authLoading || collectionsPending || !collections.length || visibilityPending || routeLibraryResolving || landingApplied || userSelectedCollection.current) return;
+    if (authLoading || collectionsPending || !collections.length || visibilityPending || landingApplied || userSelectedCollection.current) return;
     const canRestore = Boolean(account?.profile?.id && account.profile.approved_at && !account.profile.deactivated_at);
     const remembered = canRestore ? readLastPage(account.profile.id) : null;
     const rememberedCollectionIsVisible = remembered?.collectionId === MAIN_WATCHLIST_ID
@@ -1259,7 +1217,7 @@ export default function App() {
     rememberedSection.current = rememberedCollectionIsVisible ? remembered.section : 'screen';
     setLandingApplied(true);
     selectCollection(landingCollectionId, { userInitiated: false });
-  }, [account, accountScope, authLoading, collections, collectionsReadyFor, adminClubsReadyFor, routeLibraryResolving, landingApplied, viewAsAdmin, adminClubs]);
+  }, [account, accountScope, authLoading, collections, collectionsReadyFor, adminClubsReadyFor, landingApplied, viewAsAdmin, adminClubs]);
 
   useEffect(() => {
     const skeletonTimer = window.setTimeout(
@@ -1638,7 +1596,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={`${data.collectionId}:${data.selectedLibrary?.id || 'legacy'}`} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={(itemId, navigation = null) => { setSelectedMediaId(itemId); setSelectedMediaNavigation(navigation); }} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
+          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={(itemId, navigation = null) => { setSelectedMediaId(itemId); setSelectedMediaNavigation(navigation); }} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
         </main>
         <footer><span>Published from Kit’s Local Media Room.</span><span className="provider-credits">Poster data from <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>, <a href="https://books.google.com/" target="_blank" rel="noreferrer">Google Books</a>, <a href="https://openlibrary.org/" target="_blank" rel="noreferrer">Open Library</a> and <a href="https://www.steamgriddb.com/" target="_blank" rel="noreferrer">SteamGridDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</span></footer>
       </div>
@@ -1933,6 +1891,9 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
   const [importingBackup, setImportingBackup] = useState(false);
   const [binOpen, setBinOpen] = useState(false);
   const [binLibraries, setBinLibraries] = useState([]);
+  const [binLoading, setBinLoading] = useState(false);
+  const [binError, setBinError] = useState('');
+  const [exportingBackup, setExportingBackup] = useState(false);
   const [shelfEditor, setShelfEditor] = useState(null);
   const [libraryEditor, setLibraryEditor] = useState(null);
   const [shelfTransfer, setShelfTransfer] = useState(null);
@@ -2063,18 +2024,43 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
   const loadCompleteCollection = async ({ details = false } = {}) => {
     let complete = data;
     if (data.mainWatchlist || data.storage !== 'supabase') return complete;
-    const originalLibraryId = currentLibrary?.id;
     if (data.libraries?.length) {
       for (const library of data.libraries) {
-        complete = await onLoadLibrary?.(library.id, { history: false }) || complete;
-        if (details) complete = await onEnsureSectionDetails?.(library.type) || complete;
+        complete = await onLoadLibrary?.(library.id, { select: false }) || complete;
+        if (details) complete = await onEnsureSectionDetails?.(library.type, library.id) || complete;
       }
-      if (originalLibraryId) complete = await onLoadLibrary?.(originalLibraryId, { history: false }) || complete;
     } else for (const nextSection of MEDIA_SECTIONS) {
       complete = await onLoadSection?.(nextSection) || complete;
       if (details) complete = await onEnsureSectionDetails?.(nextSection) || complete;
     }
     return complete;
+  };
+
+  const openBin = () => {
+    setBinOpen(true);
+    setBinLoading(true);
+    setBinError('');
+    void Promise.all([
+      loadCompleteCollection(),
+      loadCollectionLibraries({ collectionId: data.collectionId, includeDeleted: true, fresh: true, accessToken }),
+    ]).then(([, allLibraries]) => {
+      setBinLibraries(allLibraries.filter((library) => library.deleted_at));
+    }).catch((error) => {
+      setBinError(error?.message || 'The complete Bin could not be loaded.');
+    }).finally(() => setBinLoading(false));
+  };
+
+  const exportCompleteBackup = async () => {
+    if (exportingBackup) return;
+    setExportingBackup(true);
+    try {
+      exportCollection(await loadCompleteCollection({ details: true }));
+      notify('Backup prepared.');
+    } catch {
+      notify('The complete collection could not be prepared for export.');
+    } finally {
+      setExportingBackup(false);
+    }
   };
 
   const pickRandom = () => {
@@ -2224,7 +2210,7 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
     };
     if (libraryEditor?.id) {
       await updateLibrary(accessToken, libraryEditor.id, payload);
-      await onLoadLibrary(libraryEditor.id, { fresh: true, history: false });
+      await onLoadLibrary(libraryEditor.id, { fresh: true });
       setLibraryEditor(null);
       notify(`${values.name} saved.`);
       return;
@@ -2331,19 +2317,20 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
           {canEdit && <Button className="quiet-button create-shelf-button" icon={Plus} onClick={() => setCreatingShelf(true)}>Create Shelf</Button>}
           {section !== 'other' && <Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters || posterRetryAfter > 0} onClick={enrichCurrentSection}>{enrichingPosters ? 'Finding posters…' : posterRetryAfter ? `Find posters in ${retryLabel(posterRetryAfter)}` : 'Find posters'}</Button>}
           {section !== 'other' && <Button className="quiet-button" icon={Search} disabled={enrichingDetails || detailsRetryAfter > 0} onClick={enrichDetailsInCurrentSection}>{enrichingDetails ? 'Enriching details…' : detailsRetryAfter ? `Enrich details in ${retryLabel(detailsRetryAfter)}` : 'Enrich details'}</Button>}
-          <Button className="quiet-button" icon={Download} onClick={async () => { try { exportCollection(await loadCompleteCollection({ details: true })); } catch { notify('The complete collection could not be prepared for export.'); } }}>Export backup</Button>
+          <Button className="quiet-button" icon={Download} disabled={exportingBackup} onClick={exportCompleteBackup}>{exportingBackup ? 'Preparing backupâ€¦' : 'Export backup'}</Button>
           {canEdit && <><input ref={backupInputRef} hidden type="file" accept=".json,application/json" onChange={importBackupFile} /><Button className="quiet-button" icon={Upload} disabled={importingBackup} onClick={() => backupInputRef.current?.click()}>{importingBackup ? 'Importing backup…' : 'Import backup'}</Button></>}
-          {canEdit && <Button className="quiet-button bin-button" icon={Trash2} onClick={async () => { try { await loadCompleteCollection(); const allLibraries = await loadCollectionLibraries({ collectionId: data.collectionId, includeDeleted: true, fresh: true, accessToken }); setBinLibraries(allLibraries.filter((library) => library.deleted_at)); setBinOpen(true); } catch { notify('The complete Bin could not be loaded.'); } }}>Bin{binCount ? ` (${binCount})` : ''}</Button>}
+          {canEdit && <Button className="quiet-button bin-button" icon={Trash2} onClick={openBin}>Bin{binCount ? ` (${binCount})` : ''}</Button>}
           {canEdit && section === 'screen' && <><Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('film')}>Bulk Import Film</Button><Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('television')}>Bulk Import Television</Button></>}
           {canEdit && section === 'book' && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('book')}>Bulk Import Books</Button>}
           {canEdit && section === 'game' && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('game')}>Bulk Import Video Games</Button>}
         </div>
       </section>}
-      {creatingShelf && <CreateShelfDialog section={section} terminology={currentLibrary} onClose={() => setCreatingShelf(false)} onSave={async (values) => { setCreatingShelf(false); try { await createShelf(accessToken, { collection_id: data.collectionId, library_id: currentLibrary.id, section: currentLibrary.type === 'other' ? 'screen' : currentLibrary.type, ...values, show_in_main_watchlist: currentLibrary.type === 'screen' ? values.show_in_main_watchlist : false, position: (shelves.at(-1)?.position || 0) + 1000 }); await onLoadLibrary(currentLibrary.id, { fresh: true, history: false }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this library.'); } }} />}
-      {addingMedia && <AddMediaDialog section={section} terminology={currentLibrary} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, collection_id: data.collectionId, library_id: currentLibrary.id, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id) => [id, OPTIMISTIC_APPEND_POSITION])), interests: [], likes: [], priorities: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, type: section === 'other' ? 'other' : item.type, collection_id: data.collectionId, library_id: currentLibrary.id }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setMediaReaction(accessToken, created[0].id, 'priority', true); await onLoadLibrary(currentLibrary.id, { fresh: true, history: false }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify(`${currentLibrary.singular} added.`); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify(`The ${currentLibrary.singular.toLocaleLowerCase()} could not be saved.`); }); }} />}
-      {binOpen && <CollectionBinDrawer libraries={binLibraries} media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onRestoreLibrary={async (library) => { await updateLibrary(accessToken, library.id, { deleted_at: null }); setBinLibraries((rows) => rows.filter((row) => row.id !== library.id)); await onLoadLibrary(library.id, { fresh: true }); setBinOpen(false); notify(`${library.name} restored from Bin.`); }} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; onDataChange(optimisticData); try { const deleted = await permanentlyDeleteMedia(accessToken, item.database_id); if (!deleted?.length) throw new Error('Supabase did not delete the media item.'); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; onDataChange(optimisticData); try { const deleted = await deleteShelf(accessToken, shelf.shelf_id); if (!deleted?.length) throw new Error('Supabase did not delete the shelf.'); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })} />}
+      {creatingShelf && <CreateShelfDialog section={section} terminology={currentLibrary} onClose={() => setCreatingShelf(false)} onSave={async (values) => { setCreatingShelf(false); try { await createShelf(accessToken, { collection_id: data.collectionId, library_id: currentLibrary.id, section: currentLibrary.type === 'other' ? 'screen' : currentLibrary.type, ...values, show_in_main_watchlist: currentLibrary.type === 'screen' ? values.show_in_main_watchlist : false, position: (shelves.at(-1)?.position || 0) + 1000 }); await onLoadLibrary(currentLibrary.id, { fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this library.'); } }} />}
+      {addingMedia && <AddMediaDialog section={section} terminology={currentLibrary} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, collection_id: data.collectionId, library_id: currentLibrary.id, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id) => [id, OPTIMISTIC_APPEND_POSITION])), interests: [], likes: [], priorities: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, type: section === 'other' ? 'other' : item.type, collection_id: data.collectionId, library_id: currentLibrary.id }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setMediaReaction(accessToken, created[0].id, 'priority', true); await onLoadLibrary(currentLibrary.id, { fresh: true }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify(`${currentLibrary.singular} added.`); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify(`The ${currentLibrary.singular.toLocaleLowerCase()} could not be saved.`); }); }} />}
+      {binOpen && <CollectionBinDrawer loading={binLoading} error={binError} onRetry={openBin} libraries={binLibraries} media={deletedMedia} shelves={deletedShelves} libraryName={(libraryId) => (data.libraries || []).find((library) => library.id === libraryId)?.name || binLibraries.find((library) => library.id === libraryId)?.name || 'Library'} onClose={() => setBinOpen(false)} onError={notify} onRestoreLibrary={async (library) => { await updateLibrary(accessToken, library.id, { deleted_at: null }); setBinLibraries((rows) => rows.filter((row) => row.id !== library.id)); await onLoadLibrary(library.id, { fresh: true }); setBinOpen(false); notify(`${library.name} restored from Bin.`); }} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await onLoadLibrary(item.library_id, { fresh: true, select: false }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; onDataChange(optimisticData); try { const deleted = await permanentlyDeleteMedia(accessToken, item.database_id); if (!deleted?.length) throw new Error('Supabase did not delete the media item.'); notify(`${item.title} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await onLoadLibrary(shelf.library_id, { fresh: true, select: false }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; onDataChange(optimisticData); try { const deleted = await deleteShelf(accessToken, shelf.shelf_id); if (!deleted?.length) throw new Error('Supabase did not delete the shelf.'); notify(`${shelf.name} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })} />}
       {shelfEditor && <ShelfEditDialog shelf={shelfEditor} canArrange={shelfEditor.canArrange} onArrange={() => { const openArrange = shelfEditor.onArrange; setShelfEditor(null); openArrange?.(); }} canCurateMain={shelfEditor.canCurateMain} onToggleMain={shelfEditor.onToggleMain} canTransfer={Boolean((data.libraries || []).some((library) => library.type === currentLibrary?.type))} onTransfer={(mode) => { const transferShelf = shelfEditor; setShelfEditor(null); setShelfTransfer({ mode, shelf: transferShelf, itemCount: (data.media || []).filter((item) => !item.deleted_at && item.lists?.includes(transferShelf.shelf_id)).length }); }} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList, numbered: changes.is_numbered ?? shelfEditor.numbered } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
       {shelfTransfer && <ShelfTransferDialog transfer={shelfTransfer} sourceLibrary={currentLibrary} sourceOwnerName={sourceOwnerName} ownerData={shelfTransfer.mode === 'copy-visitor' ? null : data} loadDestinations={loadCopyDestinations} ownCollection={ownCollection} onClose={() => setShelfTransfer(null)} onConfirm={async ({ mode, shelf, destinationLibraryId, name }) => {
+        const sourceLibraryId = currentLibrary?.id;
         const result = mode === 'move'
           ? await moveShelfToLibrary(accessToken, shelf.shelf_id, destinationLibraryId)
           : await copyShelfToLibrary(accessToken, shelf.shelf_id, destinationLibraryId, name, shareToken || null);
@@ -2352,6 +2339,9 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
           return result;
         }
         setShelfTransfer(null);
+        if (sourceLibraryId && sourceLibraryId !== result.library_id) {
+          await onLoadLibrary(sourceLibraryId, { fresh: true, select: false });
+        }
         await onLoadLibrary(result.library_id, { fresh: true });
         window.setTimeout(() => document.getElementById(`shelf-${result.shelf_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
         notify(mode === 'move' ? `${shelf.name} moved.` : `${name} copied.`);
@@ -2570,7 +2560,7 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
   </section></div>, document.body);
 }
 
-function CollectionBinDrawer({ libraries = [], media, shelves, onClose, onError, onRestoreLibrary, onOpenMedia, onRestoreMedia, onDeleteMedia, onRestoreShelf, onDeleteShelf }) {
+function CollectionBinDrawer({ loading = false, error = '', onRetry, libraries = [], media, shelves, libraryName, onClose, onError, onRestoreLibrary, onOpenMedia, onRestoreMedia, onDeleteMedia, onRestoreShelf, onDeleteShelf }) {
   const [busyId, setBusyId] = useState(null);
   useEscape(onClose);
   const run = async (id, action) => {
@@ -2581,13 +2571,15 @@ function CollectionBinDrawer({ libraries = [], media, shelves, onClose, onError,
 
   return createPortal(<div className="drawer-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <aside className="collection-bin-drawer">
-      <button className="close" onClick={onClose} aria-label="Close Bin"><X /></button>
+      <button className="close" type="button" onClick={onClose} aria-label="Close Bin"><X /></button>
       <span className="eyebrow">COLLECTION BIN</span>
       <h2>Recently removed</h2>
       <p className="bin-intro">Restore anything you want to keep, or permanently delete it here when you are certain.</p>
-      {!libraries.length && !media.length && !shelves.length && <div className="bin-empty"><Trash2 size={20} /><span>The Bin is empty.</span></div>}
+      {loading && <div className="bin-loading" role="status"><RotateCw size={18} /><span><strong>Opening your complete Bin</strong><small>Your collection stays right where you left it.</small></span></div>}
+      {!loading && error && <div className="bin-load-error" role="alert"><span><strong>The complete Bin could not be loaded</strong><small>{error}</small></span><button type="button" onClick={onRetry}>Try again</button></div>}
+      {!loading && !error && !libraries.length && !media.length && !shelves.length && <div className="bin-empty"><Trash2 size={20} /><span>The Bin is empty.</span></div>}
       {libraries.length > 0 && <section className="bin-group"><header><span>LIBRARIES</span><small>{libraries.length}</small></header><div className="bin-list">
-        {libraries.map((library) => <article className="bin-row-card shelf" key={library.id}><div className="bin-item-main"><span className="bin-shelf-mark"><BookOpen size={15} /></span><span><strong>{library.name}</strong><small>{LIBRARY_TYPE_DETAILS[library.type]?.label}</small></span></div><div className="bin-row-actions"><button disabled={busyId === library.id} onClick={() => run(library.id, () => onRestoreLibrary(library))}><RotateCw size={13} />Restore library</button></div></article>)}
+        {libraries.map((library) => <article className="bin-row-card shelf" key={library.id}><div className="bin-item-main"><span className="bin-shelf-mark"><BookOpen size={15} /></span><span><strong>{library.name}</strong><small>{LIBRARY_TYPE_DETAILS[library.type]?.label}</small></span></div><div className="bin-row-actions"><button type="button" disabled={busyId === library.id} onClick={() => run(library.id, () => onRestoreLibrary(library))}><RotateCw size={13} />Restore library</button></div></article>)}
       </div></section>}
       {media.length > 0 && <section className="bin-group"><header><span>MEDIA</span><small>{media.length}</small></header><div className="bin-list">
         {media.map((item) => <article className="bin-row-card" key={item.database_id}>

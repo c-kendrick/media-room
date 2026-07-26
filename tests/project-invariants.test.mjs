@@ -19,7 +19,7 @@ import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanoni
 import { getDrawerNavigationTargets } from '../src/media-drawer-navigation.js';
 import { watchlistRequestMessage } from '../src/watchlist-requests.js';
 import { parseLightweightInline, parseLightweightMarkdown } from '../src/lightweight-markdown.js';
-import { chooseLibrary, copiedShelfName, libraryDefaults, libraryRouteUrl, validateLibraryDraft } from '../src/library-system.js';
+import { chooseLibrary, copiedShelfName, libraryDefaults, validateLibraryDraft } from '../src/library-system.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -39,7 +39,6 @@ test('custom library helpers provide deterministic defaults, routing, validation
   assert.equal(chooseLibrary(libraries, 'custom', 'film').id, 'custom');
   assert.equal(chooseLibrary(libraries, 'missing', 'custom').id, 'custom');
   assert.equal(chooseLibrary(libraries, 'missing', 'missing').id, 'film');
-  assert.equal(libraryRouteUrl('/collection?share=abc#top', 'custom'), '/collection?share=abc&library=custom#top');
   assert.equal(copiedShelfName('Favourites', ['Favourites (Copy)', 'favourites (copy 2)']), 'Favourites (Copy 3)');
   assert.equal(validateLibraryDraft({
     name: ' anime ',
@@ -58,6 +57,8 @@ test('custom library helpers provide deterministic defaults, routing, validation
 });
 
 test('custom libraries are migrated non-destructively and shelf transfers stay atomic and scoped', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
   const migration = await read('supabase/migrations/20260727010000_custom_libraries.sql');
   const otherType = await read('supabase/migrations/20260727005000_add_other_media_type.sql');
   assert.match(otherType, /alter type public\.media_type add value if not exists 'other'/);
@@ -77,6 +78,15 @@ test('custom libraries are migrated non-destructively and shelf transfers stay a
   assert.match(migration, /false,false,null[\s\S]*returning id into copied_shelf/);
   assert.match(migration, /case when include_private then source\.notes else null end/);
   assert.doesNotMatch(migration, /insert into public\.media_reactions|insert into public\.watchlist_requests/);
+  assert.doesNotMatch(app, /updateLibraryRoute|libraryRouteId|searchParams\.set\(['"]library/);
+  assert.match(app, /<MediaView key=\{data\.collectionId\}/);
+  assert.match(app, /if \(!select\) return merged/);
+  assert.match(app, /const openBin = \(\) => \{\s*setBinOpen\(true\);\s*setBinLoading\(true\);/);
+  assert.match(app, /onLoadLibrary\?\.\(library\.id, \{ select: false \}\)/);
+  assert.match(app, /onLoadLibrary\(sourceLibraryId, \{ fresh: true, select: false \}\)/);
+  assert.match(app, /libraries: snapshot\.libraries \|\| \[\]/);
+  assert.match(styles, /\.library-header-controls[\s\S]*background-image:radial-gradient/);
+  assert.match(styles, /\.library-editor-dialog[\s\S]*grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/);
 });
 
 test('lightweight Markdown supports only the approved inline formatting', () => {
@@ -300,7 +310,7 @@ test('collection note storage remains compatible while note UI is removed from c
 
 test('opening Main Watchlist has no redundant All Watchlists tab', async () => {
   const app = await read('src/App.jsx');
-  assert.match(app, /<MediaView key=\{`\$\{data\.collectionId\}:\$\{data\.selectedLibrary\?\.id \|\| 'legacy'\}`\}/);
+  assert.match(app, /<MediaView key=\{data\.collectionId\}/);
   assert.match(app, /const \[section, setSection\] = useState\(\(\) => data\.selectedLibrary\?\.type/);
   assert.doesNotMatch(app, />All Watchlists</);
   assert.match(app, /!data\.mainWatchlist && <div className="library-header-controls" aria-busy=\{sectionLoading\}>/);
@@ -1462,6 +1472,38 @@ test('section snapshot merging keeps visited tabs and cached drawer details', ()
   assert.deepEqual(merged.loadedSections, ['screen', 'book']);
   assert.deepEqual(merged.mediaShelves.map((row) => row.shelf_id), ['screen-shelf', 'book-shelf']);
   assert.equal(merged.media.find((row) => row.database_id === 'screen-item').description, 'Cached');
+});
+
+test('background library loading preserves the visible library selection', () => {
+  const current = {
+    collectionId: 'collection-a',
+    selectedLibrary: { id: 'film', type: 'screen', name: 'Film & TV' },
+    loadedLibraries: ['film'],
+    loadedSections: ['screen'],
+    detailedLibraries: ['film'],
+    collectionDescriptions: {},
+    libraries: [
+      { id: 'film', type: 'screen', name: 'Film & TV' },
+      { id: 'books', type: 'book', name: 'Books' },
+    ],
+    mediaShelves: [{ shelf_id: 'film-shelf', library_id: 'film', section: 'screen' }],
+    media: [{ database_id: 'film-item', library_id: 'film', type: 'film' }],
+  };
+  const backgroundBooks = {
+    ...current,
+    selectedLibrary: { id: 'books', type: 'book', name: 'Books' },
+    loadedLibraries: ['books'],
+    loadedSections: ['book'],
+    detailedLibraries: ['books'],
+    mediaShelves: [{ shelf_id: 'book-shelf', library_id: 'books', section: 'book' }],
+    media: [{ database_id: 'book-item', library_id: 'books', type: 'book' }],
+  };
+
+  const merged = mergeSectionSnapshot(current, backgroundBooks);
+  assert.equal(merged.selectedLibrary.id, 'film');
+  assert.deepEqual(merged.loadedLibraries, ['film', 'books']);
+  assert.deepEqual(merged.detailedLibraries, ['film', 'books']);
+  assert.deepEqual(merged.mediaShelves.map((row) => row.shelf_id), ['film-shelf', 'book-shelf']);
 });
 
 test('section snapshot merging is idempotent and heals cache-network duplicates', async () => {
