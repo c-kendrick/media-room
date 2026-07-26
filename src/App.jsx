@@ -313,11 +313,44 @@ function Empty({ children }) {
 }
 
 function WatchlistTitle({ title, clubs, selectedClubId, onChange }) {
+  const selectorRef = useRef(null);
+  const summaryRef = useRef(null);
+  const closeSelector = (restoreFocus = false) => {
+    if (selectorRef.current) selectorRef.current.open = false;
+    if (restoreFocus) summaryRef.current?.focus();
+  };
+  useEffect(() => {
+    const selector = selectorRef.current;
+    const summary = summaryRef.current;
+    const syncExpanded = () => summary?.setAttribute('aria-expanded', String(Boolean(selector?.open)));
+    const closeOutside = (event) => {
+      if (selector?.open && !selector.contains(event.target)) closeSelector();
+    };
+    selector?.addEventListener('toggle', syncExpanded);
+    document.addEventListener('pointerdown', closeOutside);
+    syncExpanded();
+    return () => {
+      selector?.removeEventListener('toggle', syncExpanded);
+      document.removeEventListener('pointerdown', closeOutside);
+    };
+  }, []);
   if (clubs.length <= 1) return <h1>{title}</h1>;
-  return <details className="watchlist-title-selector">
-    <summary><h1>{title}</h1><ChevronDown size={24} /></summary>
-    <div className="watchlist-title-menu">
-      {clubs.map((club) => <button className={club.id === selectedClubId ? 'selected' : ''} key={club.id} onClick={(event) => { event.currentTarget.closest('details').removeAttribute('open'); onChange(club.id); }}>{club.name} Watchlist</button>)}
+  return <details ref={selectorRef} className="watchlist-title-selector" onKeyDown={(event) => {
+    if ((event.key === 'Enter' || event.key === ' ') && event.target === summaryRef.current) {
+      event.preventDefault();
+      if (selectorRef.current) selectorRef.current.open = !selectorRef.current.open;
+    } else if (event.key === 'Escape' && selectorRef.current?.open) {
+      event.preventDefault();
+      closeSelector(true);
+    } else if (event.key === 'ArrowDown' && event.target === summaryRef.current) {
+      event.preventDefault();
+      if (selectorRef.current) selectorRef.current.open = true;
+      window.requestAnimationFrame(() => selectorRef.current?.querySelector('.watchlist-title-menu button')?.focus());
+    }
+  }}>
+    <summary ref={summaryRef} aria-haspopup="menu"><h1>{title}</h1><ChevronDown size={24} /></summary>
+    <div className="watchlist-title-menu" role="menu">
+      {clubs.map((club) => <button role="menuitemradio" aria-checked={club.id === selectedClubId} className={club.id === selectedClubId ? 'selected' : ''} key={club.id} onClick={() => { closeSelector(true); onChange(club.id); }}>{club.name} Watchlist</button>)}
     </div>
   </details>;
 }

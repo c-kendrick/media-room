@@ -967,6 +967,14 @@ test('collection and Main Watchlist titles live inside the dotted media controls
   assert.doesNotMatch(styles, /\.main-watchlist-scope/);
   assert.doesNotMatch(styles, /\.main-watchlist-nav/);
   assert.match(styles, /\.watchlist-title-selector/);
+  assert.match(app, /document\.addEventListener\('pointerdown', closeOutside\)/);
+  assert.match(app, /\(event\.key === 'Enter' \|\| event\.key === ' '\) && event\.target === summaryRef\.current/);
+  assert.match(app, /event\.key === 'Escape' && selectorRef\.current\?\.open/);
+  assert.match(app, /event\.key === 'ArrowDown' && event\.target === summaryRef\.current/);
+  assert.match(app, /setAttribute\('aria-expanded', String\(Boolean\(selector\?\.open\)\)\)/);
+  assert.match(app, /closeSelector\(true\); onChange\(club\.id\)/);
+  assert.match(styles, /\.public-media-command\.has-title-control \.media-command-heading\{z-index:2\}/);
+  assert.match(styles, /\.watchlist-title-menu\{[^}]*max-height:min\(420px,calc\(100dvh - 110px\)\);overflow-y:auto;overscroll-behavior:contain/);
   assert.match(styles, /\.public-media-command\.dotted:after/);
   assert.match(styles, /\.media-command-heading h1\{[^}]*color:var\(--brand-brown\)[^}]*font-family:var\(--brand-serif\)[^}]*font-size:30px/);
 });
