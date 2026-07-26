@@ -14,7 +14,7 @@ import { applyReactionToSnapshot, mediaReactionIdentity } from '../src/media-rea
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from '../src/identity.js';
 import { mapSnapshot, mergeSectionSnapshot } from '../src/supabase-data.js';
 import { completeShelfOrder } from '../src/media-write.js';
-import { canPersistSnapshot, sectionSnapshot } from '../src/section-cache.js';
+import { canPersistSnapshot, invalidateLibrarySnapshot, sectionSnapshot } from '../src/section-cache.js';
 import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
 import { getDrawerNavigationTargets } from '../src/media-drawer-navigation.js';
 import { watchlistRequestMessage } from '../src/watchlist-requests.js';
@@ -84,7 +84,8 @@ test('custom libraries are migrated non-destructively and shelf transfers stay a
   assert.match(app, /const openBin = \(\) => \{\s*setBinOpen\(true\);\s*setBinLoading\(true\);/);
   assert.match(app, /onLoadLibrary\?\.\(library\.id, \{ select: false \}\)/);
   assert.match(app, /onLoadLibrary\(sourceLibraryId, \{ fresh: true, select: false \}\)/);
-  assert.match(app, /if \(mode === 'move'\) \{[\s\S]*onLoadLibrary\(result\.library_id, \{ fresh: true, select: false \}\);[\s\S]*return result;/);
+  assert.match(app, /const invalidateLibrary = \(libraryId,[\s\S]*invalidateLibrarySnapshot\(current, libraryId\)[\s\S]*deleteCachedSection\(\{ accountScope, collectionId: requestedCollectionId, libraryId \}\)/);
+  assert.match(app, /if \(mode === 'move'\) \{\s*onInvalidateLibrary\?\.\(result\.library_id\);[\s\S]*return result;/);
   assert.match(app, /libraries: snapshot\.libraries \|\| \[\]/);
   assert.match(app, /shelf-control-button shelf-add-button library-create-button/);
   assert.match(app, /shelf-action-group shelf-edit-actions library-edit-actions/);
@@ -92,6 +93,7 @@ test('custom libraries are migrated non-destructively and shelf transfers stay a
   assert.match(styles, /\.collection-page \.library-header-controls\{[\s\S]*background:transparent/);
   assert.match(styles, /\.collection-page \.collection-library-heading\{[\s\S]*justify-content:space-between[\s\S]*z-index:2/);
   assert.match(styles, /\.library-title-menu\{[\s\S]*right:0/);
+  assert.match(styles, /@media\(max-width:760px\)\{[\s\S]*\.collection-page \.library-header-controls\{[^}]*flex-wrap:nowrap[\s\S]*\.library-create-button\{[\s\S]*font-size:0!important/);
   assert.match(styles, /\.library-editor-dialog[\s\S]*grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/);
 });
 
@@ -1511,6 +1513,17 @@ test('background library loading preserves the visible library selection', () =>
   assert.deepEqual(merged.loadedLibraries, ['film', 'books']);
   assert.deepEqual(merged.detailedLibraries, ['film', 'books']);
   assert.deepEqual(merged.mediaShelves.map((row) => row.shelf_id), ['film-shelf', 'book-shelf']);
+});
+
+test('invalidating a moved shelf destination forces its next library load to refresh', () => {
+  const snapshot = {
+    loadedLibraries: ['books', 'comics', 'games'],
+    detailedLibraries: ['books', 'comics'],
+  };
+  const invalidated = invalidateLibrarySnapshot(snapshot, 'comics');
+  assert.deepEqual(invalidated.loadedLibraries, ['books', 'games']);
+  assert.deepEqual(invalidated.detailedLibraries, ['books']);
+  assert.deepEqual(snapshot.loadedLibraries, ['books', 'comics', 'games']);
 });
 
 test('section snapshot merging is idempotent and heals cache-network duplicates', async () => {

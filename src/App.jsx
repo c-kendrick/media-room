@@ -56,7 +56,7 @@ import { buildCollectionShareUrl, buildPublicCollectionUrl, createCollectionShar
 import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUserHub, removeClubMember, requestFriend, respondClubInvitation, respondFriendRequest, transferClubOwnership, unfriend } from './social.js';
 import { applyReactionToSnapshot, mediaReactionIdentity, setMediaLoveBatch, setMediaReaction } from './media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from './identity.js';
-import { clearCachedAccount, readCachedSection, writeCachedSnapshot } from './section-cache.js';
+import { clearCachedAccount, deleteCachedSection, invalidateLibrarySnapshot, readCachedSection, writeCachedSnapshot } from './section-cache.js';
 import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershipIdentity, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, SHELF_SET_SIZE, validateShelfDraft } from './shelf-order.js';
 import { getDrawerNavigationTargets } from './media-drawer-navigation.js';
 import { LightweightMarkdown } from './LightweightMarkdown.jsx';
@@ -907,6 +907,23 @@ export default function App() {
     return selected;
   };
 
+  const invalidateLibrary = (libraryId, requestedCollectionId = dataRef.current?.collectionId) => {
+    if (!libraryId || !requestedCollectionId) return;
+    sectionRequests.current.delete(`${accountScope}:${requestedCollectionId}:${libraryId}`);
+    const current = dataRef.current?.collectionId === requestedCollectionId
+      ? dataRef.current
+      : snapshotCache.current.get(requestedCollectionId);
+    if (current?.loadedLibraries?.includes(libraryId)) {
+      const invalidated = invalidateLibrarySnapshot(current, libraryId);
+      cacheSnapshot(invalidated, requestedCollectionId);
+      if (dataRef.current?.collectionId === requestedCollectionId) {
+        dataRef.current = invalidated;
+        setData(invalidated);
+      }
+    }
+    if (!sharedMode) void deleteCachedSection({ accountScope, collectionId: requestedCollectionId, libraryId });
+  };
+
   const ensureSectionDetails = async (section, requestedLibraryId = dataRef.current?.selectedLibrary?.id) => {
     const current = dataRef.current;
     if (!current || current.storage !== 'supabase' || current.mainWatchlist) return current;
@@ -1653,7 +1670,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={(itemId, navigation = null) => { setSelectedMediaId(itemId); setSelectedMediaNavigation(navigation); }} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
+          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onInvalidateLibrary={invalidateLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={(itemId, navigation = null) => { setSelectedMediaId(itemId); setSelectedMediaNavigation(navigation); }} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
         </main>
         <footer><span>Published from Kit’s Local Media Room.</span><span className="provider-credits">Poster data from <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>, <a href="https://books.google.com/" target="_blank" rel="noreferrer">Google Books</a>, <a href="https://openlibrary.org/" target="_blank" rel="noreferrer">Open Library</a> and <a href="https://www.steamgriddb.com/" target="_blank" rel="noreferrer">SteamGridDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</span></footer>
       </div>
@@ -1927,7 +1944,7 @@ function StarRating({ value, editable = false, onChange, label = 'Star rating' }
   </span>;
 }
 
-function MediaView({ data, loading = false, initialSection, onLoadSection, onLoadLibrary, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, ownCollection, loadCopyDestinations, onViewCopiedShelf, sourceOwnerName, shareToken }) {
+function MediaView({ data, loading = false, initialSection, onLoadSection, onLoadLibrary, onInvalidateLibrary, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, ownCollection, loadCopyDestinations, onViewCopiedShelf, sourceOwnerName, shareToken }) {
   const [section, setSection] = useState(() => data.selectedLibrary?.type || (MEDIA_SECTIONS.has(initialSection) ? initialSection : 'screen'));
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -2392,8 +2409,8 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
         }
         setShelfTransfer(null);
         if (mode === 'move') {
+          onInvalidateLibrary?.(result.library_id);
           if (sourceLibraryId) await onLoadLibrary(sourceLibraryId, { fresh: true, select: false });
-          if (result.library_id !== sourceLibraryId) await onLoadLibrary(result.library_id, { fresh: true, select: false });
           notify(`${shelf.name} moved.`);
           return result;
         }
