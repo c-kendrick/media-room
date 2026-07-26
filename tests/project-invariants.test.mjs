@@ -19,7 +19,7 @@ import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanoni
 import { getDrawerNavigationTargets } from '../src/media-drawer-navigation.js';
 import { watchlistRequestMessage } from '../src/watchlist-requests.js';
 import { parseLightweightInline, parseLightweightMarkdown } from '../src/lightweight-markdown.js';
-import { chooseLibrary, copiedShelfName, libraryDefaults, validateLibraryDraft } from '../src/library-system.js';
+import { bulkImportTerminology, chooseLibrary, copiedShelfName, libraryDefaults, validateLibraryDraft } from '../src/library-system.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -54,6 +54,17 @@ test('custom library helpers provide deterministic defaults, routing, validation
     plural: 'Items',
     creator: 'Creator',
   }, libraries, 'custom').valid, true);
+  assert.deepEqual(bulkImportTerminology('book', { type: 'book', singular: 'Comic', plural: 'Comics' }), {
+    heading: 'Comics',
+    singular: 'Comic',
+    plural: 'Comics',
+  });
+  assert.deepEqual(bulkImportTerminology('film', { type: 'screen', singular: 'Anime title', plural: 'Anime titles' }), {
+    heading: 'Anime titles (Film)',
+    singular: 'Anime title',
+    plural: 'Anime titles',
+  });
+  assert.equal(bulkImportTerminology('television', libraryDefaults('screen')).heading, 'Television');
 });
 
 test('custom libraries are migrated non-destructively and shelf transfers stay atomic and scoped', async () => {
@@ -556,11 +567,14 @@ test('owners can open a collection Bin and restore media or shelves', async () =
   assert.match(app, /function CollectionBinDrawer/);
   assert.match(app, /onRestoreMedia[\s\S]*setMediaDeleted\(accessToken, item\.database_id, false\)/);
   assert.match(app, /onRestoreShelf[\s\S]*updateShelf\(accessToken, shelf\.shelf_id, \{ deleted_at: null \}\)/);
+  assert.match(app, /onRestoreShelf[\s\S]*Supabase did not restore the shelf/);
   assert.match(app, /CollectionBinDrawer[\s\S]*Delete forever/);
   assert.match(app, /onDeleteMedia[\s\S]*permanentlyDeleteMedia/);
   assert.match(app, /onDeleteShelf[\s\S]*deleteShelf/);
   assert.match(app, /onDeleteMedia[\s\S]*optimistic: true[\s\S]*media: data\.media\.filter[\s\S]*onDataChange\(optimisticData\)/);
   assert.match(app, /onDeleteShelf[\s\S]*optimistic: true[\s\S]*mediaShelves: data\.mediaShelves\.filter[\s\S]*onDataChange\(optimisticData\)/);
+  assert.match(app, /sourceShelves[\s\S]*filter\(\(shelf\) => !shelf\.deleted_at\)/);
+  assert.match(app, /Supabase did not move the shelf to the Bin/);
   assert.match(app, /if \(!deleted\?\.length\) throw new Error\('Supabase did not delete the media item\.'/);
   assert.match(app, /catch \(error\) \{ onDataChange\(previousData\); notify\(`\$\{item\.title\} could not be deleted/);
   assert.match(writes, /permanentlyDeleteMedia[\s\S]*Prefer: 'return=representation'/);
@@ -955,10 +969,13 @@ test('bulk imports are contextual, title-only, multi-shelf, and optimistic', asy
   const migration = await read('supabase/migrations/20260719010000_multi_shelf_bulk_import.sql');
   const dialog = app.slice(app.indexOf('function BulkImportDialog'), app.indexOf('function EditMediaDialog'));
 
-  assert.match(app, />Bulk Import Film</);
-  assert.match(app, />Bulk Import Television</);
-  assert.match(app, />Bulk Import Books</);
-  assert.match(app, />Bulk Import Video Games</);
+  assert.match(app, /Bulk Import \{bulkImportTerminology\('film', currentLibrary\)\.heading\}/);
+  assert.match(app, /Bulk Import \{bulkImportTerminology\('television', currentLibrary\)\.heading\}/);
+  assert.match(app, /Bulk Import \{bulkImportTerminology\('book', currentLibrary\)\.heading\}/);
+  assert.match(app, /Bulk Import \{bulkImportTerminology\('game', currentLibrary\)\.heading\}/);
+  assert.match(dialog, /const importTerms = bulkImportTerminology\(type, terminology\)/);
+  assert.match(dialog, /Bulk Import \{importTerms\.heading\}/);
+  assert.match(dialog, /items\.length === 1 \? importTerms\.singular : importTerms\.plural/);
   assert.doesNotMatch(dialog, /OWNER-ONLY IMPORT|Destination shelf|year optional|Film \||TV \|/i);
   assert.match(dialog, /className="shelf-picker"/);
   assert.match(dialog, /shelfIds\.includes\(shelf\.shelf_id\)/);

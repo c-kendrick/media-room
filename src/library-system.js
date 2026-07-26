@@ -22,6 +22,27 @@ export function defaultMediaTypeForLibrary(type) {
   return type === 'screen' ? 'film' : type === 'book' ? 'book' : type === 'game' ? 'game' : 'other';
 }
 
+export function bulkImportTerminology(mediaType, library) {
+  const type = library?.type || libraryTypeForMedia(mediaType);
+  const defaults = libraryDefaults(type);
+  const singular = String(library?.singular || defaults.singular).trim();
+  const plural = String(library?.plural || defaults.plural).trim();
+  const usesCustomTerms = singular !== defaults.singular || plural !== defaults.plural;
+  const technical = {
+    film: { heading: 'Film', singular: 'Film', plural: 'Films' },
+    television: { heading: 'Television', singular: 'TV Show', plural: 'TV Shows' },
+    book: { heading: 'Books', singular: 'Book', plural: 'Books' },
+    game: { heading: 'Video Games', singular: 'Video Game', plural: 'Video Games' },
+  }[mediaType] || { heading: plural, singular, plural };
+
+  if (!usesCustomTerms) return technical;
+  return {
+    heading: type === 'screen' ? `${plural} (${technical.heading})` : plural,
+    singular,
+    plural,
+  };
+}
+
 export function normalizeLibrary(row) {
   if (!row) return null;
   return {
