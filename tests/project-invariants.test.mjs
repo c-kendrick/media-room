@@ -648,6 +648,16 @@ test('shelf arranging saves every active item independently of filters and treat
   assert.match(app, /The shelf order could not be saved: \$\{error\.message\}/);
 });
 
+test('every shelf has a compact random picker scoped to its visible items', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /function pickRandomItem\(items\)[\s\S]*Math\.floor\(Math\.random\(\) \* items\.length\)/);
+  assert.match(app, /className="button random-pick shelf-pick-action"[\s\S]*disabled=\{!items\.length\}[\s\S]*onClick=\{\(\) => onOpen\(pickRandomItem\(items\)\.item_id\)\}><span>Pick<\/span><Shuffle size=\{15\} \/><\/button>/);
+  assert.match(styles, /\.shelf-pick-action\{align-self:center;flex:0 0 auto\}/);
+  assert.match(styles, /@media\(max-width:580px\)\{\.shelf-pick-action\{order:99;margin-left:auto\}/);
+  assert.match(styles, /@media\(max-width:420px\)[\s\S]*\.shelf-pick-action span\{display:none\}/);
+});
+
 test('shelf reordering completes the visible order with active server-only memberships', async () => {
   const completed = completeShelfOrder(
     ['visible-b', 'visible-a'],
