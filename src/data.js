@@ -1,4 +1,38 @@
 import { loadCollectionFromSupabase, loadMainWatchlistFromSupabase } from './supabase-data.js';
+import { libraryDefaults, libraryTypeForMedia } from './library-system.js';
+
+function withStaticLibraries(snapshot) {
+  if (snapshot.libraries?.length) return snapshot;
+  const libraryId = (type) => `static-${type}`;
+  const libraries = ['screen', 'book', 'game'].map((type, index) => ({
+    id: libraryId(type),
+    collectionId: snapshot.collectionId || 'static',
+    name: libraryDefaults(type).label,
+    type,
+    protected: true,
+    position: (index + 1) * 1000,
+    singular: libraryDefaults(type).singular,
+    plural: libraryDefaults(type).plural,
+    creator: libraryDefaults(type).creator,
+    deleted_at: null,
+  }));
+  return {
+    ...snapshot,
+    collectionId: snapshot.collectionId || 'static',
+    libraries,
+    selectedLibrary: libraries[0],
+    loadedLibraries: libraries.map((library) => library.id),
+    loadedSections: ['screen', 'book', 'game'],
+    mediaShelves: (snapshot.mediaShelves || []).map((shelf) => ({
+      ...shelf,
+      library_id: shelf.library_id || libraryId(shelf.section || 'screen'),
+    })),
+    media: (snapshot.media || []).map((item) => ({
+      ...item,
+      library_id: item.library_id || libraryId(libraryTypeForMedia(item.type)),
+    })),
+  };
+}
 
 async function loadStaticSnapshot({ fresh = false } = {}) {
   const relative = `${import.meta.env.BASE_URL}media-data.json`;
@@ -8,7 +42,7 @@ async function loadStaticSnapshot({ fresh = false } = {}) {
   const response = await fetch(url, { cache: fresh ? 'no-store' : 'default' });
   if (!response.ok) throw new Error(`Could not load media-data.json (${response.status}).`);
 
-  return response.json();
+  return withStaticLibraries(await response.json());
 }
 
 function assertSnapshot(data) {
@@ -18,11 +52,11 @@ function assertSnapshot(data) {
   return data;
 }
 
-export async function loadMediaSnapshot({ fresh = false, collectionId, section = 'screen', accessToken, mainWatchlistOwnerIds } = {}) {
+export async function loadMediaSnapshot({ fresh = false, collectionId, libraryId = null, section = 'screen', accessToken, mainWatchlistOwnerIds } = {}) {
   try {
     const supabaseSnapshot = collectionId === 'main-watchlist'
       ? await loadMainWatchlistFromSupabase({ fresh, accessToken, ownerIds: mainWatchlistOwnerIds })
-      : await loadCollectionFromSupabase({ fresh, collectionId, section, accessToken });
+      : await loadCollectionFromSupabase({ fresh, collectionId, libraryId, section, accessToken });
     if (supabaseSnapshot) return assertSnapshot(supabaseSnapshot);
   } catch (error) {
     // The static export keeps the public site available until the one-time

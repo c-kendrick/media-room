@@ -1,6 +1,6 @@
 const DATABASE_NAME = 'media-room-cache';
 const STORE_NAME = 'sections';
-export const SECTION_CACHE_VERSION = 3;
+export const SECTION_CACHE_VERSION = 4;
 export const SECTION_CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const SECTION_TYPES = {
@@ -11,6 +11,14 @@ const SECTION_TYPES = {
 
 export function sectionCacheKey({ accountScope = 'public', collectionId, section, scope = 'collection' }) {
   return `media-room:v${SECTION_CACHE_VERSION}:${accountScope}:${scope}:${collectionId}:${section}`;
+}
+
+export function libraryCacheKey({ accountScope = 'public', collectionId, libraryId, scope = 'collection' }) {
+  return `media-room:v${SECTION_CACHE_VERSION}:${accountScope}:${scope}:${collectionId}:library:${libraryId}`;
+}
+
+function cacheKey(options) {
+  return options.libraryId ? libraryCacheKey(options) : sectionCacheKey(options);
 }
 
 export function canPersistSnapshot(snapshot) {
@@ -26,6 +34,27 @@ export function sectionSnapshot(snapshot, section) {
     detailedSections: [],
     mediaShelves: (snapshot.mediaShelves || []).filter((shelf) => shelf.section === section),
     media: (snapshot.media || []).filter((item) => SECTION_TYPES[section].has(item.type)).map((item) => {
+      const { notes, director, description, genres, runtime, details_loaded, ...card } = item;
+      return {
+        ...card,
+        details_loaded: false,
+        lists: (card.lists || []).filter((shelfId) => shelfIds.has(shelfId)),
+        list_positions: Object.fromEntries(Object.entries(card.list_positions || {}).filter(([shelfId]) => shelfIds.has(shelfId))),
+      };
+    }),
+  };
+}
+
+export function librarySnapshot(snapshot, libraryId) {
+  if (!canPersistSnapshot(snapshot) || !libraryId) return null;
+  const shelfIds = new Set((snapshot.mediaShelves || []).filter((shelf) => shelf.library_id === libraryId).map((shelf) => shelf.shelf_id));
+  return {
+    ...snapshot,
+    selectedLibrary: (snapshot.libraries || []).find((library) => library.id === libraryId) || snapshot.selectedLibrary,
+    loadedLibraries: [libraryId],
+    detailedSections: [],
+    mediaShelves: (snapshot.mediaShelves || []).filter((shelf) => shelf.library_id === libraryId),
+    media: (snapshot.media || []).filter((item) => item.library_id === libraryId).map((item) => {
       const { notes, director, description, genres, runtime, details_loaded, ...card } = item;
       return {
         ...card,
@@ -73,7 +102,7 @@ async function withStore(mode, operation) {
 }
 
 export async function readCachedSection(options) {
-  const key = sectionCacheKey(options);
+  const key = cacheKey(options);
   const entry = await withStore('readonly', (store) => store.get(key)).catch(() => null);
   if (!entry || entry.version !== SECTION_CACHE_VERSION) return null;
   const age = Date.now() - Number(entry.cachedAt || 0);
@@ -85,14 +114,15 @@ export async function readCachedSection(options) {
 }
 
 export async function writeCachedSection(options, snapshot) {
-  const compact = sectionSnapshot(snapshot, options.section);
+  const compact = options.libraryId ? librarySnapshot(snapshot, options.libraryId) : sectionSnapshot(snapshot, options.section);
   if (!compact) return false;
   const entry = {
-    key: sectionCacheKey(options),
+    key: cacheKey(options),
     version: SECTION_CACHE_VERSION,
     accountScope: options.accountScope || 'public',
     collectionId: options.collectionId,
     section: options.section,
+    libraryId: options.libraryId || null,
     scope: options.scope || 'collection',
     cachedAt: Date.now(),
     snapshot: compact,
@@ -103,17 +133,24 @@ export async function writeCachedSection(options, snapshot) {
 
 export async function writeCachedSnapshot({ accountScope = 'public', scope = 'collection' } = {}, snapshot) {
   if (!canPersistSnapshot(snapshot)) return false;
-  await Promise.all((snapshot.loadedSections || []).map((section) => writeCachedSection({
+  const libraryWrites = (snapshot.loadedLibraries || []).map((libraryId) => writeCachedSection({
+    accountScope,
+    collectionId: snapshot.collectionId,
+    libraryId,
+    scope,
+  }, snapshot));
+  const sectionWrites = (snapshot.loadedSections || []).map((section) => writeCachedSection({
     accountScope,
     collectionId: snapshot.collectionId,
     section,
     scope,
-  }, snapshot)));
+  }, snapshot));
+  await Promise.all([...libraryWrites, ...sectionWrites]);
   return true;
 }
 
 export async function deleteCachedSection(options) {
-  await withStore('readwrite', (store) => store.delete(sectionCacheKey(options))).catch(() => null);
+  await withStore('readwrite', (store) => store.delete(cacheKey(options))).catch(() => null);
 }
 
 export async function clearCachedAccount(accountScope) {

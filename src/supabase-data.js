@@ -2,11 +2,12 @@ import { supabaseRpc, supabaseSelect } from './supabase.js';
 import { buildWatchDemand, buildWatchGroupIdentities } from './watch-demand.js';
 import { SECTION_NOTE_DEFAULTS } from './section-notes.js';
 import { mediaReactionIdentity } from './media-reactions.js';
+import { chooseLibrary, normalizeLibrary } from './library-system.js';
 
-const MEDIA_SELECT = 'id,legacy_id,collection_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,owned,runtime,deleted_at,created_at,updated_at';
+const MEDIA_SELECT = 'id,legacy_id,collection_id,library_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,owned,runtime,external_ids,deleted_at,created_at,updated_at';
 const PRE_OWNED_MEDIA_SELECT = MEDIA_SELECT.replace(',owned', '');
 const LEGACY_MEDIA_SELECT = PRE_OWNED_MEDIA_SELECT.replace(',star_rating', '');
-const MEDIA_CARD_SELECT = 'id,legacy_id,collection_id,type,title,year,status,priority,poster_url,creator,format,platforms,rating,star_rating,owned,deleted_at,created_at,updated_at';
+const MEDIA_CARD_SELECT = 'id,legacy_id,collection_id,library_id,type,title,year,status,priority,poster_url,creator,format,platforms,rating,star_rating,owned,deleted_at,created_at,updated_at';
 const MEDIA_DETAIL_SELECT = 'id,notes,creator,director,description,genres,runtime';
 const SECTION_TYPES = { screen: ['film', 'television'], book: ['book'], game: ['game'] };
 
@@ -26,7 +27,7 @@ async function selectMediaItems(parameters, options) {
   }
 }
 
-export function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [], publicProfiles = [], reactions = [], loadedSections = null) {
+export function mapSnapshot(collection, shelves, mediaItems, memberships, interests = [], publicProfiles = [], reactions = [], loadedSections = null, libraries = [], selectedLibrary = null) {
   const membershipsByItem = new Map();
   const profileById = new Map(publicProfiles.map((profile) => [profile.id, profile]));
   const reactionsByWork = new Map();
@@ -58,8 +59,12 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
       book: collection.book_description || SECTION_NOTE_DEFAULTS.book,
       game: collection.game_description || SECTION_NOTE_DEFAULTS.game,
     },
+    libraries: libraries.map(normalizeLibrary),
+    selectedLibrary: normalizeLibrary(selectedLibrary),
+    loadedLibraries: selectedLibrary?.id ? [selectedLibrary.id] : [],
     mediaShelves: shelves.map((shelf) => ({
       shelf_id: shelf.id,
+      library_id: shelf.library_id || selectedLibrary?.id || null,
       name: shelf.name,
       subtitle: shelf.subtitle || '',
       numbered: Boolean(shelf.is_numbered),
@@ -85,6 +90,7 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
         item_id: item.legacy_id || item.id,
         database_id: item.id,
         collection_id: item.collection_id,
+        library_id: item.library_id || selectedLibrary?.id || null,
         title: item.title,
         type: item.type,
         year: item.year,
@@ -129,10 +135,33 @@ export async function loadPublicCollections({ fresh = false, accessToken } = {})
   }
 }
 
+export async function loadCollectionLibraries({ collectionId, includeDeleted = false, fresh = false, accessToken } = {}) {
+  const rows = await supabaseSelect(query('libraries', {
+    collection_id: 'eq.' + collectionId,
+    ...(!includeDeleted ? { deleted_at: 'is.null' } : {}),
+    select: 'id,collection_id,name,type,is_protected,position,item_term_singular,item_term_plural,creator_term,deleted_at,created_at,updated_at',
+    order: 'is_protected.desc,position.asc,created_at.asc',
+  }), { fresh, accessToken });
+  return rows.map(normalizeLibrary);
+}
+
+export async function loadLibraryById({ libraryId, fresh = false, accessToken } = {}) {
+  if (!libraryId) return null;
+  const rows = await supabaseSelect(query('libraries', {
+    id: 'eq.' + libraryId,
+    deleted_at: 'is.null',
+    select: 'id,collection_id,name,type,is_protected,position,item_term_singular,item_term_plural,creator_term,deleted_at,created_at,updated_at',
+    limit: '1',
+  }), { fresh, accessToken });
+  return rows[0] ? normalizeLibrary(rows[0]) : null;
+}
+
 export function mergeSectionSnapshot(current, sectionSnapshot) {
   if (!current || current.collectionId !== sectionSnapshot.collectionId) return sectionSnapshot;
   const incomingSections = new Set(sectionSnapshot.loadedSections || []);
+  const incomingLibraries = new Set(sectionSnapshot.loadedLibraries || []);
   const replacesIncomingSection = (row) => {
+    if (incomingLibraries.size) return incomingLibraries.has(row.library_id);
     for (const section of incomingSections) {
       if (row.section === section || SECTION_TYPES[section]?.includes(row.type)) return true;
     }
@@ -148,6 +177,9 @@ export function mergeSectionSnapshot(current, sectionSnapshot) {
     ...current,
     ...sectionSnapshot,
     collectionDescriptions: { ...current.collectionDescriptions, ...sectionSnapshot.collectionDescriptions },
+    libraries: sectionSnapshot.libraries?.length ? sectionSnapshot.libraries : current.libraries,
+    selectedLibrary: sectionSnapshot.selectedLibrary || current.selectedLibrary,
+    loadedLibraries: [...new Set([...(current.loadedLibraries || []), ...(sectionSnapshot.loadedLibraries || [])])],
     loadedSections: [...new Set([...(current.loadedSections || []), ...(sectionSnapshot.loadedSections || [])])],
     mediaShelves: uniqueRows([
       ...(current.mediaShelves || []).filter((row) => !replacesIncomingSection(row)),
@@ -221,7 +253,42 @@ async function loadSectionDirect(collection, section, options) {
   return { shelves, mediaItems, memberships, interests, publicProfiles, reactions };
 }
 
-export async function loadCollectionFromSupabase({ collectionId, section = 'screen', fresh = false, accessToken } = {}) {
+async function loadLibraryDirect(collection, library, options) {
+  const { fresh, accessToken } = options;
+  const [shelves, mediaItems] = await Promise.all([
+    supabaseSelect(query('shelves', {
+      collection_id: 'eq.' + collection.id,
+      library_id: 'eq.' + library.id,
+      select: 'id,library_id,section,name,subtitle,is_queue_list,is_reading_list,is_numbered,position,deleted_at,is_required,show_in_main_watchlist,main_watchlist_position',
+      order: 'position.asc',
+    }), { fresh, accessToken }),
+    selectMediaItems({
+      collection_id: 'eq.' + collection.id,
+      library_id: 'eq.' + library.id,
+      order: 'created_at.asc',
+    }, { fresh, accessToken }),
+  ]);
+  const mediaIds = mediaItems.map((item) => item.id);
+  const memberships = shelves.length ? await supabaseSelect(query('shelf_media_items', {
+    shelf_id: 'in.(' + shelves.map((shelf) => shelf.id).join(',') + ')',
+    select: 'shelf_id,media_item_id,position', order: 'position.asc',
+  }), { fresh, accessToken }) : [];
+  const interests = mediaIds.length ? await supabaseSelect(query('media_interest', {
+    media_item_id: 'in.(' + mediaIds.join(',') + ')', select: 'media_item_id,user_id',
+  }), { fresh, accessToken }) : [];
+  const reactions = accessToken ? await supabaseSelect(query('media_reactions', {
+    select: 'user_id,kind,work_key,state',
+  }), { fresh, accessToken }) : [];
+  const workKeys = new Set(mediaItems.map(mediaReactionIdentity));
+  const visibleReactions = reactions.filter((row) => workKeys.has(row.work_key));
+  const profileIds = [...new Set([...interests.map((row) => row.user_id), ...visibleReactions.map((row) => row.user_id)])];
+  const publicProfiles = profileIds.length ? await supabaseSelect(query('public_profiles', {
+    id: 'in.(' + profileIds.join(',') + ')', select: 'id,username,display_name',
+  }), { fresh, accessToken }) : [];
+  return { shelves, mediaItems, memberships, interests, publicProfiles, reactions: visibleReactions };
+}
+
+export async function loadCollectionFromSupabase({ collectionId, libraryId = null, section = 'screen', fresh = false, accessToken } = {}) {
   const collectionFilter = {
     ...(collectionId ? { id: 'eq.' + collectionId } : { slug: 'eq.kits-collection' }),
     limit: '1',
@@ -240,21 +307,54 @@ export async function loadCollectionFromSupabase({ collectionId, section = 'scre
   const collection = collections[0];
   if (!collection) return null;
 
+  let libraries = [];
+  if (libraryId !== undefined) {
+    try {
+      const rows = await supabaseSelect(query('libraries', {
+        collection_id: 'eq.' + collection.id,
+        deleted_at: 'is.null',
+        select: 'id,collection_id,name,type,is_protected,position,item_term_singular,item_term_plural,creator_term,deleted_at,created_at,updated_at',
+        order: 'is_protected.desc,position.asc,created_at.asc',
+      }), { fresh, accessToken });
+      libraries = rows.map(normalizeLibrary);
+    } catch {
+      // The section fallback keeps pre-library local databases usable.
+    }
+  }
+  const sectionLibraryId = !libraryId ? libraries.find((library) => library.type === section && library.protected)?.id
+    || libraries.find((library) => library.type === section)?.id : null;
+  const chosenLibrary = chooseLibrary(libraries, libraryId || sectionLibraryId);
   let payload;
-  try {
-    payload = await supabaseRpc('load_collection_section', {
-      target_collection_id: collection.id,
-      target_section: section,
-    }, { fresh, accessToken });
-  } catch (error) {
-    if (import.meta.env.DEV) console.warn('[Media Room] load_collection_section RPC failed; using the slower direct fallback.', error);
-    payload = await loadSectionDirect(collection, section, { fresh, accessToken });
+  if (chosenLibrary) {
+    try {
+      payload = await supabaseRpc('load_collection_library', {
+        target_collection_id: collection.id,
+        target_library_id: chosenLibrary.id,
+      }, { fresh, accessToken });
+      if (payload?.libraries) libraries = payload.libraries.map(normalizeLibrary);
+    } catch (error) {
+      if (import.meta.env.DEV) console.warn('[Media Room] load_collection_library RPC failed; using the slower direct fallback.', error);
+      payload = await loadLibraryDirect(collection, chosenLibrary, { fresh, accessToken });
+    }
+  } else {
+    try {
+      payload = await supabaseRpc('load_collection_section', {
+        target_collection_id: collection.id,
+        target_section: section,
+      }, { fresh, accessToken });
+    } catch (error) {
+      if (import.meta.env.DEV) console.warn('[Media Room] load_collection_section RPC failed; using the slower direct fallback.', error);
+      payload = await loadSectionDirect(collection, section, { fresh, accessToken });
+    }
   }
   if (!payload) return null;
+  const selectedLibrary = payload.library || chosenLibrary;
   return mapSnapshot(
     payload.collection || collection,
     payload.shelves || [], payload.media || payload.mediaItems || [], payload.memberships || [],
-    payload.interests || [], payload.profiles || payload.publicProfiles || [], payload.reactions || [], [section],
+    payload.interests || [], payload.profiles || payload.publicProfiles || [], payload.reactions || [],
+    selectedLibrary ? [selectedLibrary.type] : [section],
+    payload.libraries || libraries, selectedLibrary,
   );
 }
 
@@ -263,10 +363,10 @@ export async function loadMediaDetails({ mediaItemId, fresh = false, accessToken
   return rows[0] ? { ...rows[0], details_loaded: true } : null;
 }
 
-export async function loadSectionDetails({ collectionId, section, fresh = false, accessToken } = {}) {
+export async function loadSectionDetails({ collectionId, section, libraryId = null, fresh = false, accessToken } = {}) {
   return supabaseSelect(query('media_items', {
     collection_id: 'eq.' + collectionId,
-    type: sectionMediaFilter(section),
+    ...(libraryId ? { library_id: 'eq.' + libraryId } : { type: sectionMediaFilter(section) }),
     select: MEDIA_DETAIL_SELECT,
   }), { fresh, accessToken });
 }
@@ -278,22 +378,33 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
   if (!collections.length) return null;
 
   const collectionIds = collections.map((collection) => collection.id);
+  let filmLibraryIds = [];
+  try {
+    filmLibraryIds = (await supabaseSelect(query('libraries', {
+      collection_id: 'in.(' + collectionIds.join(',') + ')',
+      type: 'eq.screen', deleted_at: 'is.null', select: 'id',
+    }), { fresh, accessToken })).map((library) => library.id);
+  } catch {
+    // Pre-library databases continue through the section compatibility query.
+  }
   const loadShelves = async () => {
     try {
       return await supabaseSelect(query('shelves', {
         collection_id: 'in.(' + collectionIds.join(',') + ')',
+        ...(filmLibraryIds.length ? { library_id: 'in.(' + filmLibraryIds.join(',') + ')' } : {}),
         show_in_main_watchlist: 'eq.true',
         section: 'eq.screen',
         deleted_at: 'is.null',
-        select: 'id,collection_id,section,name,subtitle,is_queue_list,is_reading_list,is_numbered,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
+        select: 'id,collection_id,library_id,section,name,subtitle,is_queue_list,is_reading_list,is_numbered,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
         order: 'main_watchlist_position.asc',
       }), { fresh, accessToken });
     } catch {
       try {
         return await supabaseSelect(query('shelves', {
           collection_id: 'in.(' + collectionIds.join(',') + ')',
+          ...(filmLibraryIds.length ? { library_id: 'in.(' + filmLibraryIds.join(',') + ')' } : {}),
           show_in_main_watchlist: 'eq.true', section: 'eq.screen', deleted_at: 'is.null',
-          select: 'id,collection_id,section,name,subtitle,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
+          select: 'id,collection_id,library_id,section,name,subtitle,position,deleted_at,show_in_main_watchlist,main_watchlist_position,is_required',
           order: 'main_watchlist_position.asc',
         }), { fresh, accessToken });
       } catch {

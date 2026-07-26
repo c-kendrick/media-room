@@ -44,8 +44,8 @@ import {
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
 import { appSiteUrl, consumeRecoverySessionFromUrl, loadAuthenticatedAccount, registerWithPassword, requestPasswordRecovery, signInWithPassword, signOut, signupRateLimitDetails, updateDisplayName, updatePassword } from './auth.js';
-import { loadMediaDetails, loadPublicCollections, loadSectionDetails, mergeSectionSnapshot } from './supabase-data.js';
-import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderMainWatchlist, reorderShelfMedia, reorderShelves, searchDetailCandidates, searchPosterCandidates, setMediaDeleted, setMediaStarRating, updateMediaItem, updateShelf } from './media-write.js';
+import { loadCollectionLibraries, loadLibraryById, loadMediaDetails, loadPublicCollections, loadSectionDetails, mergeSectionSnapshot } from './supabase-data.js';
+import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, copyShelfToLibrary, createLibrary, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, moveShelfToLibrary, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderLibraryShelves, reorderMainWatchlist, reorderShelfMedia, searchDetailCandidates, searchPosterCandidates, setMediaDeleted, setMediaStarRating, updateLibrary, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, createClub, deactivateProfile, deleteClub, listClubs, listProfiles, rejectProfile, renameClub, restoreProfile, setUserClubs } from './admin.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
 import { applyShelfMemberships, OPTIMISTIC_APPEND_POSITION } from './shelf-membership.js';
@@ -68,6 +68,7 @@ import {
   respondWatchlistRequest,
   watchlistRequestMessage,
 } from './watchlist-requests.js';
+import { copiedShelfName, filmLibrary, libraryDefaults, libraryMemoryKey, libraryRouteId, libraryRouteUrl, LIBRARY_TYPE_DETAILS, LIBRARY_TYPES, validateLibraryDraft } from './library-system.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -168,6 +169,22 @@ function useEscape(onClose, active = true) {
   }, []);
 }
 
+function readLastLibrary(collectionId) {
+  if (!collectionId) return '';
+  try { return window.localStorage.getItem(libraryMemoryKey(collectionId)) || ''; } catch { return ''; }
+}
+
+function writeLastLibrary(collectionId, libraryId) {
+  if (!collectionId || !libraryId) return;
+  try { window.localStorage.setItem(libraryMemoryKey(collectionId), libraryId); } catch { /* Storage is optional. */ }
+}
+
+function updateLibraryRoute(libraryId, { replace = false } = {}) {
+  const next = libraryRouteUrl(window.location.href, libraryId);
+  if (replace) window.history.replaceState(window.history.state || {}, '', next);
+  else window.history.pushState(window.history.state || {}, '', next);
+}
+
 function exportCollection(snapshot) {
   const payload = { exported_at: new Date().toISOString(), format: 'media-room/v1', collection: { id: snapshot.collectionId, title: snapshot.collectionTitle, owner_id: snapshot.ownerId, descriptions: snapshot.collectionDescriptions }, shelves: snapshot.mediaShelves, media: snapshot.media };
   const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
@@ -186,6 +203,7 @@ function normalizePlatform(value) {
 function mediaSection(item) {
   if (item.type === 'book') return 'book';
   if (item.type === 'game') return 'game';
+  if (item.type === 'other') return 'other';
   return 'screen';
 }
 
@@ -487,6 +505,7 @@ export default function App() {
   const [collectionId, setCollectionId] = useState(null);
   const [collectionLoading, setCollectionLoading] = useState(false);
   const [landingApplied, setLandingApplied] = useState(() => sharedMode);
+  const [routeLibraryResolving, setRouteLibraryResolving] = useState(() => Boolean(!sharedMode && libraryRouteId(window.location.search)));
   const snapshotCache = useRef(new Map());
   const mainWatchlistMemoryScope = useRef(null);
 
@@ -517,6 +536,7 @@ export default function App() {
   const requestReturnToList = useRef(false);
   const pendingRequestOpenVersion = useRef(0);
   const rememberedSection = useRef('screen');
+  const rememberedLibrary = useRef(libraryRouteId(window.location.search));
   const accessToken = account?.session?.access_token;
   const accountScope = account?.profile?.id || 'public';
   const memberClubs = userHub?.clubs || [];
@@ -645,10 +665,16 @@ export default function App() {
     if (fresh) setRefreshing(true);
     try {
       const initialSection = rememberedSection.current;
+      const initialLibraryId = targetCollectionId && targetCollectionId !== MAIN_WATCHLIST_ID
+        ? (rememberedLibrary.current || readLastLibrary(targetCollectionId))
+        : '';
       if (!sharedMode && targetCollectionId && !fresh) {
         const memory = snapshotCache.current.get(targetCollectionId);
         const memoryMatchesScope = targetCollectionId !== MAIN_WATCHLIST_ID || mainWatchlistMemoryScope.current === mainWatchlistScopeKey;
-        if (memoryMatchesScope && (memory?.loadedSections?.includes(initialSection) || (targetCollectionId === MAIN_WATCHLIST_ID && memory?.mainWatchlist))) {
+        if (memoryMatchesScope && (
+          (initialLibraryId ? memory?.loadedLibraries?.includes(initialLibraryId) : memory?.loadedSections?.includes(initialSection))
+          || (targetCollectionId === MAIN_WATCHLIST_ID && memory?.mainWatchlist)
+        )) {
           dataRef.current = memory;
           setData(memory);
           setLoading(false);
@@ -658,6 +684,7 @@ export default function App() {
             accountScope,
             collectionId: targetCollectionId,
             section: targetCollectionId === MAIN_WATCHLIST_ID ? 'screen' : initialSection,
+            libraryId: targetCollectionId === MAIN_WATCHLIST_ID ? null : initialLibraryId,
             scope: targetCollectionId === MAIN_WATCHLIST_ID ? mainWatchlistCacheScope : 'collection',
           });
           if (cached?.snapshot) {
@@ -683,7 +710,7 @@ export default function App() {
           && collections.some((row) => row.id === targetCollectionId && row.slug === 'kits-collection');
         loadedSnapshot = targetIsPublicKit && startupKitRequest.current && !fresh
           ? await startupKitRequest.current
-          : await fetchSection(targetCollectionId, initialSection, { fresh });
+          : await fetchSection(targetCollectionId, initialSection, { fresh, libraryId: initialLibraryId });
       } else loadedSnapshot = await loadMediaSnapshot({ fresh, section: initialSection, accessToken });
       const progressiveSnapshot = !sharedMode && loadedSnapshot?.collectionId !== MAIN_WATCHLIST_ID && dataRef.current?.collectionId === loadedSnapshot?.collectionId
         ? mergeSectionSnapshot(dataRef.current, loadedSnapshot)
@@ -735,12 +762,12 @@ export default function App() {
     return merged;
   };
 
-  const fetchSection = (targetCollectionId, section, { fresh = false, token = accessToken } = {}) => {
-    const requestKey = `${accountScope}:${targetCollectionId}:${section}`;
+  const fetchSection = (targetCollectionId, section, { fresh = false, token = accessToken, libraryId = null } = {}) => {
+    const requestKey = `${accountScope}:${targetCollectionId}:${libraryId || section}`;
     if (fresh) sectionRequests.current.delete(requestKey);
     let request = sectionRequests.current.get(requestKey);
     if (!request) {
-      request = loadMediaSnapshot({ fresh, collectionId: targetCollectionId, section, accessToken: token })
+      request = loadMediaSnapshot({ fresh, collectionId: targetCollectionId, libraryId, section, accessToken: token })
         .then((loaded) => {
           mergeLoadedSection(targetCollectionId, loaded);
           return loaded;
@@ -793,13 +820,44 @@ export default function App() {
     return network;
   };
 
+  const loadLibrary = async (libraryId, { collection: requestedCollectionId = dataRef.current?.collectionId, fresh = false, history = true } = {}) => {
+    if (!requestedCollectionId || requestedCollectionId === MAIN_WATCHLIST_ID || !libraryId) return dataRef.current;
+    const memory = dataRef.current?.collectionId === requestedCollectionId
+      ? dataRef.current
+      : snapshotCache.current.get(requestedCollectionId);
+    if (!fresh && memory?.loadedLibraries?.includes(libraryId)) {
+      const library = memory.libraries?.find((entry) => entry.id === libraryId);
+      if (!library) return loadLibrary(libraryId, { collection: requestedCollectionId, fresh: true, history });
+      const selected = { ...memory, selectedLibrary: library };
+      dataRef.current = selected;
+      setData(selected);
+      rememberedLibrary.current = libraryId;
+      writeLastLibrary(requestedCollectionId, libraryId);
+      if (history) updateLibraryRoute(libraryId);
+      return selected;
+    }
+    setCollectionLoading(true);
+    try {
+      const loaded = await fetchSection(requestedCollectionId, 'screen', { fresh, libraryId });
+      const selected = { ...(snapshotCache.current.get(requestedCollectionId) || loaded), selectedLibrary: loaded.selectedLibrary };
+      dataRef.current = selected;
+      setData(selected);
+      rememberedLibrary.current = selected.selectedLibrary?.id || libraryId;
+      writeLastLibrary(requestedCollectionId, rememberedLibrary.current);
+      if (history) updateLibraryRoute(rememberedLibrary.current);
+      return selected;
+    } finally {
+      setCollectionLoading(false);
+    }
+  };
+
   const ensureSectionDetails = async (section) => {
     const current = dataRef.current;
     if (!current || current.storage !== 'supabase' || current.mainWatchlist || current.detailedSections?.includes(section)) return;
-    const requestKey = `${current.collectionId}:${section}`;
+    const requestKey = `${current.collectionId}:${current.selectedLibrary?.id || section}`;
     let request = sectionDetailRequests.current.get(requestKey);
     if (!request) {
-      request = loadSectionDetails({ collectionId: current.collectionId, section, accessToken }).catch((error) => {
+      request = loadSectionDetails({ collectionId: current.collectionId, section, libraryId: current.selectedLibrary?.id, accessToken }).catch((error) => {
         sectionDetailRequests.current.delete(requestKey);
         throw error;
       });
@@ -824,9 +882,19 @@ export default function App() {
     setSearchOpen(true);
     if (dataRef.current?.storage !== 'supabase' || dataRef.current.mainWatchlist || sharedMode) return;
     void (async () => {
-      for (const section of MEDIA_SECTIONS) {
-        await loadSection(section);
-        await ensureSectionDetails(section);
+      const originalLibraryId = dataRef.current?.selectedLibrary?.id;
+      const libraries = dataRef.current?.libraries || [];
+      if (libraries.length) {
+        for (const library of libraries) {
+          await loadLibrary(library.id, { history: false });
+          await ensureSectionDetails(library.type);
+        }
+        if (originalLibraryId) await loadLibrary(originalLibraryId, { history: false });
+      } else {
+        for (const section of MEDIA_SECTIONS) {
+          await loadSection(section);
+          await ensureSectionDetails(section);
+        }
       }
     })().catch(() => setToast('Some collection search details could not be loaded.'));
   };
@@ -841,7 +909,9 @@ export default function App() {
     if (userInitiated) {
       userSelectedCollection.current = true;
       rememberedSection.current = 'screen';
+      rememberedLibrary.current = nextCollectionId === MAIN_WATCHLIST_ID ? '' : readLastLibrary(nextCollectionId);
       if (!sharedMode) writeLastPage(account?.profile?.id, nextCollectionId, 'screen');
+      updateLibraryRoute(rememberedLibrary.current);
     }
     const cached = nextCollectionId === MAIN_WATCHLIST_ID && mainWatchlistMemoryScope.current !== mainWatchlistScopeKey
       ? null
@@ -859,6 +929,52 @@ export default function App() {
     setCollectionLoading(!cached);
     setMobileNav(false);
   };
+
+  useEffect(() => {
+    const onHistoryNavigation = () => {
+      const linkedLibrary = libraryRouteId(window.location.search);
+      if (!linkedLibrary || dataRef.current?.mainWatchlist) return;
+      if (sharedMode) {
+        rememberedLibrary.current = linkedLibrary;
+        void loadLibrary(linkedLibrary, { history: false });
+        return;
+      }
+      void loadLibraryById({ libraryId: linkedLibrary, fresh: true, accessToken }).then((library) => {
+        if (library?.collectionId && library.collectionId !== dataRef.current?.collectionId) {
+          rememberedLibrary.current = library.id;
+          writeLastLibrary(library.collectionId, library.id);
+          selectCollection(library.collectionId, { userInitiated: false });
+          return;
+        }
+        rememberedLibrary.current = linkedLibrary;
+        return loadLibrary(linkedLibrary, { history: false });
+      }).catch(() => {
+        const fallback = filmLibrary(dataRef.current?.libraries || []);
+        if (fallback) void loadLibrary(fallback.id, { history: false, fresh: true });
+      });
+    };
+    window.addEventListener('popstate', onHistoryNavigation);
+    return () => window.removeEventListener('popstate', onHistoryNavigation);
+  }, [accessToken]);
+
+  useEffect(() => {
+    const viewCopiedShelf = (event) => {
+      const result = event.detail || {};
+      if (!result.collection_id) return;
+      if (result.library_id) writeLastLibrary(result.collection_id, result.library_id);
+      if (sharedMode) {
+        const destination = new URL(appSiteUrl());
+        if (result.library_id) destination.searchParams.set('library', result.library_id);
+        window.location.assign(destination.toString());
+        return;
+      }
+      rememberedLibrary.current = result.library_id || readLastLibrary(result.collection_id);
+      selectCollection(result.collection_id);
+      window.setTimeout(() => document.getElementById(`shelf-${result.shelf_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 250);
+    };
+    window.addEventListener('media-room:view-copied-shelf', viewCopiedShelf);
+    return () => window.removeEventListener('media-room:view-copied-shelf', viewCopiedShelf);
+  }, [collections, data?.collectionId, sharedMode]);
 
   const chooseMainWatchlist = (clubId) => {
     if (clubId) window.localStorage.setItem(MAIN_WATCHLIST_CLUB_KEY, clubId);
@@ -990,9 +1106,17 @@ export default function App() {
   }, [accessToken, accountScope, sharedMode]);
 
   useEffect(() => {
+    if (sharedMode) return;
     if (!accessToken || !account?.profile?.approved_at || account.profile.deactivated_at) { setOwnCollection(null); return; }
     setOwnCollection(collections.find((collection) => collection.owner_id === account.profile.id) || null);
-  }, [collections, accessToken, account?.profile?.id, account?.profile?.approved_at, account?.profile?.deactivated_at]);
+  }, [collections, accessToken, account?.profile?.id, account?.profile?.approved_at, account?.profile?.deactivated_at, sharedMode]);
+
+  useEffect(() => {
+    if (!sharedMode || !accessToken || !account?.profile?.approved_at || account.profile.deactivated_at) return;
+    loadPublicCollections({ fresh: true, accessToken })
+      .then((visible) => setOwnCollection(visible.find((collection) => collection.owner_id === account.profile.id) || null))
+      .catch(() => setOwnCollection(null));
+  }, [sharedMode, accessToken, account?.profile?.id, account?.profile?.approved_at, account?.profile?.deactivated_at]);
 
   useEffect(() => {
     if (account?.profile?.role !== 'admin' || !accessToken) {
@@ -1055,6 +1179,11 @@ export default function App() {
       setLandingApplied(true);
       userSelectedCollection.current = true;
       dataRef.current = snapshot;
+      if (snapshot?.selectedLibrary?.id && snapshot.collectionId !== MAIN_WATCHLIST_ID) {
+        rememberedLibrary.current = snapshot.selectedLibrary.id;
+        writeLastLibrary(snapshot.collectionId, snapshot.selectedLibrary.id);
+        updateLibraryRoute(snapshot.selectedLibrary.id, { replace: true });
+      }
       setData(snapshot);
       setCollectionId(request.collection_id);
       rememberedSection.current = section;
@@ -1102,9 +1231,22 @@ export default function App() {
   }, [viewAsAdmin, adminClubs, collections, data?.collectionId]);
 
   useEffect(() => {
+    if (sharedMode || !routeLibraryResolving || collectionsReadyFor !== accountScope || !collections.length) return;
+    const linkedLibraryId = libraryRouteId(window.location.search);
+    if (!linkedLibraryId) { setRouteLibraryResolving(false); return; }
+    loadLibraryById({ libraryId: linkedLibraryId, fresh: true, accessToken }).then((library) => {
+      if (!library || !displayedCollections.some((collection) => collection.id === library.collectionId)) return;
+      rememberedLibrary.current = library.id;
+      writeLastLibrary(library.collectionId, library.id);
+      setLandingApplied(true);
+      selectCollection(library.collectionId, { userInitiated: false });
+    }).catch(() => null).finally(() => setRouteLibraryResolving(false));
+  }, [sharedMode, routeLibraryResolving, collectionsReadyFor, accountScope, collections.length, accessToken]);
+
+  useEffect(() => {
     const visibilityPending = account?.profile?.role === 'admin' && adminClubsReadyFor !== account.profile.id;
     const collectionsPending = collectionsReadyFor !== accountScope;
-    if (authLoading || collectionsPending || !collections.length || visibilityPending || landingApplied || userSelectedCollection.current) return;
+    if (authLoading || collectionsPending || !collections.length || visibilityPending || routeLibraryResolving || landingApplied || userSelectedCollection.current) return;
     const canRestore = Boolean(account?.profile?.id && account.profile.approved_at && !account.profile.deactivated_at);
     const remembered = canRestore ? readLastPage(account.profile.id) : null;
     const rememberedCollectionIsVisible = remembered?.collectionId === MAIN_WATCHLIST_ID
@@ -1117,7 +1259,7 @@ export default function App() {
     rememberedSection.current = rememberedCollectionIsVisible ? remembered.section : 'screen';
     setLandingApplied(true);
     selectCollection(landingCollectionId, { userInitiated: false });
-  }, [account, accountScope, authLoading, collections, collectionsReadyFor, adminClubsReadyFor, landingApplied, viewAsAdmin, adminClubs]);
+  }, [account, accountScope, authLoading, collections, collectionsReadyFor, adminClubsReadyFor, routeLibraryResolving, landingApplied, viewAsAdmin, adminClubs]);
 
   useEffect(() => {
     const skeletonTimer = window.setTimeout(
@@ -1496,7 +1638,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={(itemId, navigation = null) => { setSelectedMediaId(itemId); setSelectedMediaNavigation(navigation); }} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} />
+          <MediaView key={`${data.collectionId}:${data.selectedLibrary?.id || 'legacy'}`} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={(itemId, navigation = null) => { setSelectedMediaId(itemId); setSelectedMediaNavigation(navigation); }} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
         </main>
         <footer><span>Published from Kit’s Local Media Room.</span><span className="provider-credits">Poster data from <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>, <a href="https://books.google.com/" target="_blank" rel="noreferrer">Google Books</a>, <a href="https://openlibrary.org/" target="_blank" rel="noreferrer">Open Library</a> and <a href="https://www.steamgriddb.com/" target="_blank" rel="noreferrer">SteamGridDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</span></footer>
       </div>
@@ -1504,7 +1646,7 @@ export default function App() {
       {selectedMedia && (
         <MediaDrawer
           item={selectedMedia}
-          shelves={data.mainWatchlist ? data.mediaShelves : mediaShelvesForSection(data, mediaSection(selectedMedia))}
+          shelves={data.mainWatchlist ? data.mediaShelves : (data.mediaShelves || []).filter((shelf) => shelf.library_id ? shelf.library_id === selectedMedia.library_id : shelf.section === mediaSection(selectedMedia))}
           onClose={closeSelectedMedia}
           previousItem={drawerNavigationTargets.previous}
           nextItem={drawerNavigationTargets.next}
@@ -1512,7 +1654,7 @@ export default function App() {
           onNext={() => navigateDrawer(drawerNavigationTargets.next)}
           canEdit={canEditCollection}
           onStarRatingChange={(starRating) => saveStarRating(selectedMedia.database_id, starRating)}
-          canReviewPoster={Boolean((canEditCollection || isAdmin) && !data.mainWatchlist)}
+          canReviewPoster={Boolean((canEditCollection || isAdmin) && !data.mainWatchlist && selectedMedia.type !== 'other')}
           onFindPosters={() => searchPosterCandidates(account.session.access_token, selectedMedia.database_id)}
           onChoosePoster={async (posterUrl) => {
             const previousData = data;
@@ -1630,7 +1772,7 @@ export default function App() {
           setImportDraft(null);
           setToast(`${cleanImportedMediaTitle(item.title)} added to your collection.`);
           let createdId = null;
-          createMediaItem(accessToken, { ...item, collection_id: draft.destination.collectionId }).then(async (created) => {
+          createMediaItem(accessToken, { ...item, collection_id: draft.destination.collectionId, library_id: draft.destination.selectedLibrary?.id }).then(async (created) => {
             createdId = created[0].id;
             await replaceMediaShelfMemberships(accessToken, createdId, [], shelfIds);
             const confirmed = await loadMediaSnapshot({ fresh: true, collectionId: draft.destination.collectionId, accessToken });
@@ -1770,8 +1912,8 @@ function StarRating({ value, editable = false, onChange, label = 'Star rating' }
   </span>;
 }
 
-function MediaView({ data, loading = false, initialSection, onLoadSection, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange }) {
-  const [section, setSection] = useState(() => MEDIA_SECTIONS.has(initialSection) ? initialSection : 'screen');
+function MediaView({ data, loading = false, initialSection, onLoadSection, onLoadLibrary, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, ownCollection, loadCopyDestinations, onViewCopiedShelf, sourceOwnerName, shareToken }) {
+  const [section, setSection] = useState(() => data.selectedLibrary?.type || (MEDIA_SECTIONS.has(initialSection) ? initialSection : 'screen'));
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
   const [formatFilters, setFormatFilters] = useState([]);
@@ -1790,7 +1932,10 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
   const [detailsRetryAfter, setDetailsRetryAfter] = useState(0);
   const [importingBackup, setImportingBackup] = useState(false);
   const [binOpen, setBinOpen] = useState(false);
+  const [binLibraries, setBinLibraries] = useState([]);
   const [shelfEditor, setShelfEditor] = useState(null);
+  const [libraryEditor, setLibraryEditor] = useState(null);
+  const [shelfTransfer, setShelfTransfer] = useState(null);
   const [addToShelfIds, setAddToShelfIds] = useState([]);
   const [optimisticShelfIds, setOptimisticShelfIds] = useState([]);
   const [optimisticShelfDetails, setOptimisticShelfDetails] = useState({});
@@ -1813,7 +1958,15 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
     return () => window.clearInterval(timer);
   }, [posterRetryAfter > 0, detailsRetryAfter > 0]);
 
-  const sourceShelves = mediaShelvesForSection(data, section).filter((shelf) => !optimisticDeletedShelfIds.includes(shelf.shelf_id));
+  const currentLibrary = data.selectedLibrary || null;
+  useEffect(() => {
+    if (!currentLibrary?.type) return;
+    setSection(currentLibrary.type);
+    onSectionChange(currentLibrary.type);
+  }, [currentLibrary?.id, currentLibrary?.type]);
+  const sourceShelves = (data.mediaShelves || [])
+    .filter((shelf) => data.mainWatchlist || (currentLibrary ? shelf.library_id === currentLibrary.id : shelf.section === section))
+    .filter((shelf) => !optimisticDeletedShelfIds.includes(shelf.shelf_id));
   useEffect(() => {
     const sourceIds = sourceShelves.map((shelf) => shelf.shelf_id);
     confirmedShelfOrderRef.current = sourceIds;
@@ -1821,25 +1974,25 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
       latestShelfOrderRef.current = sourceIds;
       setOptimisticShelfIds(sourceIds);
     }
-  }, [data.collectionId, data.mediaShelves, section]);
+  }, [data.collectionId, data.mediaShelves, currentLibrary?.id, section]);
   useEffect(() => () => window.clearTimeout(shelfOrderTimerRef.current), []);
   useEffect(() => { setOptimisticShelfDetails({}); }, [data.collectionId, data.mediaShelves, section]);
   useEffect(() => { setOptimisticMainShelfIds(data.mediaShelves.filter((shelf) => shelf.section === 'screen' && shelf.showInMainWatchlist).map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves]);
   const shelfIndex = new Map(optimisticShelfIds.map((id, index) => [id, index]));
   const shelves = sourceShelves.map((shelf) => ({ ...shelf, ...(optimisticShelfDetails[shelf.shelf_id] || {}) })).sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
   const items = [...active(data.media), ...optimisticMediaItems]
-    .filter((item) => data.mainWatchlist || mediaSection(item) === section)
+    .filter((item) => data.mainWatchlist || (currentLibrary ? item.library_id === currentLibrary.id : mediaSection(item) === section))
     .map((item) => ({ ...item, reactionControl: { canReact, currentUserId, onReaction } }));
   const deletedMedia = (data.media || []).filter((item) => item.deleted_at);
   const deletedShelves = (data.mediaShelves || []).filter((shelf) => shelf.deleted_at);
-  const binCount = deletedMedia.length + deletedShelves.length;
+  const binCount = deletedMedia.length + deletedShelves.length + binLibraries.length;
   const formats = unique(items.flatMap(mediaDisplayTags)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const genres = unique(items.flatMap((item) => item.genres || [])).sort((a, b) => a.localeCompare(b));
   const sectionTypes = section === 'screen'
     ? [['film', 'Films'], ['television', 'Television']]
     : section === 'book'
       ? [['book', 'Books']]
-      : [['game', 'Video games']];
+      : section === 'game' ? [['game', 'Video games']] : [['other', currentLibrary?.plural || 'Items']];
 
   const matchesAny = (selected, values) => !selected.length || selected.some((value) => values.includes(value));
   const queryLower = query.trim().toLowerCase();
@@ -1870,14 +2023,16 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
       data.media,
     ).map((item) => item.item_id),
   }));
-  const sectionLabel = data.mainWatchlist ? 'Main Watchlist' : section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games';
-  const singularLabel = data.mainWatchlist ? 'item' : section === 'screen' ? 'film or TV show' : section === 'book' ? 'book' : 'video game';
+  const sectionLabel = data.mainWatchlist ? 'Main Watchlist' : currentLibrary?.name || (section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : section === 'game' ? 'Video Games' : 'Other');
+  const singularLabel = data.mainWatchlist ? 'item' : (currentLibrary?.singular || libraryDefaults(section).singular).toLocaleLowerCase();
   const canReorderShelves = canEdit || Boolean(data.mainWatchlist && isAdmin);
   const reorderableShelves = shelves.filter((shelf) => !shelf.virtual);
-  const canCurateMain = Boolean(!data.mainWatchlist && section === 'screen' && (canEdit || isAdmin));
+  const canCurateMain = Boolean(!data.mainWatchlist && currentLibrary?.type === 'screen' && (canEdit || isAdmin));
   const advancedFilterCount = [listFilters, typeFilters, stampFilters, ratingFilters, ownershipFilters, formatFilters, genreFilters]
     .reduce((total, values) => total + values.length, 0);
-  const sectionLoading = Boolean(loading || (!data.mainWatchlist && !data.loadedSections?.includes(section)));
+  const sectionLoading = Boolean(loading || (!data.mainWatchlist && currentLibrary
+    ? !data.loadedLibraries?.includes(currentLibrary.id)
+    : !data.loadedSections?.includes(section)));
 
   useEffect(() => {
     if (query.trim()) onEnsureSectionDetails?.(section).catch(() => notify('Some detailed search fields could not be loaded.'));
@@ -1898,10 +2053,24 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
     void onLoadSection?.(next).catch(() => notify(`${sectionName(next)} could not be loaded.`));
   };
 
+  const switchLibrary = (libraryId) => {
+    if (!libraryId || libraryId === currentLibrary?.id) return;
+    setQuery('');
+    clearAdvancedFilters();
+    void onLoadLibrary?.(libraryId).catch(() => notify('That library could not be loaded.'));
+  };
+
   const loadCompleteCollection = async ({ details = false } = {}) => {
     let complete = data;
     if (data.mainWatchlist || data.storage !== 'supabase') return complete;
-    for (const nextSection of MEDIA_SECTIONS) {
+    const originalLibraryId = currentLibrary?.id;
+    if (data.libraries?.length) {
+      for (const library of data.libraries) {
+        complete = await onLoadLibrary?.(library.id, { history: false }) || complete;
+        if (details) complete = await onEnsureSectionDetails?.(library.type) || complete;
+      }
+      if (originalLibraryId) complete = await onLoadLibrary?.(originalLibraryId, { history: false }) || complete;
+    } else for (const nextSection of MEDIA_SECTIONS) {
       complete = await onLoadSection?.(nextSection) || complete;
       if (details) complete = await onEnsureSectionDetails?.(nextSection) || complete;
     }
@@ -1947,7 +2116,8 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
     shelfOrderSavingRef.current = true;
     try {
       if (data.mainWatchlist) await reorderMainWatchlist(accessToken, ordered.filter((shelfId) => shelfId !== 'main-priority-watchlist'));
-      else await reorderShelves(accessToken, data.collectionId, section, ordered);
+      else if (currentLibrary?.id) await reorderLibraryShelves(accessToken, currentLibrary.id, ordered);
+      else throw new Error('Choose a library before reordering shelves.');
       confirmedShelfOrderRef.current = ordered;
       if (sameShelfOrder(latestShelfOrderRef.current, ordered)) {
         await refresh({ fresh: true });
@@ -1995,7 +2165,7 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
   const enrichCurrentSection = async () => {
     setEnrichingPosters(true);
     try {
-      const result = await enrichSectionPosters(accessToken, data.collectionId, section);
+      const result = await enrichSectionPosters(accessToken, data.collectionId, section, currentLibrary?.id);
       await refresh({ fresh: true });
       notify(`${result?.enriched || 0} posters added${result?.unmatched ? `; ${result.unmatched} left for review` : ''}${result?.warnings?.length ? ` (${result.warnings.join(', ')})` : ''}.`);
     } catch (error) {
@@ -2009,7 +2179,7 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
   const enrichDetailsInCurrentSection = async () => {
     setEnrichingDetails(true);
     try {
-      const result = await enrichSectionDetails(accessToken, data.collectionId, section);
+      const result = await enrichSectionDetails(accessToken, data.collectionId, section, currentLibrary?.id);
       await refresh({ fresh: true });
       notify(`${result?.enriched || 0} items enriched${result?.reviewed ? ` from ${result.reviewed} reviewed` : ''}${result?.warnings?.length ? ` (${result.warnings.join(', ')})` : ''}.`);
     } catch (error) {
@@ -2044,6 +2214,49 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
     }
   };
 
+  const saveLibrary = async (values) => {
+    const payload = {
+      name: values.name,
+      type: values.type,
+      item_term_singular: values.singular,
+      item_term_plural: values.plural,
+      creator_term: values.creator,
+    };
+    if (libraryEditor?.id) {
+      await updateLibrary(accessToken, libraryEditor.id, payload);
+      await onLoadLibrary(libraryEditor.id, { fresh: true, history: false });
+      setLibraryEditor(null);
+      notify(`${values.name} saved.`);
+      return;
+    }
+    const created = await createLibrary(accessToken, { ...payload, collection_id: data.collectionId, is_protected: false });
+    const next = created?.[0];
+    if (!next?.id) throw new Error('The library was not created.');
+    setLibraryEditor(null);
+    await onLoadLibrary(next.id, { fresh: true });
+    notify(`${next.name} created. Create a shelf before adding ${values.plural.toLocaleLowerCase()}.`);
+  };
+
+  const requestLibraryDeletion = () => {
+    if (!currentLibrary || currentLibrary.protected) return;
+    const shelfCount = (data.mediaShelves || []).filter((shelf) => shelf.library_id === currentLibrary.id).length;
+    const mediaCount = (data.media || []).filter((item) => item.library_id === currentLibrary.id).length;
+    requestConfirmation({
+      title: `Move ${currentLibrary.name} to Bin?`,
+      message: `${shelfCount} ${shelfCount === 1 ? 'shelf' : 'shelves'} and ${mediaCount} ${mediaCount === 1 ? currentLibrary.singular : currentLibrary.plural} will become unavailable until the library is restored.`,
+      confirmLabel: 'Move Library to Bin',
+      tone: 'danger',
+      optimistic: true,
+      onConfirm: async () => {
+        await updateLibrary(accessToken, currentLibrary.id, { deleted_at: new Date().toISOString() });
+        const fallback = filmLibrary(data.libraries.filter((library) => library.id !== currentLibrary.id));
+        if (!fallback) throw new Error('The Film & TV library is unavailable.');
+        await onLoadLibrary(fallback.id, { fresh: true });
+        notify(`${currentLibrary.name} moved to Bin.`);
+      },
+    });
+  };
+
   return (
     <div className={cls('page media-page', data.mainWatchlist ? 'main-watchlist-page' : 'collection-page')}>
       <div className={cls('media-command public-media-command dotted', data.mainWatchlist && 'has-title-control')}>
@@ -2053,10 +2266,17 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
             ? <WatchlistTitle title={mainWatchlistTitle} clubs={mainWatchlistClubs} selectedClubId={mainWatchlistClubId} onChange={onMainWatchlistClubChange} />
             : <h1>{data.collectionTitle || 'The media room'}</h1>}
         </div>
-        {!data.mainWatchlist && <div className="media-tabs" aria-busy={sectionLoading}>
-          <button className={section === 'screen' ? 'active' : ''} onClick={() => switchSection('screen')}><Film />Film & TV</button>
-          <button className={section === 'book' ? 'active' : ''} onClick={() => switchSection('book')}><BookOpen />Books</button>
-          <button className={section === 'game' ? 'active' : ''} onClick={() => switchSection('game')}><Gamepad2 />Video Games</button>
+        {!data.mainWatchlist && <div className="library-header-controls" aria-busy={sectionLoading}>
+          {(canEdit || isAdmin) && <Button className="library-create-button" icon={Plus} onClick={() => setLibraryEditor({ type: currentLibrary?.type || 'other' })}>Create Library</Button>}
+          {(canEdit || isAdmin) && currentLibrary && <button className="library-text-action" type="button" onClick={() => setLibraryEditor(currentLibrary)}><Pencil size={15} />Edit</button>}
+          {(canEdit || isAdmin) && currentLibrary && <button className="library-text-action danger" type="button" disabled={currentLibrary.protected} title={currentLibrary.protected ? 'Default libraries cannot be deleted' : `Delete ${currentLibrary.name}`} onClick={requestLibraryDeletion}><Trash2 size={15} />Delete</button>}
+          <label className="library-selector">
+            <span className="sr-only">Library</span>
+            <select value={currentLibrary?.id || ''} onChange={(event) => switchLibrary(event.target.value)} aria-label="Choose library">
+              {(data.libraries || []).filter((library) => !library.deleted_at).map((library) => <option value={library.id} key={library.id}>{library.name}{library.protected || library.name === LIBRARY_TYPE_DETAILS[library.type]?.label ? '' : ` — ${LIBRARY_TYPE_DETAILS[library.type]?.label}`}</option>)}
+            </select>
+            <ChevronDown size={16} aria-hidden="true" />
+          </label>
         </div>}
 
         <div className="media-search-row">
@@ -2099,29 +2319,44 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
             data.media,
           );
           if (!shelfItems.length && queryLower) return null;
-          return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} arrangeItems={arrangeItems} onOpen={(itemId) => openMedia(itemId, { shelfId: shelf.shelf_id, shelves: drawerShelves })} canEdit={canEdit && !shelf.virtual} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); void refresh({ fresh: true }).catch(() => notify('The order was saved, but the latest collection could not be refreshed. Reload to see the saved order everywhere.')); } catch (error) { notify(error?.message ? `Item order could not be saved: ${error.message}` : 'Item order could not be saved.'); throw error; } }} onRename={(editorActions) => setShelfEditor({ ...shelf, ...editorActions, canCurateMain, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id), onToggleMain: (enabled) => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }, enabled) })} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} />;
+          return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} arrangeItems={arrangeItems} onOpen={(itemId) => openMedia(itemId, { shelfId: shelf.shelf_id, shelves: drawerShelves })} canEdit={canEdit && !shelf.virtual} canCopy={Boolean(!canEdit && !data.mainWatchlist && currentUserId && ownCollection && data.ownerId !== currentUserId)} onCopy={() => setShelfTransfer({ mode: 'copy-visitor', shelf, itemCount: arrangeItems.length })} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); void refresh({ fresh: true }).catch(() => notify('The order was saved, but the latest collection could not be refreshed. Reload to see the saved order everywhere.')); } catch (error) { notify(error?.message ? `Item order could not be saved: ${error.message}` : 'Item order could not be saved.'); throw error; } }} onRename={(editorActions) => setShelfEditor({ ...shelf, ...editorActions, canCurateMain, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id), onToggleMain: (enabled) => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }, enabled) })} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} />;
         })}
       </div>
 
-      {!sectionLoading && !randomPool.length && <Empty>No media matches those filters.</Empty>}
+      {!sectionLoading && !shelves.length && !data.mainWatchlist && <Empty>{canEdit ? `Create a shelf in ${currentLibrary?.name} before adding ${currentLibrary?.plural?.toLocaleLowerCase() || 'items'}.` : `${currentLibrary?.name || 'This library'} has no shelves yet.`}</Empty>}
+      {!sectionLoading && shelves.length > 0 && !randomPool.length && <Empty>No {currentLibrary?.plural?.toLocaleLowerCase() || 'media'} match those filters.</Empty>}
       {!sectionLoading && !data.mainWatchlist && (canEdit || isAdmin) && <section className="collection-tools">
         <div className="collection-tools-intro"><span className="eyebrow">COLLECTION TOOLS</span><p>{canEdit ? 'Manage this section without cluttering the shelves.' : 'Administrative backup and artwork tools.'}</p></div>
         <div className="collection-tool-actions">
           {canEdit && <Button className="quiet-button create-shelf-button" icon={Plus} onClick={() => setCreatingShelf(true)}>Create Shelf</Button>}
-          <Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters || posterRetryAfter > 0} onClick={enrichCurrentSection}>{enrichingPosters ? 'Finding posters…' : posterRetryAfter ? `Find posters in ${retryLabel(posterRetryAfter)}` : 'Find posters'}</Button>
-          <Button className="quiet-button" icon={Search} disabled={enrichingDetails || detailsRetryAfter > 0} onClick={enrichDetailsInCurrentSection}>{enrichingDetails ? 'Enriching details…' : detailsRetryAfter ? `Enrich details in ${retryLabel(detailsRetryAfter)}` : 'Enrich details'}</Button>
+          {section !== 'other' && <Button className="quiet-button" icon={RotateCw} disabled={enrichingPosters || posterRetryAfter > 0} onClick={enrichCurrentSection}>{enrichingPosters ? 'Finding posters…' : posterRetryAfter ? `Find posters in ${retryLabel(posterRetryAfter)}` : 'Find posters'}</Button>}
+          {section !== 'other' && <Button className="quiet-button" icon={Search} disabled={enrichingDetails || detailsRetryAfter > 0} onClick={enrichDetailsInCurrentSection}>{enrichingDetails ? 'Enriching details…' : detailsRetryAfter ? `Enrich details in ${retryLabel(detailsRetryAfter)}` : 'Enrich details'}</Button>}
           <Button className="quiet-button" icon={Download} onClick={async () => { try { exportCollection(await loadCompleteCollection({ details: true })); } catch { notify('The complete collection could not be prepared for export.'); } }}>Export backup</Button>
           {canEdit && <><input ref={backupInputRef} hidden type="file" accept=".json,application/json" onChange={importBackupFile} /><Button className="quiet-button" icon={Upload} disabled={importingBackup} onClick={() => backupInputRef.current?.click()}>{importingBackup ? 'Importing backup…' : 'Import backup'}</Button></>}
-          {canEdit && <Button className="quiet-button bin-button" icon={Trash2} onClick={async () => { try { await loadCompleteCollection(); setBinOpen(true); } catch { notify('The complete Bin could not be loaded.'); } }}>Bin{binCount ? ` (${binCount})` : ''}</Button>}
+          {canEdit && <Button className="quiet-button bin-button" icon={Trash2} onClick={async () => { try { await loadCompleteCollection(); const allLibraries = await loadCollectionLibraries({ collectionId: data.collectionId, includeDeleted: true, fresh: true, accessToken }); setBinLibraries(allLibraries.filter((library) => library.deleted_at)); setBinOpen(true); } catch { notify('The complete Bin could not be loaded.'); } }}>Bin{binCount ? ` (${binCount})` : ''}</Button>}
           {canEdit && section === 'screen' && <><Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('film')}>Bulk Import Film</Button><Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('television')}>Bulk Import Television</Button></>}
           {canEdit && section === 'book' && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('book')}>Bulk Import Books</Button>}
           {canEdit && section === 'game' && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('game')}>Bulk Import Video Games</Button>}
         </div>
       </section>}
-      {creatingShelf && <CreateShelfDialog section={section} onClose={() => setCreatingShelf(false)} onSave={async (values) => { setCreatingShelf(false); try { await createShelf(accessToken, { collection_id: data.collectionId, section, ...values, position: (shelves.at(-1)?.position || 0) + 1000 }); await refresh({ fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this section.'); } }} />}
-      {addingMedia && <AddMediaDialog section={section} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id) => [id, OPTIMISTIC_APPEND_POSITION])), interests: [], likes: [], priorities: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, collection_id: data.collectionId }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setMediaReaction(accessToken, created[0].id, 'priority', true); await refresh({ fresh: true }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('Media added.'); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify('The media item could not be saved.'); }); }} />}
-      {binOpen && <CollectionBinDrawer media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; onDataChange(optimisticData); try { const deleted = await permanentlyDeleteMedia(accessToken, item.database_id); if (!deleted?.length) throw new Error('Supabase did not delete the media item.'); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; onDataChange(optimisticData); try { const deleted = await deleteShelf(accessToken, shelf.shelf_id); if (!deleted?.length) throw new Error('Supabase did not delete the shelf.'); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })} />}
-      {shelfEditor && <ShelfEditDialog shelf={shelfEditor} canArrange={shelfEditor.canArrange} onArrange={() => { const openArrange = shelfEditor.onArrange; setShelfEditor(null); openArrange?.(); }} canCurateMain={shelfEditor.canCurateMain} onToggleMain={shelfEditor.onToggleMain} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList, numbered: changes.is_numbered ?? shelfEditor.numbered } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
+      {creatingShelf && <CreateShelfDialog section={section} terminology={currentLibrary} onClose={() => setCreatingShelf(false)} onSave={async (values) => { setCreatingShelf(false); try { await createShelf(accessToken, { collection_id: data.collectionId, library_id: currentLibrary.id, section: currentLibrary.type === 'other' ? 'screen' : currentLibrary.type, ...values, show_in_main_watchlist: currentLibrary.type === 'screen' ? values.show_in_main_watchlist : false, position: (shelves.at(-1)?.position || 0) + 1000 }); await onLoadLibrary(currentLibrary.id, { fresh: true, history: false }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this library.'); } }} />}
+      {addingMedia && <AddMediaDialog section={section} terminology={currentLibrary} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, collection_id: data.collectionId, library_id: currentLibrary.id, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id) => [id, OPTIMISTIC_APPEND_POSITION])), interests: [], likes: [], priorities: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, type: section === 'other' ? 'other' : item.type, collection_id: data.collectionId, library_id: currentLibrary.id }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setMediaReaction(accessToken, created[0].id, 'priority', true); await onLoadLibrary(currentLibrary.id, { fresh: true, history: false }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify(`${currentLibrary.singular} added.`); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify(`The ${currentLibrary.singular.toLocaleLowerCase()} could not be saved.`); }); }} />}
+      {binOpen && <CollectionBinDrawer libraries={binLibraries} media={deletedMedia} shelves={deletedShelves} onClose={() => setBinOpen(false)} onError={notify} onRestoreLibrary={async (library) => { await updateLibrary(accessToken, library.id, { deleted_at: null }); setBinLibraries((rows) => rows.filter((row) => row.id !== library.id)); await onLoadLibrary(library.id, { fresh: true }); setBinOpen(false); notify(`${library.name} restored from Bin.`); }} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await refresh({ fresh: true }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; onDataChange(optimisticData); try { const deleted = await permanentlyDeleteMedia(accessToken, item.database_id); if (!deleted?.length) throw new Error('Supabase did not delete the media item.'); await refresh({ fresh: true }); notify(`${item.title} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })} onRestoreShelf={async (shelf) => { await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); await refresh({ fresh: true }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; onDataChange(optimisticData); try { const deleted = await deleteShelf(accessToken, shelf.shelf_id); if (!deleted?.length) throw new Error('Supabase did not delete the shelf.'); await refresh({ fresh: true }); notify(`${shelf.name} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })} />}
+      {shelfEditor && <ShelfEditDialog shelf={shelfEditor} canArrange={shelfEditor.canArrange} onArrange={() => { const openArrange = shelfEditor.onArrange; setShelfEditor(null); openArrange?.(); }} canCurateMain={shelfEditor.canCurateMain} onToggleMain={shelfEditor.onToggleMain} canTransfer={Boolean((data.libraries || []).some((library) => library.type === currentLibrary?.type))} onTransfer={(mode) => { const transferShelf = shelfEditor; setShelfEditor(null); setShelfTransfer({ mode, shelf: transferShelf, itemCount: (data.media || []).filter((item) => !item.deleted_at && item.lists?.includes(transferShelf.shelf_id)).length }); }} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList, numbered: changes.is_numbered ?? shelfEditor.numbered } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
+      {shelfTransfer && <ShelfTransferDialog transfer={shelfTransfer} sourceLibrary={currentLibrary} sourceOwnerName={sourceOwnerName} ownerData={shelfTransfer.mode === 'copy-visitor' ? null : data} loadDestinations={loadCopyDestinations} ownCollection={ownCollection} onClose={() => setShelfTransfer(null)} onConfirm={async ({ mode, shelf, destinationLibraryId, name }) => {
+        const result = mode === 'move'
+          ? await moveShelfToLibrary(accessToken, shelf.shelf_id, destinationLibraryId)
+          : await copyShelfToLibrary(accessToken, shelf.shelf_id, destinationLibraryId, name, shareToken || null);
+        if (mode === 'copy-visitor') {
+          notify(`${name} copied to your collection.`);
+          return result;
+        }
+        setShelfTransfer(null);
+        await onLoadLibrary(result.library_id, { fresh: true });
+        window.setTimeout(() => document.getElementById(`shelf-${result.shelf_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
+        notify(mode === 'move' ? `${shelf.name} moved.` : `${name} copied.`);
+        return result;
+      }} onViewResult={onViewCopiedShelf} />}
       {bulkImportType && <BulkImportDialog type={bulkImportType} shelves={shelves} onClose={() => setBulkImportType(null)} onImport={(shelfIds, rows) => {
         const temporaryBatch = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const temporaryItems = rows.map((item, index) => ({ ...item, year: null, item_id: `bulk-${temporaryBatch}-${index}`, database_id: `bulk-${temporaryBatch}-${index}`, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id) => [id, OPTIMISTIC_APPEND_POSITION - rows.length + index])), interests: [], optimistic: true, created_at: new Date().toISOString() }));
@@ -2136,6 +2371,7 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onEns
           notify('The items could not be imported. Apply the latest Supabase migration and try again.');
         });
       }} />}
+      {libraryEditor && <LibraryEditorDialog library={libraryEditor.id ? libraryEditor : null} initialType={libraryEditor.type} libraries={data.libraries || []} hasHistory={Boolean(libraryEditor.id && ((data.mediaShelves || []).some((shelf) => shelf.library_id === libraryEditor.id) || (data.media || []).some((item) => item.library_id === libraryEditor.id)))} onClose={() => setLibraryEditor(null)} onSave={saveLibrary} />}
     </div>
   );
 }
@@ -2167,7 +2403,7 @@ function shelfNeedsUniformReactionWrap(shelfElement, currentlyWrapped = false) {
   });
 }
 
-function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canRate, onRate, canReorderShelf, canCurateMain, canRemoveMirror, onRemoveMirror, onToggleMain, canMoveUp, canMoveDown, onMoveShelf, onAdd, onReorder, onRename, onDelete }) {
+function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canCopy, onCopy, canRate, onRate, canReorderShelf, canCurateMain, canRemoveMirror, onRemoveMirror, onToggleMain, canMoveUp, canMoveDown, onMoveShelf, onAdd, onReorder, onRename, onDelete }) {
   const shelfRef = useRef(null);
   const trackRef = useRef(null);
   const [displayItems, setDisplayItems] = useState(items);
@@ -2242,12 +2478,12 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canRa
     }));
   };
   const pagerOnlyActions = !canRemoveMirror && !canEdit && !canCurateMain && !canReorderShelf;
-  return <section ref={shelfRef} className={cls('media-shelf fixed-set-shelf', shelf.ownerName && 'main-watchlist-shelf', uniformReactionWrap && 'uniform-reaction-wrap')}>
+  return <section id={`shelf-${shelf.shelf_id}`} ref={shelfRef} className={cls('media-shelf fixed-set-shelf', shelf.ownerName && 'main-watchlist-shelf', uniformReactionWrap && 'uniform-reaction-wrap')}>
     <div className="shelf-head">
       <div className="shelf-title"><span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2>{shelf.subtitle && <p className="shelf-subtitle">{shelf.subtitle}</p>}</span></div>
       <div className={cls('shelf-actions', pagerOnlyActions && 'pager-only')}>
         <span className="shelf-mobile-top-row">
-          <span className="shelf-action-group shelf-edit-actions">{canEdit && <button aria-label={`Edit ${shelf.name}`} onClick={() => onRename({ canArrange: arrangeItems.length > 1, onArrange: () => setArranging(true) })}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Move ${shelf.name} to Bin`} onClick={onDelete}><Trash2 size={15} /></button>}</span>
+          <span className="shelf-action-group shelf-edit-actions">{canEdit && <button aria-label={`Edit ${shelf.name}`} onClick={() => onRename({ canArrange: arrangeItems.length > 1, onArrange: () => setArranging(true) })}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Move ${shelf.name} to Bin`} onClick={onDelete}><Trash2 size={15} /></button>}{canCopy && <button className="copy-foreign-shelf" aria-label={`Copy ${shelf.name} to your collection`} title="Copy shelf" onClick={onCopy}><Copy size={15} /><span>Copy shelf</span></button>}</span>
           <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => moveShelfWithViewport(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => moveShelfWithViewport(1)}><ArrowDown size={15} /></button>}</span>
         </span>
         <span className="shelf-mobile-bottom-row">
@@ -2334,7 +2570,7 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
   </section></div>, document.body);
 }
 
-function CollectionBinDrawer({ media, shelves, onClose, onError, onOpenMedia, onRestoreMedia, onDeleteMedia, onRestoreShelf, onDeleteShelf }) {
+function CollectionBinDrawer({ libraries = [], media, shelves, onClose, onError, onRestoreLibrary, onOpenMedia, onRestoreMedia, onDeleteMedia, onRestoreShelf, onDeleteShelf }) {
   const [busyId, setBusyId] = useState(null);
   useEscape(onClose);
   const run = async (id, action) => {
@@ -2349,7 +2585,10 @@ function CollectionBinDrawer({ media, shelves, onClose, onError, onOpenMedia, on
       <span className="eyebrow">COLLECTION BIN</span>
       <h2>Recently removed</h2>
       <p className="bin-intro">Restore anything you want to keep, or permanently delete it here when you are certain.</p>
-      {!media.length && !shelves.length && <div className="bin-empty"><Trash2 size={20} /><span>The Bin is empty.</span></div>}
+      {!libraries.length && !media.length && !shelves.length && <div className="bin-empty"><Trash2 size={20} /><span>The Bin is empty.</span></div>}
+      {libraries.length > 0 && <section className="bin-group"><header><span>LIBRARIES</span><small>{libraries.length}</small></header><div className="bin-list">
+        {libraries.map((library) => <article className="bin-row-card shelf" key={library.id}><div className="bin-item-main"><span className="bin-shelf-mark"><BookOpen size={15} /></span><span><strong>{library.name}</strong><small>{LIBRARY_TYPE_DETAILS[library.type]?.label}</small></span></div><div className="bin-row-actions"><button disabled={busyId === library.id} onClick={() => run(library.id, () => onRestoreLibrary(library))}><RotateCw size={13} />Restore library</button></div></article>)}
+      </div></section>}
       {media.length > 0 && <section className="bin-group"><header><span>MEDIA</span><small>{media.length}</small></header><div className="bin-list">
         {media.map((item) => <article className="bin-row-card" key={item.database_id}>
           <button className="bin-item-main" onClick={() => onOpenMedia(item.item_id)}>{item.poster_url ? <img src={item.poster_url} alt="" /> : <span className="bin-poster-fallback"><Clapperboard size={14} /></span>}<span><strong>{cleanImportedMediaTitle(item.title)}</strong><small>{sectionName(mediaSection(item))}{item.year ? ` · ${item.year}` : ''}</small></span></button>
@@ -2997,7 +3236,7 @@ function ShareCollectionDialog({ accessToken, collectionId, collectionTitle, not
   </section></div>;
 }
 
-function ShelfEditDialog({ shelf, canArrange, onArrange, canCurateMain, onToggleMain, onClose, onSave }) {
+function ShelfEditDialog({ shelf, canArrange, onArrange, canCurateMain, onToggleMain, canTransfer, onTransfer, onClose, onSave }) {
   useEscape(onClose);
   const [name, setName] = useState(shelf.name);
   const [subtitle, setSubtitle] = useState(shelf.subtitle || '');
@@ -3013,12 +3252,169 @@ function ShelfEditDialog({ shelf, canArrange, onArrange, canCurateMain, onToggle
       {canArrange && <button className="shelf-control-button arrange-button" type="button" onClick={onArrange}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}
       {canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', mainWatchlist && 'active')} type="button" aria-pressed={mainWatchlist} onClick={async () => { const previous = mainWatchlist; const enabled = !previous; setMainWatchlist(enabled); try { await onToggleMain(enabled); } catch { setMainWatchlist(previous); } }}><span className="main-watchlist-copy"><small>{mainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}
     </div>}
+    {canTransfer && <details className="shelf-transfer-section">
+      <summary>Move or copy shelf</summary>
+      <p>Use another active library of the same technical type. Copies are independent and Main Watchlist inclusion starts disabled.</p>
+      <div className="shelf-transfer-actions">
+        <button type="button" disabled={shelf.required} title={shelf.required ? 'Protected shelves cannot be moved' : 'Move to another library'} onClick={() => onTransfer('move')}><Redo2 size={16} />Move to another library</button>
+        <button type="button" onClick={() => onTransfer('copy-owner')}><Copy size={16} />Copy to another library</button>
+      </div>
+      {shelf.required && <small>Protected shelves can be copied but cannot be moved.</small>}
+    </details>}
     <small className="character-count">{subtitle.length} / 180</small>
     <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose}>Cancel</button><Button type="submit" icon={Pencil} disabled={!shelf.required && !name.trim()}>Save Shelf</Button></div>
   </form></div>;
 }
 
-function CreateShelfDialog({ section, onClose, onSave }) {
+function ShelfTransferDialog({ transfer, sourceLibrary, sourceOwnerName, ownerData, loadDestinations, ownCollection, onClose, onConfirm, onViewResult }) {
+  useEscape(onClose);
+  const [destinationData, setDestinationData] = useState(ownerData);
+  const [loading, setLoading] = useState(!ownerData);
+  const [destinationLibraryId, setDestinationLibraryId] = useState('');
+  const [name, setName] = useState(transfer.mode === 'move' ? transfer.shelf.name : `${transfer.shelf.name} (Copy)`);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+  const sourceType = sourceLibrary?.type;
+  const viewResult = (target) => {
+    if (onViewResult) onViewResult(target);
+    else window.dispatchEvent(new CustomEvent('media-room:view-copied-shelf', { detail: target }));
+  };
+  useEffect(() => {
+    if (ownerData) return;
+    let cancelled = false;
+    setLoading(true);
+    Promise.resolve(loadDestinations?.()).then((loaded) => {
+      if (!cancelled) setDestinationData(loaded);
+    }).catch(() => {
+      if (!cancelled) setError('Your destination libraries could not be loaded.');
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [ownerData]);
+  const compatibleLibraries = (destinationData?.libraries || [])
+    .filter((library) => !library.deleted_at && library.type === sourceType)
+    .filter((library) => transfer.mode !== 'move' || library.id !== sourceLibrary?.id);
+  useEffect(() => {
+    if (!destinationLibraryId && compatibleLibraries[0]) setDestinationLibraryId(compatibleLibraries[0].id);
+  }, [compatibleLibraries.map((library) => library.id).join('|')]);
+  useEffect(() => {
+    if (transfer.mode === 'move') return;
+    const destinationNames = (destinationData?.mediaShelves || [])
+      .filter((shelf) => shelf.library_id === destinationLibraryId)
+      .map((shelf) => shelf.name);
+    if (destinationNames.some((value) => value.trim().toLocaleLowerCase() === transfer.shelf.name.trim().toLocaleLowerCase())
+      || destinationLibraryId === sourceLibrary?.id) {
+      setName(copiedShelfName(transfer.shelf.name, destinationNames));
+    }
+  }, [destinationLibraryId]);
+  const submit = async (event) => {
+    event.preventDefault();
+    if (busy || !destinationLibraryId || !name.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      const completed = await onConfirm({ ...transfer, destinationLibraryId, name: name.trim() });
+      if (transfer.mode === 'copy-visitor') setResult(completed);
+    } catch (transferError) {
+      setError(transferError?.message || 'The shelf operation failed. No partial copy was kept.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const copyMode = transfer.mode !== 'move';
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
+    <form className="media-edit-dialog shelf-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="shelf-transfer-title" onSubmit={submit}>
+      <button className="close" type="button" onClick={onClose} disabled={busy} aria-label="Close shelf transfer"><X /></button>
+      <span className="eyebrow">{transfer.mode === 'move' ? 'MOVE SHELF' : 'COPY SHELF'}</span>
+      <h2 id="shelf-transfer-title">{transfer.shelf.name}</h2>
+      {transfer.mode === 'copy-visitor' && <div className="copy-source-summary"><span><b>Source owner</b>{sourceOwnerName}</span><span><b>Active items</b>{transfer.itemCount}</span></div>}
+      {transfer.mode !== 'copy-visitor' && <p className="dialog-intro">{transfer.itemCount} active {transfer.itemCount === 1 ? 'item' : 'items'} will be {transfer.mode === 'move' ? 'moved atomically' : 'copied into independent records'}.</p>}
+      {loading && <p className="shelf-picker-state" role="status">Loading compatible libraries…</p>}
+      {!loading && !compatibleLibraries.length && <div className="shelf-picker-state error"><span>No active {LIBRARY_TYPE_DETAILS[sourceType]?.label || sourceType} destination library is available.</span>{ownCollection && transfer.mode === 'copy-visitor' && <button type="button" className="text-button" onClick={() => viewResult({ collection_id: ownCollection.id, library_id: null })}>Go to your collection to create one</button>}</div>}
+      {compatibleLibraries.length > 0 && <label>Destination library<select value={destinationLibraryId} onChange={(event) => setDestinationLibraryId(event.target.value)} disabled={busy}>{compatibleLibraries.map((library) => <option value={library.id} key={library.id}>{library.name}{library.name === LIBRARY_TYPE_DETAILS[library.type]?.label ? '' : ` — ${LIBRARY_TYPE_DETAILS[library.type]?.label}`}</option>)}</select></label>}
+      {copyMode && <label>New shelf name<input value={name} maxLength="100" onChange={(event) => setName(event.target.value)} disabled={busy} required /></label>}
+      {copyMode && <p className="field-explanation">This creates a snapshot with independent media records. Main Watchlist inclusion starts disabled.</p>}
+      {error && <p className="auth-error" role="alert">{error}</p>}
+      {result && <div className="copy-success" role="status"><Check size={18} /><span><b>Shelf copied</b>The source will no longer affect your copy.</span><Button type="button" onClick={() => viewResult(result)}>View copied shelf</Button></div>}
+      {!result && <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose} disabled={busy}>Cancel</button><Button type="submit" icon={transfer.mode === 'move' ? Redo2 : Copy} disabled={busy || loading || !compatibleLibraries.length || (copyMode && !name.trim())}>{busy ? (transfer.mode === 'move' ? 'Moving…' : 'Copying…') : transfer.mode === 'move' ? 'Move Shelf' : 'Copy Shelf'}</Button></div>}
+    </form>
+  </div>;
+}
+
+function LibraryEditorDialog({ library, initialType = 'other', libraries, hasHistory, onClose, onSave }) {
+  useEscape(onClose);
+  const startingType = library?.type || initialType || 'other';
+  const defaults = libraryDefaults(startingType);
+  const [draft, setDraft] = useState({
+    name: library?.name || '',
+    type: startingType,
+    singular: library?.singular || defaults.singular,
+    plural: library?.plural || defaults.plural,
+    creator: library?.creator || defaults.creator,
+  });
+  const [automatic, setAutomatic] = useState({
+    singular: !library || library.singular === defaults.singular,
+    plural: !library || library.plural === defaults.plural,
+    creator: !library || library.creator === defaults.creator,
+  });
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const typeLocked = Boolean(library?.protected || (library && hasHistory));
+  const setTerm = (field) => (event) => {
+    setAutomatic((current) => ({ ...current, [field]: false }));
+    setDraft((current) => ({ ...current, [field]: event.target.value }));
+  };
+  const changeType = (event) => {
+    const type = event.target.value;
+    const nextDefaults = libraryDefaults(type);
+    setDraft((current) => ({
+      ...current,
+      type,
+      singular: automatic.singular ? nextDefaults.singular : current.singular,
+      plural: automatic.plural ? nextDefaults.plural : current.plural,
+      creator: automatic.creator ? nextDefaults.creator : current.creator,
+    }));
+  };
+  const submit = async (event) => {
+    event.preventDefault();
+    if (saving) return;
+    const validation = validateLibraryDraft(draft, libraries, library?.id);
+    setErrors(validation.errors);
+    if (!validation.valid) return;
+    setSaving(true);
+    try {
+      await onSave(validation.values);
+    } catch (error) {
+      setErrors((current) => ({ ...current, form: error?.message || 'The library could not be saved.' }));
+      setSaving(false);
+    }
+  };
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
+    <form className="media-edit-dialog library-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="library-editor-title" onSubmit={submit}>
+      <button className="close" type="button" onClick={onClose} disabled={saving} aria-label="Close library editor"><X /></button>
+      <span className="eyebrow">{library ? 'LIBRARY SETTINGS' : 'NEW LIBRARY'}</span>
+      <h2 id="library-editor-title">{library ? `Edit ${library.name}` : 'Create Library'}</h2>
+      <label>Library name<input autoFocus value={draft.name} maxLength="50" aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? 'library-name-error' : undefined} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required /></label>
+      {errors.name && <small className="field-error" id="library-name-error">{errors.name}</small>}
+      <label>Technical type<select value={draft.type} disabled={typeLocked} onChange={changeType}>{LIBRARY_TYPES.map((type) => <option value={type} key={type}>{LIBRARY_TYPE_DETAILS[type].label}</option>)}</select></label>
+      {typeLocked && <p className="field-explanation">{library?.protected ? 'Default library types cannot be changed.' : 'A library type can change only before it has ever contained a shelf or item.'}</p>}
+      <details className="library-terminology">
+        <summary>Custom terminology</summary>
+        <div className="library-terminology-grid">
+          <label>Singular item term<input value={draft.singular} maxLength="40" aria-invalid={Boolean(errors.singular)} onChange={setTerm('singular')} required />{errors.singular && <small className="field-error">{errors.singular}</small>}</label>
+          <label>Plural item term<input value={draft.plural} maxLength="40" aria-invalid={Boolean(errors.plural)} onChange={setTerm('plural')} required />{errors.plural && <small className="field-error">{errors.plural}</small>}</label>
+          <label>Creator term<input value={draft.creator} maxLength="40" aria-invalid={Boolean(errors.creator)} onChange={setTerm('creator')} required />{errors.creator && <small className="field-error">{errors.creator}</small>}</label>
+        </div>
+      </details>
+      {errors.form && <p className="auth-error" role="alert">{errors.form}</p>}
+      <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><Button type="submit" icon={library ? Check : Plus} disabled={saving}>{saving ? 'Saving…' : library ? 'Save Library' : 'Create Library'}</Button></div>
+    </form>
+  </div>;
+}
+
+function CreateShelfDialog({ section, terminology, onClose, onSave }) {
   useEscape(onClose);
   const [name, setName] = useState('');
   const [subtitle, setSubtitle] = useState('');
@@ -3026,7 +3422,7 @@ function CreateShelfDialog({ section, onClose, onSave }) {
   const [numbered, setNumbered] = useState(false);
   return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog create-shelf-dialog" onSubmit={(event) => { event.preventDefault(); if (!name.trim()) return; onSave({ name: name.trim(), subtitle: subtitle.trim() || null, is_numbered: numbered, ...(section === 'screen' ? { show_in_main_watchlist: mainWatchlist } : {}) }); }}>
     <button className="close" type="button" onClick={onClose} aria-label="Close create shelf"><X /></button>
-    <span className="eyebrow">NEW SHELF</span><h2>Create a Shelf</h2>
+    <span className="eyebrow">NEW SHELF</span><h2>Create a Shelf</h2><p className="dialog-intro">Organise {terminology?.plural?.toLocaleLowerCase() || 'items'} within this library.</p>
     <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>
     <label>Subtitle <span className="field-hint">Optional</span><input value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
     <label className="reading-list-designation"><input type="checkbox" checked={numbered} onChange={(event) => setNumbered(event.target.checked)} /><span><b>Numbered shelf</b><small>Show each item's shelf position beneath its card.</small></span></label>
@@ -3219,17 +3615,18 @@ function mediaFormPayload(form) {
   };
 }
 
-function MediaDetailFields({ form, setForm, section, compact = false }) {
+function MediaDetailFields({ form, setForm, section, terminology, compact = false }) {
   const set = (name) => (event) => setForm((current) => ({ ...current, [name]: event.target.value }));
   return <div className="media-edit-grid optional-detail-grid">
     {section === 'screen' && <label>Type<select value={form.type} onChange={set('type')}><option value="film">Film</option><option value="television">Television</option></select></label>}
     <label>Year<input type="number" min="1000" max="3000" placeholder="YYYY" value={form.year} onChange={set('year')} /></label>
-    {section === 'book' && <label>Author<input value={form.creator} onChange={set('creator')} /></label>}
-    {section === 'game' && <label>Developer and/or Publisher<input value={form.creator} onChange={set('creator')} /></label>}
+    {section === 'book' && <label>{terminology?.creator || 'Author'}<input value={form.creator} onChange={set('creator')} /></label>}
+    {section === 'game' && <label>{terminology?.creator || 'Developer'} and/or Publisher<input value={form.creator} onChange={set('creator')} /></label>}
+    {section === 'other' && <label>{terminology?.creator || 'Creator'}<input value={form.creator} onChange={set('creator')} /></label>}
     {section === 'screen' && <label>Director<input value={form.director} onChange={set('director')} /></label>}
     {section === 'game'
       ? <label>Platforms (comma separated)<input value={form.platforms} onChange={set('platforms')} placeholder="PC, PlayStation 5…" /></label>
-      : <label>Format<input value={form.format} onChange={set('format')} placeholder={section === 'book' ? 'Hardback, paperback…' : 'DVD, Blu-ray, 4K…'} /></label>}
+      : <label>Format<input value={form.format} onChange={set('format')} placeholder={section === 'book' ? 'Hardback, paperback…' : section === 'other' ? 'Physical, digital…' : 'DVD, Blu-ray, 4K…'} /></label>}
     <label>Genres (comma separated)<input value={form.genres} onChange={set('genres')} placeholder="Drama, mystery…" /></label>
     {section === 'screen' && <label>Runtime (minutes)<input type="number" min="1" value={form.runtime} onChange={set('runtime')} /></label>}
     <label className="full">Poster URL<input type="url" value={form.poster_url} onChange={set('poster_url')} placeholder="https://…" /></label>
@@ -3238,7 +3635,7 @@ function MediaDetailFields({ form, setForm, section, compact = false }) {
   </div>;
 }
 
-function AddMediaDialog({ section, shelves, initialShelfIds = [], initialItem = null, sourceCollectionTitle = '', importMode = false, shelvesLoading = false, shelvesError = '', onRetryShelves, onClose, onSave }) {
+function AddMediaDialog({ section, terminology, shelves, initialShelfIds = [], initialItem = null, sourceCollectionTitle = '', importMode = false, shelvesLoading = false, shelvesError = '', onRetryShelves, onClose, onSave }) {
   useEscape(onClose);
   const [form, setForm] = useState(() => mediaForm(initialItem || {}, section === 'screen' ? 'film' : section));
   const [priorityWatch, setPriorityWatch] = useState(false);
@@ -3246,7 +3643,7 @@ function AddMediaDialog({ section, shelves, initialShelfIds = [], initialItem = 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const destination = shelves.find((shelf) => shelfIds.includes(shelf.shelf_id));
-  const namePlaceholder = section === 'screen' ? 'Name of film or show' : section === 'book' ? 'Name of book' : 'Name of video game';
+  const namePlaceholder = section === 'screen' ? 'Name of film or show' : section === 'book' ? 'Name of book' : section === 'game' ? 'Name of video game' : `Name of ${terminology?.singular?.toLocaleLowerCase() || 'item'}`;
   const submit = async (event) => {
     event.preventDefault();
     const item = mediaFormPayload(form);
@@ -3258,11 +3655,11 @@ function AddMediaDialog({ section, shelves, initialShelfIds = [], initialItem = 
   };
   return <div className="modal-layer editor-layer add-media-layer"><form className="media-edit-dialog add-media-dialog" onSubmit={submit}>
     <button className="close" type="button" onClick={onClose} aria-label="Close add item"><X /></button>
-    <span className="eyebrow">{importMode ? `IMPORT FROM ${sourceCollectionTitle.toUpperCase()}` : `ADD TO ${destination?.name?.toUpperCase() || 'COLLECTION'}`}</span><h2>{importMode ? 'Import to Your Collection' : 'Add an Item'}</h2><p className="dialog-intro">{importMode ? 'The source details are ready to use. Edit anything you like, then choose a shelf to save your own copy.' : 'Add as much or as little detail as you like, then choose at least one shelf.'}</p>
+    <span className="eyebrow">{importMode ? `IMPORT FROM ${sourceCollectionTitle.toUpperCase()}` : `ADD TO ${destination?.name?.toUpperCase() || 'COLLECTION'}`}</span><h2>{importMode ? 'Import to Your Collection' : `Add ${terminology?.singular ? `a ${terminology.singular}` : 'an Item'}`}</h2><p className="dialog-intro">{importMode ? 'The source details are ready to use. Edit anything you like, then choose a shelf to save your own copy.' : 'Add as much or as little detail as you like, then choose at least one shelf.'}</p>
     <label className="required-media-title">Name <span>Required</span><input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} placeholder={namePlaceholder} required /></label>
     <section className="optional-media-section">
       <header>{importMode ? <span className="eyebrow">DETAILS & DESTINATION</span> : <span className="eyebrow">OPTIONAL</span>}<p>{importMode ? 'The copied details are editable. Choose at least one destination shelf.' : 'Everything below can be left blank.'}</p></header>
-      <MediaDetailFields form={form} setForm={setForm} section={section} compact />
+      <MediaDetailFields form={form} setForm={setForm} section={section} terminology={terminology} compact />
       <div className="add-status-options">
         <button type="button" className={cls('add-status-option owned', form.owned && 'active')} aria-pressed={form.owned} onClick={() => setForm((current) => ({ ...current, owned: !current.owned }))}><span>{form.owned ? <Check size={12} /> : <Plus size={12} />}</span><strong>{form.owned ? 'Owned' : 'Mark as Owned'}</strong></button>
         {section === 'screen' && <button type="button" className={cls('add-status-option priority', priorityWatch && 'active')} aria-pressed={priorityWatch} onClick={() => setPriorityWatch((current) => !current)}><span>{priorityWatch ? <Check size={12} /> : <Plus size={12} />}</span><strong>{priorityWatch ? 'Priority Watch' : 'Mark Priority Watch'}</strong></button>}

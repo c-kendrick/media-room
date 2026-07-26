@@ -120,7 +120,9 @@ Deno.serve(async (request) => {
       if (!body.collection_id || !['screen', 'book', 'game'].includes(body.enrich_section)) return json({ error: 'Choose a valid collection section.' }, 400);
       const { data: collection } = await client.from('collections').select('id,owner_id').eq('id', body.collection_id).single();
       if (!collection || (collection.owner_id !== user.id && !isAdmin)) return json({ error: 'Only the collection owner or an administrator can enrich posters.' }, 403);
-      const { data: collectionItems, error: itemsError } = await client.from('media_items').select('id,collection_id,type,title,year,poster_url').eq('collection_id', collection.id).is('deleted_at', null);
+      let itemQuery = client.from('media_items').select('id,collection_id,library_id,type,title,year,poster_url').eq('collection_id', collection.id).is('deleted_at', null);
+      if (body.library_id) itemQuery = itemQuery.eq('library_id', body.library_id);
+      const { data: collectionItems, error: itemsError } = await itemQuery;
       if (itemsError) return json({ error: itemsError.message }, 400);
       const sectionTypes = body.enrich_section === 'screen' ? ['film', 'television'] : [body.enrich_section];
       const targets = (collectionItems || []).filter((item: MediaItem) => !item.poster_url && sectionTypes.includes(item.type)).slice(0, 50);
