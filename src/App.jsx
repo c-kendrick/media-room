@@ -516,6 +516,7 @@ export default function App() {
   const userSelectedCollection = useRef(false);
   const requestLoginHandled = useRef('');
   const requestReturnToList = useRef(false);
+  const pendingRequestOpenVersion = useRef(0);
   const rememberedSection = useRef('screen');
   const accessToken = account?.session?.access_token;
   const accountScope = account?.profile?.id || 'public';
@@ -1035,7 +1036,8 @@ export default function App() {
   };
 
   async function openPendingWatchlistRequest(request, { fromList = false } = {}) {
-    if (!request?.media_item_id || !accessToken) return;
+    if (!request?.media_item_id || !accessToken) return false;
+    const openVersion = ++pendingRequestOpenVersion.current;
     setUsersOpen(false);
     setWatchlistRequestListOpen(false);
     requestReturnToList.current = fromList;
@@ -1047,6 +1049,7 @@ export default function App() {
         section,
         accessToken,
       });
+      if (openVersion !== pendingRequestOpenVersion.current) return false;
       const item = snapshot?.media?.find((row) => row.database_id === request.media_item_id);
       if (!item) throw new Error('The requested item is no longer available.');
       cacheSnapshot(snapshot, request.collection_id);
@@ -1059,9 +1062,12 @@ export default function App() {
       setSelectedMediaNavigation(null);
       setSelectedMediaId(item.item_id);
       setPendingWatchlistRequest(request);
+      return true;
     } catch (requestError) {
+      if (openVersion !== pendingRequestOpenVersion.current) return false;
       requestReturnToList.current = false;
       setToast(requestError?.message || 'That watchlist request could not be opened.');
+      return false;
     }
   }
 
@@ -1262,6 +1268,12 @@ export default function App() {
         response,
         destinationShelfId,
       );
+      if (result?.status !== 'pending') {
+        setUserHub((current) => current ? {
+          ...current,
+          watchlist_requests: (current.watchlist_requests || []).filter((request) => request.id !== pendingWatchlistRequest.id),
+        } : current);
+      }
       setPendingWatchlistRequest(null);
       snapshotCache.current.delete(MAIN_WATCHLIST_ID);
       if (result?.status === 'pending') setToast('Request kept for later.');
@@ -1680,7 +1692,11 @@ export default function App() {
           }}
           onManageUsers={() => { setAccountOpen(false); setAdminOpen(true); }}
           watchlistRequests={pendingWatchlistRequests}
-          onOpenWatchlistRequest={(request) => { setAccountOpen(false); void openPendingWatchlistRequest(request); }}
+          onOpenWatchlistRequest={async (request) => {
+            const opened = await openPendingWatchlistRequest(request);
+            if (opened) setAccountOpen(false);
+            return opened;
+          }}
           viewAsAdmin={viewAsAdmin}
           onViewAsAdminChange={setViewAsAdmin}
           onAccountUpdated={async (profile) => { setAccount((current) => ({ ...current, profile })); const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); clearSnapshotCaches({ persistent: true }); await refresh({ fresh: true, targetCollectionId: data.collectionId }); setToast('Account settings saved.'); }}
@@ -2553,36 +2569,39 @@ function WatchlistRequestDialog({ request, shelves, busy, onRespond, onDismiss }
     <div className="modal-layer editor-layer watchlist-request-layer">
       <section className={cls('media-edit-dialog watchlist-request-dialog', isStampRequest ? 'stamp-request' : 'move-request')} role="dialog" aria-modal="true" aria-labelledby="watchlist-request-title">
         <button className="close" type="button" onClick={onDismiss} aria-label="Dismiss watchlist request"><X /></button>
+        <div className="watchlist-request-dotted-strip" aria-hidden="true" />
         <header className="watchlist-request-hero">
           <span className="watchlist-request-emblem"><RequestIcon size={22} /></span>
           <span><small>{isStampRequest ? 'PRIORITY STAMP REQUEST' : 'WATCHED ITEM REQUEST'}</small><h2 id="watchlist-request-title">{request.media_title}</h2></span>
         </header>
-        <div className="watchlist-request-requester">
-          <span className="watchlist-request-avatar" aria-hidden="true">{request.requester_name?.trim()?.charAt(0)?.toUpperCase() || 'M'}</span>
-          <span><small>REQUESTED BY</small><strong>{request.requester_name}</strong></span>
-        </div>
-        <p className="watchlist-request-message">{watchlistRequestMessage(request)}</p>
-        {!isStampRequest && request.source_shelf_name && <p className="watchlist-request-source"><ListOrdered size={15} /><span><small>CURRENT SHELF</small><strong>{request.source_shelf_name}</strong></span></p>}
-        {isStampRequest
-          ? <div className="watchlist-request-actions">
-            <button className="secondary-button" type="button" disabled={busy} onClick={() => respond('keep_stamp')}>Keep my stamp</button>
-            <Button type="button" disabled={busy} onClick={() => respond('clear_stamp')}>Clear my stamp</Button>
+        <div className="watchlist-request-body">
+          <div className="watchlist-request-requester">
+            <span className="watchlist-request-avatar" aria-hidden="true">{request.requester_name?.trim()?.charAt(0)?.toUpperCase() || 'M'}</span>
+            <span><small>REQUESTED BY</small><strong>{request.requester_name}</strong></span>
           </div>
-          : <>
-            {!pickerOpen && <div className="watchlist-request-actions move-actions">
-              <Button type="button" disabled={busy} onClick={() => setPickerOpen(true)}>Move to another shelf</Button>
-              <button className="secondary-button" type="button" disabled={busy} onClick={() => respond('not_now')}>Not now</button>
-              <button className="request-overflow-action" type="button" disabled={busy} onClick={() => respond('keep_in_watchlist')}>Keep in watchlist</button>
-            </div>}
-            {pickerOpen && <div className="watchlist-destination-picker">
-              <div className="watchlist-picker-heading"><span className="watchlist-request-emblem"><ListOrdered size={18} /></span><span><small>CHOOSE A DESTINATION</small><h3>Move to another shelf</h3><p>Only shelves outside the Main Watchlist are available.</p></span></div>
-              {!validDestinations.length
-                ? <div className="shelf-picker-state"><strong>No valid destination shelves</strong><span>Create a non-watchlist shelf, then return to this request.</span></div>
-                : <div className="shelf-picker">{validDestinations.map((shelf) => <button type="button" disabled={busy} key={shelf.shelf_id} onClick={() => respond('move_to_shelf', shelf.shelf_id)}><ListOrdered size={14} /><span><strong>{shelf.name}</strong>{shelf.subtitle && <small>{shelf.subtitle}</small>}</span></button>)}</div>}
-              <button className="secondary-button" type="button" disabled={busy} onClick={() => { setPickerOpen(false); setError(''); }}>Cancel</button>
-            </div>}
-          </>}
-        {error && <p className="field-error" role="alert">{error}</p>}
+          <p className="watchlist-request-message">{watchlistRequestMessage(request)}</p>
+          {!isStampRequest && request.source_shelf_name && <p className="watchlist-request-source"><ListOrdered size={15} /><span><small>CURRENT SHELF</small><strong>{request.source_shelf_name}</strong></span></p>}
+          {isStampRequest
+            ? <div className="watchlist-request-actions">
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => respond('keep_stamp')}>Keep my stamp</button>
+              <Button type="button" disabled={busy} onClick={() => respond('clear_stamp')}>Clear my stamp</Button>
+            </div>
+            : <>
+              {!pickerOpen && <div className="watchlist-request-actions move-actions">
+                <button className="watchlist-keep-tertiary" type="button" disabled={busy} onClick={() => respond('keep_in_watchlist')}>Keep in watchlist</button>
+                <button className="watchlist-not-now" type="button" disabled={busy} onClick={() => respond('not_now')}>Not now</button>
+                <Button className="watchlist-move-primary" icon={ListOrdered} type="button" disabled={busy} onClick={() => setPickerOpen(true)}>Move to another shelf</Button>
+              </div>}
+              {pickerOpen && <div className="watchlist-destination-picker">
+                <div className="watchlist-picker-heading"><span className="watchlist-request-emblem"><ListOrdered size={18} /></span><span><small>CHOOSE A DESTINATION</small><h3>Move to another shelf</h3><p>Only shelves outside the Main Watchlist are available.</p></span></div>
+                {!validDestinations.length
+                  ? <div className="shelf-picker-state"><strong>No valid destination shelves</strong><span>Create a non-watchlist shelf, then return to this request.</span></div>
+                  : <div className="shelf-picker">{validDestinations.map((shelf) => <button type="button" disabled={busy} key={shelf.shelf_id} onClick={() => respond('move_to_shelf', shelf.shelf_id)}><ListOrdered size={14} /><span><strong>{shelf.name}</strong>{shelf.subtitle && <small>{shelf.subtitle}</small>}</span></button>)}</div>}
+                <button className="secondary-button" type="button" disabled={busy} onClick={() => { setPickerOpen(false); setError(''); }}>Cancel</button>
+              </div>}
+            </>}
+          {error && <p className="field-error" role="alert">{error}</p>}
+        </div>
       </section>
     </div>,
     document.body,
@@ -3028,8 +3047,31 @@ function RecoveryPasswordDialog({ account, onClose, onComplete }) {
   return <div className="modal-layer recovery-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="account-dialog recovery-dialog" role="dialog" aria-modal="true" aria-labelledby="recovery-title"><button className="close" onClick={onClose} aria-label="Close password recovery"><X /></button><span className="eyebrow">PASSWORD RECOVERY</span><h2 id="recovery-title">Choose a new password</h2><p>Use at least eight characters. Your recovery link can only be used for this password change.</p>{account ? <form onSubmit={async(event)=>{event.preventDefault();if(password.length<8){setError('Use at least 8 characters.');return;}if(password!==confirmation){setError('The passwords do not match.');return;}setBusy(true);setError('');try{await updatePassword(account.session.access_token,password);await onComplete();}catch{setError('This recovery link is invalid or expired. Request a new link and try again.');setBusy(false);}}}><label>New password<input type="password" autoComplete="new-password" minLength="8" value={password} onChange={(event)=>setPassword(event.target.value)} required/></label><label>Confirm new password<input type="password" autoComplete="new-password" minLength="8" value={confirmation} onChange={(event)=>setConfirmation(event.target.value)} required/></label>{error&&<p className="auth-error">{error}</p>}<Button type="submit" disabled={busy}>{busy?'Saving…':'Set new password'}</Button></form>:<><p className="auth-error">This recovery link is invalid or expired.</p><Button onClick={onClose}>Return to sign in</Button></>}</section></div>;
 }
 
+function AccountWatchlistRequestRow({ request, openingRequestId, onOpen }) {
+  const isStampRequest = request.request_type === 'priority_stamp_removal';
+  const opening = openingRequestId === request.id;
+  return <button className="account-watchlist-request-row" type="button" disabled={Boolean(openingRequestId)} aria-busy={opening} onClick={() => onOpen(request)}>
+    <span className={cls('account-request-type', isStampRequest ? 'stamp' : 'move')}>{isStampRequest ? <Stamp size={15} /> : <ListOrdered size={15} />}</span>
+    <span className="account-request-copy">
+      <strong>{request.media_title}</strong>
+      <small>{opening ? 'Opening request…' : isStampRequest ? `${request.requester_name} requested a Priority Stamp decision.` : `${request.requester_name} asked you to move this watched item.`}</small>
+    </span>
+    <ChevronRight className="account-request-chevron" size={16} />
+  </button>;
+}
+
+function AccountWatchlistRequests({ requests, openingRequestId, onOpen }) {
+  return <section className="account-watchlist-requests" aria-labelledby="account-watchlist-title">
+    <header>
+      <span className="account-request-mark"><Bell size={16} /></span>
+      <span><small>WATCHLIST REQUESTS</small><strong id="account-watchlist-title">{requests.length === 1 ? 'One request needs your attention' : `${requests.length} requests need your attention`}</strong></span>
+      <b aria-label={`${requests.length} pending watchlist ${requests.length === 1 ? 'request' : 'requests'}`}>{requests.length}</b>
+    </header>
+    <div>{requests.map((request) => <AccountWatchlistRequestRow request={request} openingRequestId={openingRequestId} onOpen={onOpen} key={request.id} />)}</div>
+  </section>;
+}
+
 function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers, watchlistRequests = [], onOpenWatchlistRequest, viewAsAdmin, onViewAsAdminChange, onAccountUpdated, notify }) {
-  useEscape(onClose);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -3044,6 +3086,9 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [nextDisplayName, setNextDisplayName] = useState(account?.profile?.display_name || '');
   const [nextPassword, setNextPassword] = useState('');
+  const [openingRequestId, setOpeningRequestId] = useState('');
+  const openingRequestRef = useRef('');
+  useEscape(() => { if (!openingRequestRef.current) onClose(); });
 
   useEffect(() => {
     if (!signupRetryUntil) { setSignupRetrySeconds(0); return undefined; }
@@ -3092,19 +3137,28 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
       setSubmitting(false);
     }
   };
+  const openAccountWatchlistRequest = async (request) => {
+    if (openingRequestRef.current) return;
+    openingRequestRef.current = request.id;
+    setOpeningRequestId(request.id);
+    try {
+      await onOpenWatchlistRequest(request);
+    } finally {
+      openingRequestRef.current = '';
+      setOpeningRequestId('');
+    }
+  };
 
   return (
-    <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && !openingRequestRef.current && onClose()}>
       <section className="account-dialog" aria-label="Account">
-        <button className="close" onClick={onClose} aria-label="Close account"><X /></button>
+        <button className="close" onClick={onClose} disabled={Boolean(openingRequestId)} aria-label="Close account"><X /></button>
+        <div className="account-dialog-body">
         {account ? (
           <>
             <span className="eyebrow">SIGNED IN</span>
             <div className="account-identity"><UserAvatar person={account.profile} size="large" /><div><h2>{personDisplayName(account.profile, 'Media Room member')}</h2><p>{account.profile?.role === 'admin' && viewAsAdmin ? 'Administrator account' : account.profile?.deactivated_at ? 'Account deactivated — your library is safely stored.' : account.profile?.approved_at ? 'Approved member' : 'Pending approval'}</p></div></div>
-            {watchlistRequests.length > 0 && <section className="account-watchlist-requests" aria-labelledby="account-watchlist-title">
-              <header><span className="account-request-mark"><Bell size={16} /></span><span><small>WATCHLIST REQUESTS</small><strong id="account-watchlist-title">{watchlistRequests.length === 1 ? 'One request needs your attention' : `${watchlistRequests.length} requests need your attention`}</strong></span><b>{watchlistRequests.length}</b></header>
-              <div>{watchlistRequests.map((request) => <button type="button" key={request.id} onClick={() => onOpenWatchlistRequest(request)}><span className={cls('account-request-type', request.request_type === 'priority_stamp_removal' ? 'stamp' : 'move')}>{request.request_type === 'priority_stamp_removal' ? <Stamp size={15} /> : <ListOrdered size={15} />}</span><span><strong>{request.media_title}</strong><small>{request.request_type === 'priority_stamp_removal' ? `${request.requester_name} requested a Priority Stamp decision.` : `${request.requester_name} asked you to move this watched item.`}</small></span><ChevronRight size={16} /></button>)}</div>
-            </section>}
+            {watchlistRequests.length > 0 && <AccountWatchlistRequests requests={watchlistRequests} openingRequestId={openingRequestId} onOpen={openAccountWatchlistRequest} />}
             {account.profile?.role === 'admin' && <label className="admin-view-toggle"><input type="checkbox" checked={viewAsAdmin} onChange={(event) => onViewAsAdminChange(event.target.checked)} /><span><b>View as Admin</b><small>Turn on administrator controls and the full collection view.</small></span></label>}
             <button className="account-settings-toggle" type="button" onClick={() => { setSettingsOpen((current) => !current); setError(''); }}>{settingsOpen ? 'Hide account settings' : 'Display name & password'}</button>
             {settingsOpen && <form className="account-settings" onSubmit={async (event) => { event.preventDefault(); setSubmitting(true); setError(''); try { let profile = account.profile; if (nextDisplayName.trim() !== account.profile.display_name) profile = await updateDisplayName(account.session.access_token, nextDisplayName.trim()); if (nextPassword) { if (nextPassword.length < 8) throw new Error('short-password'); await updatePassword(account.session.access_token, nextPassword); setNextPassword(''); } await onAccountUpdated(profile); } catch (settingsError) { setError(settingsError?.message === 'short-password' ? 'Use at least 8 characters for the new password.' : 'Those account settings could not be saved. Apply the latest Supabase migration and try again.'); } finally { setSubmitting(false); } }}>
@@ -3132,6 +3186,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
             </form>
           </>
         )}
+        </div>
       </section>
     </div>
   );
