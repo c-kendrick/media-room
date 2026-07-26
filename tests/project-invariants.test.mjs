@@ -90,6 +90,8 @@ test('custom libraries are migrated non-destructively and shelf transfers stay a
   assert.match(app, /shelf-action-group shelf-edit-actions library-edit-actions/);
   assert.match(app, /const TypeIcon = library\.type === 'screen' \? Film/);
   assert.match(styles, /\.collection-page \.library-header-controls\{[\s\S]*background:transparent/);
+  assert.match(styles, /\.collection-page \.collection-library-heading\{[\s\S]*justify-content:space-between[\s\S]*z-index:2/);
+  assert.match(styles, /\.library-title-menu\{[\s\S]*right:0/);
   assert.match(styles, /\.library-editor-dialog[\s\S]*grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/);
 });
 
