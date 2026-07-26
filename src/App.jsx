@@ -310,6 +310,10 @@ function sortShelfItems(items, shelfId, sourceOrder = []) {
   });
 }
 
+function pickRandomItem(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
 function Button({ children, className, icon: Icon, type = 'button', ...props }) {
   return (
     <button type={type} className={cls('button', className)} {...props}>
@@ -2143,7 +2147,7 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
       notify('Nothing matches the current media filters.');
       return;
     }
-    const picked = randomPool[Math.floor(Math.random() * randomPool.length)];
+    const picked = pickRandomItem(randomPool);
     openMedia(picked.item_id);
   };
 
@@ -2553,6 +2557,7 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canCo
           <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => moveShelfWithViewport(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => moveShelfWithViewport(1)}><ArrowDown size={15} /></button>}</span>
         </span>
         <span className="shelf-mobile-bottom-row">
+          <button type="button" className="button random-pick shelf-pick-action" disabled={!items.length} aria-label={`Pick randomly from ${shelf.name}`} onClick={() => onOpen(pickRandomItem(items).item_id)}><span>Pick</span><Shuffle size={15} /></button>
           <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && arrangeItems.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}</span>
           <span className="shelf-action-group shelf-add-actions">{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
           <span className="shelf-action-group shelf-set-actions"><button aria-label={mobileShelfPaging ? `Show previous items in ${shelf.name}` : `Show previous sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canPrevious : currentSegment <= 0 || segmentCount <= 1} onClick={() => scrollSegment(-1)}><ChevronLeft /></button>{!mobileShelfPaging && segmentCount > 1 && <small>Sets {currentSegment * 2 + 1}{displaySegments[currentSegment]?.[1]?.length ? `\u2013${currentSegment * 2 + 2}` : ''}</small>}<button aria-label={mobileShelfPaging ? `Show next items in ${shelf.name}` : `Show next sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canNext : currentSegment >= segmentCount - 1 || segmentCount <= 1} onClick={() => scrollSegment(1)}><ChevronRight /></button></span>
