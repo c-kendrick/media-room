@@ -38,6 +38,7 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
   }
 
   for (const reaction of reactions) {
+    if (reaction.state && reaction.state !== 'active') continue;
     const current = reactionsByWork.get(reaction.work_key) || { like: [], priority: [] };
     const person = profileById.get(reaction.user_id);
     if (person && !current[reaction.kind].some((entry) => entry.id === person.id)) current[reaction.kind].push(person);
@@ -201,7 +202,7 @@ async function loadSectionDirect(collection, section, options) {
       media_item_id: 'in.(' + mediaIds.join(',') + ')', select: 'media_item_id,user_id',
     }), { fresh, accessToken }) : [],
     accessToken && workKeys.size ? supabaseSelect(query('media_reactions', {
-      select: 'user_id,kind,work_key',
+      select: 'user_id,kind,work_key,state',
     }), { fresh, accessToken }) : [],
   ]);
   // The section RPC may be unavailable while a migration is being deployed. In
@@ -305,7 +306,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
   };
   const [publicProfiles, reactions, shelves, allInterestRows] = await Promise.all([
     supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh, accessToken }),
-    accessToken ? supabaseSelect(query('media_reactions', { select: 'user_id,kind,work_key' }), { fresh, accessToken }) : Promise.resolve([]),
+    accessToken ? supabaseSelect(query('media_reactions', { select: 'user_id,kind,work_key,state' }), { fresh, accessToken }) : Promise.resolve([]),
     loadShelves(),
     supabaseSelect(query('media_interest', { select: 'media_item_id,user_id' }), { fresh, accessToken }),
   ]);
@@ -387,7 +388,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
     [...mirroredMemberships, ...virtualMemberships],
     interests,
     publicProfiles,
-    reactions.filter((reaction) => scopedProfileIds.has(reaction.user_id)),
+    reactions.filter((reaction) => scopedProfileIds.has(reaction.user_id) && (!reaction.state || reaction.state === 'active')),
     ['screen'],
   );
   return { ...snapshot, mainWatchlist: true, media: snapshot.media.map((item) => {

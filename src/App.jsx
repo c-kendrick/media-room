@@ -59,6 +59,15 @@ import { clearCachedAccount, readCachedSection, writeCachedSnapshot } from './se
 import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershipIdentity, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, SHELF_SET_SIZE, validateShelfDraft } from './shelf-order.js';
 import { getDrawerNavigationTargets } from './media-drawer-navigation.js';
 import { LightweightMarkdown } from './LightweightMarkdown.jsx';
+import {
+  loadWatchlistRequestActions,
+  loadWatchlistRequests,
+  requestPriorityStampRemoval,
+  requestWatchedItemMove,
+  respondWatchlistRequest,
+  stampRequestProgress,
+  watchlistRequestMessage,
+} from './watchlist-requests.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -424,6 +433,10 @@ export default function App() {
   const [shareOpen, setShareOpen] = useState(false);
   const [usersOpen, setUsersOpen] = useState(false);
   const [userHub, setUserHub] = useState(null);
+  const [pendingWatchlistRequest, setPendingWatchlistRequest] = useState(null);
+  const [watchlistRequestListOpen, setWatchlistRequestListOpen] = useState(false);
+  const [watchlistRequestActions, setWatchlistRequestActions] = useState(null);
+  const [watchlistRequestBusy, setWatchlistRequestBusy] = useState(false);
   const [mainWatchlistClubId, setMainWatchlistClubId] = useState(() => window.localStorage.getItem(MAIN_WATCHLIST_CLUB_KEY) || '');
   const [viewAsAdmin, setViewAsAdmin] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
@@ -467,6 +480,8 @@ export default function App() {
   const flushPendingLovesRef = useRef(() => Promise.resolve());
   const latestRequest = useRef(0);
   const userSelectedCollection = useRef(false);
+  const requestLoginHandled = useRef('');
+  const requestReturnToList = useRef(false);
   const rememberedSection = useRef('screen');
   const accessToken = account?.session?.access_token;
   const accountScope = account?.profile?.id || 'public';
@@ -972,7 +987,12 @@ export default function App() {
       setUserHub(null);
       return null;
     }
-    const nextHub = await loadUserHub(accessToken);
+    const [nextHub, watchlistRequests] = await Promise.all([
+      loadUserHub(accessToken),
+      loadWatchlistRequests(accessToken).catch(() => []),
+    ]);
+    nextHub.watchlist_requests = watchlistRequests || [];
+    nextHub.notification_count = Number(nextHub.notification_count || 0) + nextHub.watchlist_requests.length;
     setUserHub(nextHub);
     if (mainWatchlistClubId && !(nextHub?.clubs || []).some((club) => club.id === mainWatchlistClubId)) {
       window.localStorage.removeItem(MAIN_WATCHLIST_CLUB_KEY);
@@ -981,12 +1001,52 @@ export default function App() {
     return nextHub;
   };
 
+  async function openPendingWatchlistRequest(request, { fromList = false } = {}) {
+    if (!request?.media_item_id || !accessToken) return;
+    setUsersOpen(false);
+    setWatchlistRequestListOpen(false);
+    requestReturnToList.current = fromList;
+    try {
+      const section = request.media_type === 'book' ? 'book' : request.media_type === 'game' ? 'game' : 'screen';
+      const snapshot = await loadMediaSnapshot({
+        fresh: true,
+        collectionId: request.collection_id,
+        section,
+        accessToken,
+      });
+      const item = snapshot?.media?.find((row) => row.database_id === request.media_item_id);
+      if (!item) throw new Error('The requested item is no longer available.');
+      cacheSnapshot(snapshot, request.collection_id);
+      setLandingApplied(true);
+      userSelectedCollection.current = true;
+      dataRef.current = snapshot;
+      setData(snapshot);
+      setCollectionId(request.collection_id);
+      rememberedSection.current = section;
+      setSelectedMediaNavigation(null);
+      setSelectedMediaId(item.item_id);
+      setPendingWatchlistRequest(request);
+    } catch (requestError) {
+      requestReturnToList.current = false;
+      setToast(requestError?.message || 'That watchlist request could not be opened.');
+    }
+  }
+
   useEffect(() => {
     if (!accessToken || !account?.profile?.approved_at || account.profile.deactivated_at) { setUserHub(null); return undefined; }
     refreshUserHub().catch(() => setUserHub(null));
     const timer = window.setInterval(() => refreshUserHub().catch(() => null), 45_000);
     return () => window.clearInterval(timer);
   }, [accessToken, account?.profile?.approved_at, account?.profile?.deactivated_at]);
+
+  useEffect(() => {
+    const profileId = account?.profile?.id;
+    const requests = userHub?.watchlist_requests || [];
+    if (!profileId || !userHub || requestLoginHandled.current === profileId) return;
+    requestLoginHandled.current = profileId;
+    if (requests.length === 1) void openPendingWatchlistRequest(requests[0]);
+    else if (requests.length > 1) setWatchlistRequestListOpen(true);
+  }, [account?.profile?.id, userHub]);
 
   useEffect(() => {
     if (!account?.profile?.id || !memberClubs.length || selectedMainWatchlistClub) return;
@@ -1102,6 +1162,101 @@ export default function App() {
       setToast('Full item details could not be loaded.');
     });
   }, [selectedMedia?.database_id, selectedMedia?.details_loaded, accessToken]);
+
+  const selectedActionClubId = data?.mainWatchlist
+    && selectedMainWatchlistClub?.owner_id === account?.profile?.id
+    ? selectedMainWatchlistClub.id
+    : null;
+  useEffect(() => {
+    if (!selectedMedia?.database_id || !accessToken || sharedMode || pendingWatchlistRequest) {
+      setWatchlistRequestActions(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const loadActions = () => loadWatchlistRequestActions(accessToken, selectedMedia.database_id, selectedActionClubId)
+      .then((actions) => { if (!cancelled) setWatchlistRequestActions(actions || null); })
+      .catch(() => { if (!cancelled) setWatchlistRequestActions(null); });
+    void loadActions();
+    const timer = window.setInterval(loadActions, 45_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [selectedMedia?.database_id, accessToken, selectedActionClubId, pendingWatchlistRequest, sharedMode]);
+
+  const reloadSelectedRequestActions = async () => {
+    if (!selectedMedia?.database_id || !accessToken || pendingWatchlistRequest) return;
+    const actions = await loadWatchlistRequestActions(accessToken, selectedMedia.database_id, selectedActionClubId);
+    setWatchlistRequestActions(actions || null);
+  };
+
+  const createStampRemovalRequests = async () => {
+    if (!selectedMedia?.database_id || watchlistRequestBusy) return;
+    setWatchlistRequestBusy(true);
+    try {
+      const result = await requestPriorityStampRemoval(accessToken, selectedMedia.database_id, selectedActionClubId);
+      snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+      setToast(result?.message || 'Priority stamp removal requested.');
+      await Promise.allSettled([
+        reloadSelectedRequestActions(),
+        refresh({ fresh: true, targetCollectionId: data.collectionId }),
+      ]);
+    } catch (requestError) {
+      setToast(requestError?.message || 'Priority stamp removal requests could not be sent.');
+    } finally {
+      setWatchlistRequestBusy(false);
+    }
+  };
+
+  const createMoveRequest = async (option) => {
+    if (!selectedMedia?.database_id || !option || watchlistRequestBusy) return;
+    setWatchlistRequestBusy(true);
+    try {
+      await requestWatchedItemMove(accessToken, option.club_id, selectedMedia.database_id, option.source_shelf_id);
+      setToast(`Asked ${option.target_name} to move this watched item out of ${option.source_shelf_name}.`);
+      await reloadSelectedRequestActions().catch(() => null);
+    } catch (requestError) {
+      setToast(requestError?.message || 'The watched-item move request could not be sent.');
+    } finally {
+      setWatchlistRequestBusy(false);
+    }
+  };
+
+  const answerPendingWatchlistRequest = async (response, destinationShelfId = null) => {
+    if (!pendingWatchlistRequest || watchlistRequestBusy) return;
+    setWatchlistRequestBusy(true);
+    try {
+      const result = await respondWatchlistRequest(
+        accessToken,
+        pendingWatchlistRequest.id,
+        response,
+        destinationShelfId,
+      );
+      setPendingWatchlistRequest(null);
+      snapshotCache.current.delete(MAIN_WATCHLIST_ID);
+      if (result?.status === 'pending') setToast('Request kept for later.');
+      else if (response === 'clear_stamp') setToast('Priority stamp cleared.');
+      else if (response === 'keep_stamp') setToast('Priority stamp kept.');
+      else if (response === 'move_to_shelf') setToast('Item moved to the selected shelf.');
+      else setToast('Item kept in the watchlist.');
+      await Promise.allSettled([
+        refreshUserHub(),
+        response === 'not_now' ? Promise.resolve() : refresh({ fresh: true, targetCollectionId: data.collectionId }),
+      ]);
+    } catch (requestError) {
+      setToast(requestError?.message || 'The request could not be updated. No changes were made.');
+      throw requestError;
+    } finally {
+      setWatchlistRequestBusy(false);
+    }
+  };
+
+  const closeSelectedMedia = () => {
+    setSelectedMediaId(null);
+    setSelectedMediaNavigation(null);
+    setPendingWatchlistRequest(null);
+    if (requestReturnToList.current && (userHub?.watchlist_requests || []).length) {
+      requestReturnToList.current = false;
+      setWatchlistRequestListOpen(true);
+    }
+  };
 
   const initialLoading = loading || authLoading || collectionsLoading || (!landingApplied && collections.length > 0);
   if (initialLoading) {
@@ -1305,7 +1460,7 @@ export default function App() {
         <MediaDrawer
           item={selectedMedia}
           shelves={data.mainWatchlist ? data.mediaShelves : mediaShelvesForSection(data, mediaSection(selectedMedia))}
-          onClose={() => { setSelectedMediaId(null); setSelectedMediaNavigation(null); }}
+          onClose={closeSelectedMedia}
           previousItem={drawerNavigationTargets.previous}
           nextItem={drawerNavigationTargets.next}
           onPrevious={() => navigateDrawer(drawerNavigationTargets.previous)}
@@ -1383,6 +1538,13 @@ export default function App() {
           canReact={canReact}
           currentUserId={account?.profile?.id}
           onReaction={(kind, enabled) => saveReaction(selectedMedia, kind, enabled)}
+          watchlistRequest={pendingWatchlistRequest}
+          watchlistRequestActions={watchlistRequestActions}
+          watchlistRequestBusy={watchlistRequestBusy}
+          onRequestStampRemoval={createStampRemovalRequests}
+          onRequestMove={createMoveRequest}
+          onRespondWatchlistRequest={answerPendingWatchlistRequest}
+          onDismissWatchlistRequest={() => setPendingWatchlistRequest(null)}
           sourceCollectionTitle={selectedSourceCollectionTitle}
           canImport={canImportSelectedMedia}
           onImport={beginMediaImport}
@@ -1467,6 +1629,7 @@ export default function App() {
             setAccountOpen(false);
             setLandingApplied(false);
             userSelectedCollection.current = false;
+            requestLoginHandled.current = '';
             setToast('Signed in securely.');
           }}
           onSignedOut={() => {
@@ -1476,6 +1639,9 @@ export default function App() {
             setAccountOpen(false);
             setLandingApplied(false);
             userSelectedCollection.current = false;
+            requestLoginHandled.current = '';
+            setPendingWatchlistRequest(null);
+            setWatchlistRequestListOpen(false);
             setToast('Signed out.');
           }}
           onManageUsers={() => { setAccountOpen(false); setAdminOpen(true); }}
@@ -1488,7 +1654,9 @@ export default function App() {
       {recoveryOpen && <RecoveryPasswordDialog account={account} onClose={() => setRecoveryOpen(false)} onComplete={async () => { await signOut(); setAccount(null); setRecoveryOpen(false); setAccountOpen(true); window.history.replaceState({}, '', appSiteUrl()); setToast('Password updated. Sign in with your new password.'); }} />}
 
       {shareOpen && ownCollection && <ShareCollectionDialog accessToken={accessToken} collectionId={ownCollection.id} collectionTitle={ownCollection.title} notify={setToast} onClose={() => setShareOpen(false)} />}
-      {usersOpen && <UsersDialog accessToken={accessToken} currentUser={account.profile} hub={userHub} setHub={setUserHub} refreshHub={refreshUserHub} notify={setToast} onClose={() => setUsersOpen(false)} onVisibilityChanged={async () => { const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); clearSnapshotCaches({ persistent: true }); }} />}
+      {usersOpen && <UsersDialog accessToken={accessToken} currentUser={account.profile} hub={userHub} setHub={setUserHub} refreshHub={refreshUserHub} notify={setToast} onOpenWatchlistRequest={(request) => openPendingWatchlistRequest(request, { fromList: true })} onClose={() => setUsersOpen(false)} onVisibilityChanged={async () => { const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); clearSnapshotCaches({ persistent: true }); }} />}
+
+      {watchlistRequestListOpen && <WatchlistRequestListDialog requests={userHub?.watchlist_requests || []} onOpen={(request) => openPendingWatchlistRequest(request, { fromList: true })} onClose={() => setWatchlistRequestListOpen(false)} />}
 
       {adminOpen && <AdminUsers accessToken={accessToken} clubs={adminClubs} onClubsChange={setAdminClubs} mainWatchlistClubId={adminMainClubId} onMainWatchlistClubChange={(clubId) => {
         if (clubId) window.localStorage.setItem(ADMIN_MAIN_CLUB_KEY, clubId);
@@ -2234,7 +2402,7 @@ function MediaCard({ item, shelfRank = null, eagerPoster = false, onClick, canRa
   );
 }
 
-function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPrevious, onNext, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, sourceCollectionTitle, canImport, onImport, onDelete, onRestore }) {
+function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPrevious, onNext, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, sourceCollectionTitle, canImport, onImport, onDelete, onRestore, watchlistRequest, watchlistRequestActions, watchlistRequestBusy, onRequestStampRemoval, onRequestMove, onRespondWatchlistRequest, onDismissWatchlistRequest }) {
   const [editing, setEditing] = useState(false);
   const [optimisticShelves, setOptimisticShelves] = useState(item.lists || []);
   const optimisticShelvesRef = useRef(item.lists || []);
@@ -2245,7 +2413,7 @@ function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPreviou
   const [posterReviewOpen, setPosterReviewOpen] = useState(false);
   const [detailReviewOpen, setDetailReviewOpen] = useState(false);
   const [shelvesOpen, setShelvesOpen] = useState(false);
-  useEscape(onClose, !editing && !posterReviewOpen && !detailReviewOpen && !shelvesOpen);
+  useEscape(onClose, !editing && !posterReviewOpen && !detailReviewOpen && !shelvesOpen && !watchlistRequest);
   useEffect(() => { setOptimisticOwned(Boolean(item.owned)); }, [item.owned, item.database_id]);
   useEffect(() => { optimisticShelvesRef.current = item.lists || []; setOptimisticShelves(item.lists || []); }, [item.lists, item.database_id]);
   const tags = mediaDisplayTags(item);
@@ -2310,7 +2478,10 @@ function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPreviou
               {canEdit && !item.poster_url && canReviewPoster && <button aria-label="Enrich poster" onClick={() => setPosterReviewOpen(true)}><Search size={14} />Enrich poster</button>}
               {canEdit && canReviewPoster && <button aria-label="Enrich details" onClick={() => setDetailReviewOpen(true)}><Search size={14} />Enrich details</button>}
               {canEdit && (item.deleted_at ? <button aria-label="Restore from Bin" onClick={onRestore}>Restore from Bin</button> : <button aria-label="Move to Bin" onClick={onDelete}><Trash2 size={14} />Move to Bin</button>)}
+              {watchlistRequestActions?.can_request_stamp_removal && <button type="button" disabled={watchlistRequestBusy} onClick={onRequestStampRemoval}><Stamp size={14} />Request priority stamp removal</button>}
+              {(watchlistRequestActions?.move_options || []).map((option) => <button type="button" disabled={watchlistRequestBusy} onClick={() => onRequestMove(option)} key={`${option.club_id}-${option.source_shelf_id}`}><ListOrdered size={14} />Ask {option.target_name} to move this watched item out of {option.source_shelf_name}</button>)}
             </div>
+            {stampRequestProgress(watchlistRequestActions) && <p className="watchlist-request-progress">{stampRequestProgress(watchlistRequestActions)}</p>}
             {canImport && <div className="drawer-import-actions"><Button className="drawer-import-button" icon={Download} onClick={onImport}>Import to Your Collection</Button></div>}
           </div>
         </div>
@@ -2322,7 +2493,55 @@ function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPreviou
       {shelvesOpen && <ShelfMembershipDialog collectionTitle={sourceCollectionTitle} itemTitle={title} shelves={shelves} selectedShelfIds={optimisticShelves} canEdit={canEdit} onToggle={toggleShelf} onClose={() => setShelvesOpen(false)} />}
       {posterReviewOpen && <PosterEnrichmentDialog item={item} candidates={posterCandidates} busy={posterReviewBusy} error={posterReviewError} onClose={() => setPosterReviewOpen(false)} onLoad={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); setPosterCandidates(result?.candidates || []); } catch (error) { setPosterReviewError(error?.message || 'Provider candidates could not be loaded.'); } finally { setPosterReviewBusy(false); } }} onChoose={(candidate) => { setPosterReviewOpen(false); setPosterReviewBusy(false); setPosterReviewError(''); onChoosePoster(candidate.poster_url).catch(() => null); }} />}
       {detailReviewOpen && <DetailEnrichmentDialog item={item} onClose={() => setDetailReviewOpen(false)} onLoad={onFindDetails} onChoose={async (candidate) => { await onChooseDetails(candidate); setDetailReviewOpen(false); }} />}
+      {watchlistRequest && <WatchlistRequestDialog request={watchlistRequest} shelves={shelves} busy={watchlistRequestBusy} onRespond={onRespondWatchlistRequest} onDismiss={onDismissWatchlistRequest} />}
     </div>
+  );
+}
+
+function WatchlistRequestDialog({ request, shelves, busy, onRespond, onDismiss }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [error, setError] = useState('');
+  const validDestinations = (shelves || []).filter((shelf) => !shelf.deleted_at && !shelf.showInMainWatchlist && !shelf.virtual);
+  useEscape(() => pickerOpen ? setPickerOpen(false) : onDismiss());
+  const respond = async (response, destinationShelfId = null) => {
+    setError('');
+    try {
+      await onRespond(response, destinationShelfId);
+    } catch (requestError) {
+      setError(requestError?.message || 'The request could not be updated. No changes were made.');
+    }
+  };
+  return createPortal(
+    <div className="modal-layer editor-layer watchlist-request-layer">
+      <section className="media-edit-dialog watchlist-request-dialog" role="dialog" aria-modal="true" aria-labelledby="watchlist-request-title">
+        <button className="close" type="button" onClick={onDismiss} aria-label="Dismiss watchlist request"><X /></button>
+        <span className="eyebrow">WATCHLIST REQUEST</span>
+        <h2 id="watchlist-request-title">{request.media_title}</h2>
+        <p className="watchlist-request-message">{watchlistRequestMessage(request)}</p>
+        {request.request_type === 'move_watched_item' && request.source_shelf_name && <p className="watchlist-request-source">This item is currently in <strong>{request.source_shelf_name}</strong>.</p>}
+        {request.request_type === 'priority_stamp_removal'
+          ? <div className="watchlist-request-actions">
+            <button className="secondary-button" type="button" disabled={busy} onClick={() => respond('keep_stamp')}>Keep my stamp</button>
+            <Button type="button" disabled={busy} onClick={() => respond('clear_stamp')}>Clear my stamp</Button>
+          </div>
+          : <>
+            {!pickerOpen && <div className="watchlist-request-actions move-actions">
+              <Button type="button" disabled={busy} onClick={() => setPickerOpen(true)}>Move to another shelf</Button>
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => respond('not_now')}>Not now</button>
+              <button className="request-overflow-action" type="button" disabled={busy} onClick={() => respond('keep_in_watchlist')}>Keep in watchlist</button>
+            </div>}
+            {pickerOpen && <div className="watchlist-destination-picker">
+              <div><span className="eyebrow">DESTINATION</span><h3>Move to another shelf</h3><p>Only shelves outside the Main Watchlist are available.</p></div>
+              {!validDestinations.length
+                ? <div className="shelf-picker-state"><strong>No valid destination shelves</strong><span>Create a non-watchlist shelf, then return to this request.</span></div>
+                : <div className="shelf-picker">{validDestinations.map((shelf) => <button type="button" disabled={busy} key={shelf.shelf_id} onClick={() => respond('move_to_shelf', shelf.shelf_id)}><ListOrdered size={14} /><span><strong>{shelf.name}</strong>{shelf.subtitle && <small>{shelf.subtitle}</small>}</span></button>)}</div>}
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => { setPickerOpen(false); setError(''); }}>Cancel</button>
+            </div>}
+          </>}
+        {error && <p className="field-error" role="alert">{error}</p>}
+      </section>
+    </div>,
+    document.body,
   );
 }
 
@@ -2438,11 +2657,24 @@ function HubEmpty({ title, children }) {
   return <div className="hub-empty"><UserRound size={18} /><strong>{title}</strong>{children && <small>{children}</small>}</div>;
 }
 
+function WatchlistRequestListDialog({ requests, onOpen, onClose }) {
+  useEscape(onClose);
+  return <div className="modal-layer editor-layer watchlist-request-list-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="media-edit-dialog watchlist-request-list" role="dialog" aria-modal="true" aria-labelledby="watchlist-request-list-title">
+      <button className="close" type="button" onClick={onClose} aria-label="Close watchlist requests"><X /></button>
+      <span className="eyebrow">NOTIFICATIONS</span>
+      <h2 id="watchlist-request-list-title">You have {requests.length} watchlist requests.</h2>
+      <p>Open one request at a time. The media drawer will stay open after you respond.</p>
+      <div>{requests.map((request) => <button type="button" className="watchlist-request-list-item" key={request.id} onClick={() => onOpen(request)}><span><strong>{request.media_title}</strong><small>{watchlistRequestMessage(request)}</small></span><ChevronRight size={16} /></button>)}</div>
+    </section>
+  </div>;
+}
+
 function UserHubRow({ user, meta, children, quiet = false }) {
   return <div className={cls('user-hub-row', quiet && 'quiet')}><UserAvatar person={user} /><span className="user-hub-identity"><strong>{personDisplayName(user)}</strong><small>@{user.username}{meta ? ` · ${meta}` : ''}</small></span><div className="user-hub-actions">{children}</div></div>;
 }
 
-function UsersDialog({ accessToken, currentUser, hub, setHub, refreshHub, notify, onClose, onVisibilityChanged }) {
+function UsersDialog({ accessToken, currentUser, hub, setHub, refreshHub, notify, onOpenWatchlistRequest, onClose, onVisibilityChanged }) {
   const dialogRef = useRef(null);
   const [activeTab, setActiveTab] = useState('friends');
   const [query, setQuery] = useState('');
@@ -2477,6 +2709,7 @@ function UsersDialog({ accessToken, currentUser, hub, setHub, refreshHub, notify
   const users = hub?.users || [];
   const clubs = hub?.clubs || [];
   const invitations = hub?.club_invitations || [];
+  const watchlistRequests = hub?.watchlist_requests || [];
   const incoming = users.filter((user) => user.incoming);
   const sent = users.filter((user) => user.outgoing);
   const friends = users.filter((user) => user.friend);
@@ -2518,10 +2751,14 @@ function UsersDialog({ accessToken, currentUser, hub, setHub, refreshHub, notify
   };
 
   return <div className="modal-layer editor-layer users-dialog-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section ref={dialogRef} className="media-edit-dialog users-dialog" role="dialog" aria-modal="true" aria-labelledby="users-title">
-    <header className="people-dialog-header"><button className="close" onClick={onClose} aria-label="Close Users & Clubs"><X /></button><span className="eyebrow">PEOPLE & CLUBS</span><h2 id="users-title">Users & Clubs</h2><p>Friends can see each other’s collections and may be invited to Clubs.</p><div className="people-tabs" role="tablist" aria-label="Users and Clubs"><button role="tab" aria-selected={activeTab === 'friends'} aria-controls="friends-panel" className={activeTab === 'friends' ? 'active' : ''} onClick={() => setActiveTab('friends')}>Friends{incoming.length > 0 && <b>{incoming.length}</b>}</button><button role="tab" aria-selected={activeTab === 'clubs'} aria-controls="clubs-panel" className={activeTab === 'clubs' ? 'active' : ''} onClick={() => setActiveTab('clubs')}>Clubs{invitations.length > 0 && <b>{invitations.length}</b>}</button></div></header>
+    <header className="people-dialog-header"><button className="close" onClick={onClose} aria-label="Close Users & Clubs"><X /></button><span className="eyebrow">PEOPLE & CLUBS</span><h2 id="users-title">Users & Clubs</h2><p>Friends can see each other’s collections and may be invited to Clubs.</p><div className="people-tabs" role="tablist" aria-label="Users and Clubs"><button role="tab" aria-selected={activeTab === 'friends'} aria-controls="friends-panel" className={activeTab === 'friends' ? 'active' : ''} onClick={() => setActiveTab('friends')}>Friends{incoming.length + watchlistRequests.length > 0 && <b>{incoming.length + watchlistRequests.length}</b>}</button><button role="tab" aria-selected={activeTab === 'clubs'} aria-controls="clubs-panel" className={activeTab === 'clubs' ? 'active' : ''} onClick={() => setActiveTab('clubs')}>Clubs{invitations.length > 0 && <b>{invitations.length}</b>}</button></div></header>
     <div className="people-dialog-body">
       {!hub && <div className="people-loading" aria-live="polite"><span /><span /><span />Loading friends and Clubs…</div>}
       {hub && activeTab === 'friends' && <div id="friends-panel" role="tabpanel" className="people-panel">
+        <section className="people-section"><div className="section-heading"><div><span className="eyebrow">WATCHLIST</span><h3>Watchlist requests</h3></div>{watchlistRequests.length > 0 && <span>{watchlistRequests.length}</span>}</div>
+          {!watchlistRequests.length && <HubEmpty title="No watchlist requests">Priority Stamp and watched-item requests will appear here.</HubEmpty>}
+          {watchlistRequests.map((request) => <div className="watchlist-request-row" key={request.id}><span><strong>{request.media_title}</strong><small>{watchlistRequestMessage(request)}</small></span><Button onClick={() => onOpenWatchlistRequest(request)}>Open request</Button></div>)}
+        </section>
         <label className="people-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search approved users" aria-label="Search approved users" />{query && <button onClick={() => setQuery('')} aria-label="Clear user search"><X size={14} /></button>}</label>
         <section className="people-section"><div className="section-heading"><div><span className="eyebrow">DIRECTORY</span><h3>Approved users</h3></div>{!normalizedQuery && directory.length > visibleDirectory.length && <small>Showing first {visibleDirectory.length}</small>}</div>
           {!visibleDirectory.length && <HubEmpty title="No approved users found">Try another display name or username.</HubEmpty>}
