@@ -45,10 +45,11 @@ export function buildWatchGroupIdentities(mediaItems) {
   return identityByMediaId;
 }
 
-export function buildWatchDemand(mediaItems, collections, interests, profiles) {
+export function buildWatchDemand(mediaItems, collections, interests, profiles, virtualMediaIds = null) {
   const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
   const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
   const identityByMediaId = buildWatchGroupIdentities(mediaItems);
+  const virtualMediaIdSet = virtualMediaIds ? new Set(virtualMediaIds) : null;
   const peopleByIdentity = new Map();
   const add = (identity, personId) => {
     if (!identity || !personId) return;
@@ -57,7 +58,11 @@ export function buildWatchDemand(mediaItems, collections, interests, profiles) {
     peopleByIdentity.set(identity, people);
   };
 
-  for (const item of mediaItems) add(identityByMediaId.get(item.id), collectionById.get(item.collection_id)?.owner_id);
+  for (const item of mediaItems) {
+    if (!virtualMediaIdSet || virtualMediaIdSet.has(item.id)) {
+      add(identityByMediaId.get(item.id), collectionById.get(item.collection_id)?.owner_id);
+    }
+  }
   for (const interest of interests) add(identityByMediaId.get(interest.media_item_id), interest.user_id);
 
   return new Map(mediaItems.map((item) => {

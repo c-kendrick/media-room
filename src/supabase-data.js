@@ -520,7 +520,13 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
     if (a.collection_id !== b.collection_id) return (collectionOrder.get(a.collection_id) ?? 0) - (collectionOrder.get(b.collection_id) ?? 0);
     return mainPosition(a) - mainPosition(b) || Number(a.position || 0) - Number(b.position || 0) || a.name.localeCompare(b.name);
   });
-  const demandByMediaId = buildWatchDemand(allMediaItems, collections, interests, publicProfiles);
+  const demandByMediaId = buildWatchDemand(
+    allMediaItems,
+    collections,
+    interests,
+    publicProfiles,
+    mirroredMediaIds,
+  );
   const watchlistIdentityByMediaId = buildWatchGroupIdentities(allMediaItems);
   const priorityStampCountByMediaId = buildPriorityStampCounts(allMediaItems, interests);
   const interestedIdentities = new Set(interests.map((interest) => watchlistIdentityByMediaId.get(interest.media_item_id)).filter(Boolean));
