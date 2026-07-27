@@ -105,6 +105,7 @@ test('custom libraries are migrated non-destructively and shelf transfers stay a
   assert.match(styles, /\.collection-page \.collection-library-heading\{[\s\S]*justify-content:space-between[\s\S]*z-index:2/);
   assert.match(styles, /\.library-title-menu\{[\s\S]*right:0/);
   assert.match(styles, /@media\(max-width:760px\)\{[\s\S]*\.collection-page \.library-header-controls\{[^}]*flex-wrap:nowrap[\s\S]*\.library-create-button\{[\s\S]*font-size:0!important/);
+  assert.match(styles, /@media\(max-width:760px\)\{[\s\S]*\.library-create-button\{[\s\S]*height:40px!important[\s\S]*\.library-edit-actions>button\{[^}]*height:40px!important;min-height:40px!important/);
   assert.match(styles, /\.library-editor-dialog[\s\S]*grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/);
 });
 
@@ -583,6 +584,35 @@ test('owners can open a collection Bin and restore media or shelves', async () =
   assert.doesNotMatch(app, /drawer-danger-zone[\s\S]{0,400}Delete permanently/);
   assert.match(styles, /\.collection-bin-drawer/);
   assert.match(styles, /\.bin-row-actions/);
+});
+
+test('custom libraries can be permanently deleted from the Bin without weakening default-library protections', async () => {
+  const app = await read('src/App.jsx');
+  const data = await read('src/supabase-data.js');
+  const writes = await read('src/media-write.js');
+  const migration = await read('supabase/migrations/20260728010000_permanent_library_deletion.sql');
+  assert.match(app, /onDeleteLibrary=\{async \(library\)/);
+  assert.match(app, /loadLibraryDeletionImpact\(\{ libraryId: library\.id, accessToken \}\)/);
+  assert.match(app, /title: `Permanently delete \$\{library\.name\}\?`/);
+  assert.match(app, /contains \$\{shelfCount\}[\s\S]*and \$\{itemCount\}/);
+  assert.match(app, /mediaShelves: \(data\.mediaShelves \|\| \[\]\)\.filter\(\(row\) => row\.library_id !== library\.id\)/);
+  assert.match(app, /onInvalidateLibrary\?\.\(library\.id\)/);
+  assert.match(data, /loadLibraryDeletionImpact[\s\S]*library_id: 'eq\.' \+ libraryId[\s\S]*shelfCount: shelves\.length, itemCount: mediaItems\.length/);
+  assert.match(writes, /permanentlyDeleteLibrary[\s\S]*rpc\/permanently_delete_library/);
+  assert.match(migration, /if target\.is_protected then[\s\S]*Default libraries cannot be permanently deleted/);
+  assert.match(migration, /if target\.deleted_at is null then[\s\S]*Only libraries in the Bin can be permanently deleted/);
+  assert.match(migration, /delete from public\.media_items as item where item\.library_id = target\.id;[\s\S]*delete from public\.shelves as shelf where shelf\.library_id = target\.id;[\s\S]*delete from public\.libraries as library where library\.id = target\.id;/);
+});
+
+test('shelf creation remains cache-authoritative after reload failures and stale library responses', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /if \(sectionRequests\.current\.get\(requestKey\) !== request\) return loaded;/);
+  assert.match(app, /const created = await createShelf[\s\S]*const row = created\?\.\[0\]/);
+  assert.match(app, /loadedLibraries: \[\.\.\.new Set\([\s\S]*currentLibrary\.id/);
+  assert.match(app, /mediaShelves: \[\.\.\.\(data\.mediaShelves \|\| \[\]\)\.filter[\s\S]*createdShelf\]/);
+  assert.match(app, /Shelf created and kept visible\. The latest library data could not be reloaded yet\./);
+  assert.match(app, /creatingShelfRequestRef\.current/);
+  assert.match(app, /disabled=\{!name\.trim\(\) \|\| saving\}/);
 });
 
 test('add and edit share contextual media details while only shelf placement is additionally required', async () => {
@@ -1830,7 +1860,7 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /aria-label="Shelves"[\s\S]*<ListOrdered size=\{14\} \/>Shelves/);
   assert.match(styles, /\.drawer-collection-name\{[^}]*color:var\(--brand-brown\)/);
   assert.match(app, /function ShelfMembershipDialog[\s\S]*role="dialog"[\s\S]*visibleShelves\.map[\s\S]*onToggle\(shelf\.shelf_id\)/);
-  assert.match(app, /const pagerOnlyActions = !canRemoveMirror && !canEdit && !canCurateMain && !canReorderShelf/);
+  assert.match(app, /const pagerOnlyActions = !canRemoveMirror && !canEdit && !canReorderShelf/);
   assert.match(app, /className=\{cls\('shelf-actions', pagerOnlyActions && 'pager-only'\)\}/);
   assert.match(app, /cls\('page media-page', data\.mainWatchlist \? 'main-watchlist-page' : 'collection-page'\)/);
   assert.match(styles, /\.shelf-head h2 span\{background:var\(--brand-brown\)\}/);
@@ -1839,8 +1869,10 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /shelf\.ownerName && 'main-watchlist-shelf'/);
   assert.match(app, /function ShelfEditDialog\(\{ shelf, canArrange, onArrange, canCurateMain, onToggleMain, canTransfer, onTransfer, onClose, onSave \}\)/);
   assert.match(app, /canTransfer && <details className="shelf-transfer-section">/);
-  assert.match(app, /className="shelf-edit-mobile-actions"[\s\S]*>Arrange Shelf<[\s\S]*onToggleMain\(enabled\)/);
-  assert.match(app, /const previous = mainWatchlist; const enabled = !previous; setMainWatchlist\(enabled\); try \{ await onToggleMain\(enabled\); \} catch \{ setMainWatchlist\(previous\); \}/);
+  assert.match(app, /shelf-edit-main-watchlist[\s\S]*onToggleMain\(enabled\)[\s\S]*>Include this in Main Watchlist</);
+  assert.match(app, /const previous = mainWatchlist; const enabled = event\.target\.checked; setMainWatchlist\(enabled\); try \{ await onToggleMain\(enabled\); \} catch \{ setMainWatchlist\(previous\); \}/);
+  const mediaShelf = app.slice(app.indexOf('function MediaShelf'), app.indexOf('function ArrangeShelfDialog'));
+  assert.doesNotMatch(mediaShelf, /main-watchlist-toggle|Include this in Main Watchlist/);
   assert.match(styles, /\.shelf-heading-copy h2\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);
   assert.match(styles, /\.media-command-heading h1\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);
   assert.match(styles, /\.main-owner-intro h2\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);

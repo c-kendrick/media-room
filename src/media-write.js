@@ -157,9 +157,10 @@ export function updateLibrary(accessToken, libraryId, changes) {
 }
 
 export function permanentlyDeleteLibrary(accessToken, libraryId) {
-  return supabaseRequest('/rest/v1/libraries?id=eq.' + encodeURIComponent(libraryId), {
-    method: 'DELETE', fresh: true,
-    headers: { Authorization: 'Bearer ' + accessToken, Prefer: 'return=representation' },
+  return supabaseRequest('/rest/v1/rpc/permanently_delete_library', {
+    method: 'POST', fresh: true,
+    body: { target_library_id: libraryId },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
   });
 }
 
