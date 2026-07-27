@@ -1571,6 +1571,61 @@ test('media reactions share one identity across matching copies without joining 
   assert.deepEqual(rolledBack.media.map((item) => item.likes), [[], [], []]);
 });
 
+test('Priority Stamp optimistic updates keep Interest badges and tooltips live', () => {
+  const person = { id: 'person-a', username: 'alex', display_name: 'Alex' };
+  const other = { id: 'person-b', username: 'sam', display_name: 'Sam' };
+  const stamped = applyReactionToSnapshot({
+    collectionId: 'visible',
+    media: [{
+      database_id: 'film-a',
+      type: 'film',
+      title: 'Alien',
+      year: 1979,
+      priorities: [],
+      interestPriorities: [],
+      watchDemand: [other],
+      watchlistedBy: [other],
+      demandCount: 0,
+    }],
+  }, { type: 'film', title: 'Alien', year: 1979 }, 'priority', true, person);
+
+  assert.deepEqual(stamped.media[0].priorities.map((entry) => entry.id), ['person-a']);
+  assert.deepEqual(stamped.media[0].interestPriorities.map((entry) => entry.id), ['person-a']);
+  assert.deepEqual(stamped.media[0].watchDemand.map((entry) => entry.id), ['person-b', 'person-a']);
+  assert.equal(stamped.media[0].demandCount, 2);
+  assert.equal(priorityInterestPresentation({
+    interestPeople: stamped.media[0].watchDemand,
+    priorityPeople: stamped.media[0].interestPriorities,
+    watchlistedPeople: stamped.media[0].watchlistedBy,
+  }).count, 2);
+
+  const unstamped = applyReactionToSnapshot(
+    stamped,
+    stamped.media[0],
+    'priority',
+    false,
+    person,
+  );
+  assert.deepEqual(unstamped.media[0].priorities, []);
+  assert.deepEqual(unstamped.media[0].interestPriorities, []);
+  assert.deepEqual(unstamped.media[0].watchDemand.map((entry) => entry.id), ['person-b']);
+  assert.equal(unstamped.media[0].demandCount, 0);
+
+  const watchlistedStamp = applyReactionToSnapshot({
+    collectionId: 'visible',
+    media: [{
+      ...stamped.media[0],
+      priorities: [person],
+      interestPriorities: [person],
+      watchDemand: [person],
+      watchlistedBy: [person],
+      demandCount: 1,
+    }],
+  }, stamped.media[0], 'priority', false, person);
+  assert.deepEqual(watchlistedStamp.media[0].watchDemand.map((entry) => entry.id), ['person-a']);
+  assert.equal(watchlistedStamp.media[0].demandCount, 0);
+});
+
 test('likes and Priority Stamps are secure, private from share links, and preserve Watchlist maths', async () => {
   const app = await read('src/App.jsx');
   const data = await read('src/supabase-data.js');
@@ -1610,6 +1665,7 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.match(app, /function ReactionButton/);
   assert.match(app, /const Icon = isLike \? Heart : Stamp/);
   assert.match(app, /const tooltip = isLike \? summary : priorityPresentation\.tooltip/);
+  assert.match(app, /title=\{isLike \? tooltip : undefined\}/);
   assert.match(app, /`\$\{isLike \? 'Loved' : 'Priority Watch'\} by/);
   assert.doesNotMatch(app, /\bLiked\b|No likes yet|Added to your likes/);
   assert.match(app, /item\.priorities\?\.map\(\(person\) => <span className="card-interest"/);

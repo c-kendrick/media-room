@@ -2829,7 +2829,7 @@ function ReactionButton({ kind, people = [], interestPeople, interestPriorityPeo
     className={cls('reaction-button', isLike ? 'like-reaction' : 'priority-reaction', active && 'active', labelled && 'labelled', count > 0 && 'has-count')}
     aria-label={isLike ? `${label}. ${summary}` : tooltip.replace(/\n+/g, '. ')}
     aria-pressed={active}
-    title={isLike || !priorityPresentation.detailed ? tooltip : undefined}
+    title={isLike ? tooltip : undefined}
     data-tooltip={isLike || !priorityPresentation.detailed ? tooltip : undefined}
     disabled={!canReact || saving}
     onPointerDown={(event) => event.stopPropagation()}
