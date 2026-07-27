@@ -31,6 +31,6 @@ Before finishing:
 6. If no manual SQL is required, there's no need to state either way.
 7. Mention any known limitations, unresolved issues, or steps I still need to perform.
 
-Glossary:
-- Topmost (Club) Watchlist: the watchlist shelf that is found in the club or main watchlist at the very top that aggregates from the club-included watchlists
-- Mirrored watchlist: a shelf in a user's collection with the toggle "Include this in Main Watchlist" - this is then mirrored and placed in their club main watchlist underneath the topmost club watchlist. 
+## Glossary:
+1. Topmost (Club) Watchlist: the watchlist shelf that is found in the club or main watchlist at the very top that aggregates from the club-included watchlists
+2. Mirrored watchlist: a shelf in a user's collection with the toggle "Include this in Main Watchlist" - this is then mirrored and placed in their club main watchlist underneath the topmost club watchlist. 
