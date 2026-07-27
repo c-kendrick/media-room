@@ -221,6 +221,28 @@ export function buildPriorityStampCounts(mediaItems, interests) {
   );
 }
 
+export function buildPriorityStampInterests(mediaItems, reactions) {
+  const mediaIdByWorkKey = new Map();
+  for (const item of mediaItems || []) {
+    const workKey = mediaReactionIdentity(item);
+    if (!mediaIdByWorkKey.has(workKey)) mediaIdByWorkKey.set(workKey, item.id);
+  }
+
+  const seen = new Set();
+  return (reactions || []).flatMap((reaction) => {
+    if (
+      reaction.kind !== 'priority' ||
+      (reaction.state && reaction.state !== 'active') ||
+      !reaction.user_id
+    ) return [];
+    const mediaItemId = mediaIdByWorkKey.get(reaction.work_key);
+    const identity = `${mediaItemId}|${reaction.user_id}`;
+    if (!mediaItemId || seen.has(identity)) return [];
+    seen.add(identity);
+    return [{ media_item_id: mediaItemId, user_id: reaction.user_id }];
+  });
+}
+
 export function sortTopmostWatchlistByInterest(
   mediaItems,
   demandByMediaId,
@@ -501,7 +523,12 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
   const mirroredMediaIds = new Set(mirroredMemberships.map((membership) => membership.media_item_id));
   const mirroredMediaItems = mediaItems.filter((item) => mirroredMediaIds.has(item.id));
   const allMediaItems = mediaItems;
-  const interests = interestRows.filter((interest) => allMediaItems.some((item) => item.id === interest.media_item_id));
+  const scopedReactions = reactions.filter(
+    (reaction) =>
+      scopedProfileIds.has(reaction.user_id) &&
+      (!reaction.state || reaction.state === 'active'),
+  );
+  const interests = buildPriorityStampInterests(allMediaItems, scopedReactions);
   const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
   const collectionOrder = new Map(collections.map((collection, index) => [collection.id, index]));
   const mainPosition = (shelf) => {
@@ -524,6 +551,13 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
     allMediaItems,
     collections,
     interests,
+    publicProfiles,
+    mirroredMediaIds,
+  );
+  const watchlistedByMediaId = buildWatchDemand(
+    allMediaItems,
+    collections,
+    [],
     publicProfiles,
     mirroredMediaIds,
   );
@@ -559,12 +593,13 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
     [...mirroredMemberships, ...virtualMemberships],
     interests,
     publicProfiles,
-    reactions.filter((reaction) => scopedProfileIds.has(reaction.user_id) && (!reaction.state || reaction.state === 'active')),
+    scopedReactions,
     ['screen'],
   );
   return { ...snapshot, mainWatchlist: true, media: snapshot.media.map((item) => {
     const watchDemand = demandByMediaId.get(item.database_id) || [];
-    return { ...item, watchDemand, demandCount: watchDemand.length };
+    const watchlistedBy = watchlistedByMediaId.get(item.database_id) || [];
+    return { ...item, watchDemand, watchlistedBy, demandCount: watchDemand.length };
   }) };
 }
 
