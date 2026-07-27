@@ -140,7 +140,30 @@ export function applyReactionToSnapshot(snapshot, targetItem, kind, enabled, per
     media: snapshot.media.map((item) => {
       if (mediaReactionIdentity(item) !== targetIdentity) return item;
       const people = (item[field] || []).filter((entry) => entry.id !== person.id);
-      return { ...item, [field]: enabled ? [...people, person] : people };
+      const updatedPeople = enabled ? [...people, person] : people;
+      if (kind !== 'priority' || !Array.isArray(item.watchDemand)) {
+        return { ...item, [field]: updatedPeople };
+      }
+
+      const watchlistedIds = new Set((item.watchlistedBy || []).map((entry) => entry.id));
+      const demandWithoutPerson = item.watchDemand.filter((entry) => entry.id !== person.id);
+      const watchDemand = enabled || watchlistedIds.has(person.id)
+        ? [...demandWithoutPerson, person]
+        : demandWithoutPerson;
+      const interestPriorities = Array.isArray(item.interestPriorities)
+        ? (enabled
+          ? [...item.interestPriorities.filter((entry) => entry.id !== person.id), person]
+          : item.interestPriorities.filter((entry) => entry.id !== person.id))
+        : null;
+      const priorityCount = interestPriorities ? interestPriorities.length : updatedPeople.length;
+
+      return {
+        ...item,
+        [field]: updatedPeople,
+        watchDemand,
+        ...(interestPriorities ? { interestPriorities } : {}),
+        demandCount: qualifyingInterestCount(watchDemand.length, priorityCount),
+      };
     }),
   };
 }
