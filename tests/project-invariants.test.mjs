@@ -10,7 +10,7 @@ import { parseCollectionBackup, validateCollectionBackup } from '../src/backup-i
 import { supabaseRequest } from '../src/supabase.js';
 import { collectionSummaryStats } from '../src/collection-stats.js';
 import { appSiteUrl, authenticatedProfilePath, selectAuthenticatedProfile, signupRateLimitDetails } from '../src/auth.js';
-import { applyReactionToSnapshot, mediaReactionIdentity, priorityInterestPresentation } from '../src/media-reactions.js';
+import { applyMainWatchlistInterest, applyReactionToSnapshot, mediaReactionIdentity, priorityInterestPresentation, qualifyingInterestCount } from '../src/media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from '../src/identity.js';
 import {
   buildPriorityStampCounts,
@@ -307,6 +307,7 @@ test('Priority Stamp presentation shows distinct Interest with stamp and watchli
     {
       count: 3,
       detailed: true,
+      priorityCount: 2,
       priorityNames: [
         { id: 'user-a', name: 'User A' },
         { id: 'user-b', name: 'User B' },
@@ -343,12 +344,78 @@ test('Interest tooltip orders additional watchlist contributors before muted ove
   );
 });
 
-test('only Topmost Watchlist cards use total Interest for the Priority badge', async () => {
+test('one watchlist-only person does not qualify as Interest without a Priority Stamp', () => {
+  const userA = { id: 'user-a', display_name: 'User A' };
+  const userB = { id: 'user-b', display_name: 'User B' };
+
+  assert.equal(qualifyingInterestCount(1, 0), 0);
+  assert.equal(qualifyingInterestCount(1, 1), 1);
+  assert.equal(qualifyingInterestCount(2, 0), 2);
+  assert.equal(priorityInterestPresentation({
+    interestPeople: [{ id: 'user-a' }],
+    priorityPeople: [{ id: 'user-a' }],
+    watchlistedPeople: [{ id: 'user-a' }],
+  }).count, 1);
+
+  const soloWatchlist = priorityInterestPresentation({
+    interestPeople: [userA],
+    priorityPeople: [],
+    watchlistedPeople: [userA],
+  });
+  assert.equal(soloWatchlist.count, 0);
+  assert.equal(soloWatchlist.watchlistedCount, 0);
+  assert.deepEqual(soloWatchlist.watchlistedNames, [
+    { id: 'user-a', name: 'User A', muted: true },
+  ]);
+
+  const sharedWatchlists = priorityInterestPresentation({
+    interestPeople: [userA, userB],
+    priorityPeople: [],
+    watchlistedPeople: [userA, userB],
+  });
+  assert.equal(sharedWatchlists.count, 2);
+  assert.equal(sharedWatchlists.watchlistedCount, 2);
+  assert.ok(sharedWatchlists.watchlistedNames.every((person) => !person.muted));
+});
+
+test('included personal shelves inherit the same scoped Interest as Main Watchlist', async () => {
+  const userA = { id: 'user-a', display_name: 'User A' };
+  const userB = { id: 'user-b', display_name: 'User B' };
+  const personal = {
+    collectionId: 'collection-a',
+    mediaShelves: [
+      { shelf_id: 'included', showInMainWatchlist: true, deleted_at: null },
+      { shelf_id: 'private', showInMainWatchlist: false, deleted_at: null },
+    ],
+    media: [
+      { database_id: 'aliens-a', type: 'film', title: 'Aliens', year: 1986, lists: ['included'], priorities: [userA] },
+      { database_id: 'private-a', type: 'film', title: 'Private Film', year: 2026, lists: ['private'], priorities: [] },
+    ],
+  };
+  const mainWatchlist = {
+    mainWatchlist: true,
+    media: [
+      {
+        database_id: 'aliens-main',
+        type: 'film',
+        title: 'Aliens',
+        year: 1986,
+        watchDemand: [userA, userB],
+        watchlistedBy: [userA, userB],
+        priorities: [userA],
+        demandCount: 2,
+      },
+    ],
+  };
+  const enriched = applyMainWatchlistInterest(personal, mainWatchlist);
   const app = await read('src/App.jsx');
 
-  assert.match(app, /const count = isLike \|\| !showInterestCount \? people\.length : priorityPresentation\.count/);
-  assert.match(app, /showInterestCount=\{Boolean\(shelf\.virtual\)\}/);
-  assert.match(app, /<ReactionControls item=\{item\} showInterestCount=\{showInterestCount\}/);
+  assert.equal(enriched.media[0].demandCount, 2);
+  assert.deepEqual(enriched.media[0].watchDemand, [userA, userB]);
+  assert.deepEqual(enriched.media[0].interestPriorities, [userA]);
+  assert.equal(enriched.media[1], personal.media[1]);
+  assert.match(app, /const count = isLike \? people\.length : priorityPresentation\.count/);
+  assert.doesNotMatch(app, /showInterestCount/);
 });
 
 test('Topmost Watchlist sorts higher Interest first and preserves existing order for ties', () => {

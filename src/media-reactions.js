@@ -21,6 +21,39 @@ export function mediaReactionIdentity(item) {
   return [normalizedReactionType(item?.type), normalizedReactionTitle(item?.title), item?.year ?? ''].join('|');
 }
 
+export function qualifyingInterestCount(interestCount, priorityCount) {
+  return priorityCount > 0 || interestCount > 1 ? interestCount : 0;
+}
+
+export function applyMainWatchlistInterest(snapshot, mainWatchlist) {
+  if (!snapshot?.media?.length || snapshot.mainWatchlist || !mainWatchlist?.media?.length) return snapshot;
+  const includedShelfIds = new Set(
+    (snapshot.mediaShelves || [])
+      .filter((shelf) => !shelf.deleted_at && shelf.showInMainWatchlist)
+      .map((shelf) => shelf.shelf_id),
+  );
+  if (!includedShelfIds.size) return snapshot;
+
+  const mainItemByIdentity = new Map(
+    mainWatchlist.media.map((item) => [mediaReactionIdentity(item), item]),
+  );
+  let changed = false;
+  const media = snapshot.media.map((item) => {
+    if (!(item.lists || []).some((shelfId) => includedShelfIds.has(shelfId))) return item;
+    const mainItem = mainItemByIdentity.get(mediaReactionIdentity(item));
+    if (!mainItem?.watchDemand) return item;
+    changed = true;
+    return {
+      ...item,
+      watchDemand: mainItem.watchDemand,
+      watchlistedBy: mainItem.watchlistedBy || [],
+      interestPriorities: mainItem.priorities || [],
+      demandCount: mainItem.demandCount,
+    };
+  });
+  return changed ? { ...snapshot, media } : snapshot;
+}
+
 export function priorityInterestPresentation({
   interestPeople,
   priorityPeople = [],
@@ -42,21 +75,28 @@ export function priorityInterestPresentation({
     }))
     .filter((person) => person.name);
   const priorityNames = namedPeople(priorityPeople);
-  const priorityIds = new Set(priorityNames.map((person) => person.id));
+  const priorityIds = new Set(priorityPeople.map((person) => person.id).filter(Boolean));
+  const priorityCount = priorityPeople.length;
+  const count = qualifyingInterestCount(interestPeople.length, priorityCount);
+  const interestQualifies = count > 0;
   const watchlistedNames = namedPeople(watchlistedPeople)
-    .map((person) => ({ ...person, muted: priorityIds.has(person.id) }))
+    .map((person) => ({
+      ...person,
+      muted: priorityIds.has(person.id) || !interestQualifies,
+    }))
     .sort((left, right) => Number(left.muted) - Number(right.muted));
   const countedWatchlisted = watchlistedNames.filter((person) => !person.muted);
 
   return {
-    count: interestPeople.length,
+    count,
     detailed: true,
+    priorityCount,
     priorityNames,
     watchlistedNames,
     watchlistedCount: countedWatchlisted.length,
     tooltip: [
-      `Interest: ${interestPeople.length}`,
-      `Priority Stamps: ${priorityPeople.length}`,
+      `Interest: ${count}`,
+      `Priority Stamps: ${priorityCount}`,
       ...priorityNames.map((person) => person.name),
       '',
       `Watchlisted: ${countedWatchlisted.length}`,
