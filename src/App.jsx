@@ -2805,10 +2805,10 @@ function ReactionButton({ kind, people = [], interestPeople, watchlistedPeople, 
   return <button
     type="button"
     className={cls('reaction-button', isLike ? 'like-reaction' : 'priority-reaction', active && 'active', labelled && 'labelled', count > 0 && 'has-count')}
-    aria-label={`${label}. ${summary}`}
+    aria-label={isLike ? `${label}. ${summary}` : tooltip.replace(/\n+/g, '. ')}
     aria-pressed={active}
-    title={tooltip}
-    data-tooltip={tooltip}
+    title={isLike || !priorityPresentation.detailed ? tooltip : undefined}
+    data-tooltip={isLike || !priorityPresentation.detailed ? tooltip : undefined}
     disabled={!canReact || saving}
     onPointerDown={(event) => event.stopPropagation()}
     onClick={async (event) => {
@@ -2816,7 +2816,22 @@ function ReactionButton({ kind, people = [], interestPeople, watchlistedPeople, 
       setSaving(true);
       try { await onChange(kind, !active); } finally { setSaving(false); }
     }}
-  ><Icon size={labelled ? 15 : 14} fill={isLike && active ? 'currentColor' : 'none'} />{labelled && <span>{label}</span>}{count > 0 && <small>{count}</small>}</button>;
+  >
+    <Icon size={labelled ? 15 : 14} fill={isLike && active ? 'currentColor' : 'none'} />
+    {labelled && <span>{label}</span>}
+    {count > 0 && <small>{count}</small>}
+    {!isLike && priorityPresentation.detailed && <span className="reaction-interest-tooltip" role="tooltip">
+      <strong>Interest: {priorityPresentation.count}</strong>
+      <span className="reaction-tooltip-section">
+        <b>Priority Stamps: {people.length}</b>
+        {priorityPresentation.priorityNames.map((person) => <span key={person.id || person.name}>{person.name}</span>)}
+      </span>
+      <span className="reaction-tooltip-section">
+        <b>Watchlisted: {priorityPresentation.watchlistedCount}</b>
+        {priorityPresentation.watchlistedNames.map((person) => <span className={person.muted ? 'is-muted' : undefined} key={person.id || person.name}>{person.name}</span>)}
+      </span>
+    </span>}
+  </button>;
 }
 
 function ReactionControls({ item, canReact, currentUserId, onReaction, labelled = false }) {
