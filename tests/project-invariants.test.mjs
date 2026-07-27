@@ -343,6 +343,14 @@ test('Interest tooltip orders additional watchlist contributors before muted ove
   );
 });
 
+test('only Topmost Watchlist cards use total Interest for the Priority badge', async () => {
+  const app = await read('src/App.jsx');
+
+  assert.match(app, /const count = isLike \|\| !showInterestCount \? people\.length : priorityPresentation\.count/);
+  assert.match(app, /showInterestCount=\{Boolean\(shelf\.virtual\)\}/);
+  assert.match(app, /<ReactionControls item=\{item\} showInterestCount=\{showInterestCount\}/);
+});
+
 test('Topmost Watchlist sorts higher Interest first and preserves existing order for ties', () => {
   const media = [
     { id: 'low' },
