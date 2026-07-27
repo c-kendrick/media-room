@@ -30,25 +30,37 @@ export function priorityInterestPresentation({
     const names = priorityPeople.map((person) => person.display_name || person.username).filter(Boolean);
     return {
       count: priorityPeople.length,
+      detailed: false,
       tooltip: ['Priority Watch Stamp', ...names].join('\n'),
     };
   }
 
-  const names = (people) => people
-    .map((person) => person.display_name || person.username)
-    .filter(Boolean);
-  const priorityNames = names(priorityPeople);
-  const watchlistedNames = names(watchlistedPeople);
+  const namedPeople = (people) => people
+    .map((person) => ({
+      id: person.id,
+      name: person.display_name || person.username,
+    }))
+    .filter((person) => person.name);
+  const priorityNames = namedPeople(priorityPeople);
+  const priorityIds = new Set(priorityNames.map((person) => person.id));
+  const watchlistedNames = namedPeople(watchlistedPeople)
+    .map((person) => ({ ...person, muted: priorityIds.has(person.id) }))
+    .sort((left, right) => Number(left.muted) - Number(right.muted));
+  const countedWatchlisted = watchlistedNames.filter((person) => !person.muted);
 
   return {
     count: interestPeople.length,
+    detailed: true,
+    priorityNames,
+    watchlistedNames,
+    watchlistedCount: countedWatchlisted.length,
     tooltip: [
-      `People interested: ${interestPeople.length}`,
+      `Interest: ${interestPeople.length}`,
       `Priority Stamps: ${priorityPeople.length}`,
-      ...priorityNames,
+      ...priorityNames.map((person) => person.name),
       '',
-      `Watchlisted: ${watchlistedPeople.length}`,
-      ...watchlistedNames,
+      `Watchlisted: ${countedWatchlisted.length}`,
+      ...watchlistedNames.map((person) => person.name),
     ].join('\n'),
   };
 }

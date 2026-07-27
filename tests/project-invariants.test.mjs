@@ -306,8 +306,40 @@ test('Priority Stamp presentation shows distinct Interest with stamp and watchli
     }),
     {
       count: 3,
-      tooltip: 'People interested: 3\nPriority Stamps: 2\nUser A\nUser B\n\nWatchlisted: 1\nUser A',
+      detailed: true,
+      priorityNames: [
+        { id: 'user-a', name: 'User A' },
+        { id: 'user-b', name: 'User B' },
+      ],
+      watchlistedNames: [{ id: 'user-a', name: 'User A', muted: true }],
+      watchlistedCount: 0,
+      tooltip: 'Interest: 3\nPriority Stamps: 2\nUser A\nUser B\n\nWatchlisted: 0\nUser A',
     },
+  );
+});
+
+test('Interest tooltip orders additional watchlist contributors before muted overlaps', () => {
+  const userA = { id: 'user-a', display_name: 'User A' };
+  const userB = { id: 'user-b', display_name: 'User B' };
+  const userC = { id: 'user-c', display_name: 'User C' };
+  const presentation = priorityInterestPresentation({
+    interestPeople: [userA, userB, userC],
+    priorityPeople: [userA, userB],
+    watchlistedPeople: [userA, userC, userB],
+  });
+
+  assert.equal(presentation.watchlistedCount, 1);
+  assert.deepEqual(
+    presentation.watchlistedNames,
+    [
+      { id: 'user-c', name: 'User C', muted: false },
+      { id: 'user-a', name: 'User A', muted: true },
+      { id: 'user-b', name: 'User B', muted: true },
+    ],
+  );
+  assert.equal(
+    presentation.tooltip,
+    'Interest: 3\nPriority Stamps: 2\nUser A\nUser B\n\nWatchlisted: 1\nUser C\nUser A\nUser B',
   );
 });
 
