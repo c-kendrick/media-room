@@ -12,7 +12,12 @@ import { collectionSummaryStats } from '../src/collection-stats.js';
 import { appSiteUrl, authenticatedProfilePath, selectAuthenticatedProfile, signupRateLimitDetails } from '../src/auth.js';
 import { applyReactionToSnapshot, mediaReactionIdentity } from '../src/media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from '../src/identity.js';
-import { mapSnapshot, mergeSectionSnapshot, sortTopmostWatchlistByInterest } from '../src/supabase-data.js';
+import {
+  buildPriorityStampCounts,
+  mapSnapshot,
+  mergeSectionSnapshot,
+  sortTopmostWatchlistByInterest,
+} from '../src/supabase-data.js';
 import { completeShelfOrder } from '../src/media-write.js';
 import { canPersistSnapshot, invalidateLibrarySnapshot, sectionSnapshot } from '../src/section-cache.js';
 import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
@@ -222,6 +227,59 @@ test('Topmost Watchlist sorts higher Interest first and preserves existing order
     sortTopmostWatchlistByInterest(media, demand).map((item) => item.id),
     ['high', 'tie-first', 'tie-second', 'low'],
   );
+});
+
+test('Topmost Watchlist uses Priority Stamps only to break equal-Interest ties', () => {
+  const media = [
+    { id: 'mixed-three' },
+    { id: 'priority-three' },
+    { id: 'higher-interest' },
+    { id: 'priority-two-first' },
+    { id: 'priority-two-second' },
+  ];
+  const demand = new Map([
+    ['mixed-three', ['person-a', 'person-b', 'person-c']],
+    ['priority-three', ['person-d', 'person-e', 'person-f']],
+    ['higher-interest', ['person-g', 'person-h', 'person-i', 'person-j']],
+    ['priority-two-first', ['person-k', 'person-l', 'person-m']],
+    ['priority-two-second', ['person-n', 'person-o', 'person-p']],
+  ]);
+  const priorityStamps = new Map([
+    ['mixed-three', 1],
+    ['priority-three', 3],
+    ['higher-interest', 0],
+    ['priority-two-first', 2],
+    ['priority-two-second', 2],
+  ]);
+
+  assert.deepEqual(
+    sortTopmostWatchlistByInterest(media, demand, priorityStamps).map((item) => item.id),
+    [
+      'higher-interest',
+      'priority-three',
+      'priority-two-first',
+      'priority-two-second',
+      'mixed-three',
+    ],
+  );
+});
+
+test('Priority Stamp counts deduplicate people across copies of the same work', () => {
+  const media = [
+    { id: 'copy-a', type: 'film', title: 'Shared Work', year: 2025 },
+    { id: 'copy-b', type: 'film', title: 'Shared Work', year: 2025 },
+    { id: 'other', type: 'film', title: 'Other Work', year: 2025 },
+  ];
+  const counts = buildPriorityStampCounts(media, [
+    { media_item_id: 'copy-a', user_id: 'person-a' },
+    { media_item_id: 'copy-b', user_id: 'person-a' },
+    { media_item_id: 'copy-b', user_id: 'person-b' },
+    { media_item_id: 'other', user_id: 'person-c' },
+  ]);
+
+  assert.equal(counts.get('copy-a'), 2);
+  assert.equal(counts.get('copy-b'), 2);
+  assert.equal(counts.get('other'), 1);
 });
 
 test('Main Main Watchlist matches title variants and missing years without merging known remakes', () => {

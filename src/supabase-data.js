@@ -200,14 +200,45 @@ export function mergeSectionSnapshot(current, sectionSnapshot) {
   };
 }
 
-export function sortTopmostWatchlistByInterest(mediaItems, demandByMediaId) {
+export function buildPriorityStampCounts(mediaItems, interests) {
+  const identityByMediaId = buildWatchGroupIdentities(mediaItems);
+  const usersByIdentity = new Map();
+
+  for (const interest of interests || []) {
+    const identity = identityByMediaId.get(interest.media_item_id);
+    if (!identity || !interest.user_id) continue;
+
+    const users = usersByIdentity.get(identity) || new Set();
+    users.add(interest.user_id);
+    usersByIdentity.set(identity, users);
+  }
+
+  return new Map(
+    (mediaItems || []).map((item) => [
+      item.id,
+      usersByIdentity.get(identityByMediaId.get(item.id))?.size || 0,
+    ]),
+  );
+}
+
+export function sortTopmostWatchlistByInterest(
+  mediaItems,
+  demandByMediaId,
+  priorityStampCountByMediaId = new Map(),
+) {
   return (mediaItems || [])
     .map((item, originalIndex) => ({
       item,
       originalIndex,
       interest: demandByMediaId.get(item.id)?.length || 0,
+      priorityStamps: priorityStampCountByMediaId.get(item.id) || 0,
     }))
-    .sort((left, right) => right.interest - left.interest || left.originalIndex - right.originalIndex)
+    .sort(
+      (left, right) =>
+        right.interest - left.interest ||
+        right.priorityStamps - left.priorityStamps ||
+        left.originalIndex - right.originalIndex,
+    )
     .map(({ item }) => item);
 }
 
@@ -491,6 +522,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
   });
   const demandByMediaId = buildWatchDemand(allMediaItems, collections, interests, publicProfiles);
   const watchlistIdentityByMediaId = buildWatchGroupIdentities(allMediaItems);
+  const priorityStampCountByMediaId = buildPriorityStampCounts(allMediaItems, interests);
   const interestedIdentities = new Set(interests.map((interest) => watchlistIdentityByMediaId.get(interest.media_item_id)).filter(Boolean));
   const representativeByIdentity = new Map();
   for (const item of allMediaItems) {
@@ -503,6 +535,7 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
   const virtualMediaItems = sortTopmostWatchlistByInterest(
     [...representativeByIdentity.values()],
     demandByMediaId,
+    priorityStampCountByMediaId,
   );
   const virtualShelf = {
     id: 'main-priority-watchlist', section: 'screen', name: 'Watchlist', subtitle: 'Priority picks and titles wanted by more than one person.',
