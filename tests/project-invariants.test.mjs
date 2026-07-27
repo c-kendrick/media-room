@@ -12,7 +12,7 @@ import { collectionSummaryStats } from '../src/collection-stats.js';
 import { appSiteUrl, authenticatedProfilePath, selectAuthenticatedProfile, signupRateLimitDetails } from '../src/auth.js';
 import { applyReactionToSnapshot, mediaReactionIdentity } from '../src/media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from '../src/identity.js';
-import { mapSnapshot, mergeSectionSnapshot } from '../src/supabase-data.js';
+import { mapSnapshot, mergeSectionSnapshot, sortTopmostWatchlistByInterest } from '../src/supabase-data.js';
 import { completeShelfOrder } from '../src/media-write.js';
 import { canPersistSnapshot, invalidateLibrarySnapshot, sectionSnapshot } from '../src/section-cache.js';
 import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
@@ -202,6 +202,26 @@ test('Main Watchlist demand counts each person once across shelves, copies, and 
   for (const item of media) {
     assert.deepEqual(demand.get(item.id).map((person) => person.id).sort(), ['person-a', 'person-b', 'person-c']);
   }
+});
+
+test('Topmost Watchlist sorts higher Interest first and preserves existing order for ties', () => {
+  const media = [
+    { id: 'low' },
+    { id: 'tie-first' },
+    { id: 'high' },
+    { id: 'tie-second' },
+  ];
+  const demand = new Map([
+    ['low', [{ id: 'person-a' }]],
+    ['tie-first', [{ id: 'person-a' }, { id: 'person-b' }]],
+    ['high', [{ id: 'person-a' }, { id: 'person-b' }, { id: 'person-c' }]],
+    ['tie-second', [{ id: 'person-b' }, { id: 'person-c' }]],
+  ]);
+
+  assert.deepEqual(
+    sortTopmostWatchlistByInterest(media, demand).map((item) => item.id),
+    ['high', 'tie-first', 'tie-second', 'low'],
+  );
 });
 
 test('Main Main Watchlist matches title variants and missing years without merging known remakes', () => {
@@ -399,6 +419,7 @@ test('Main Watchlist includes one virtual priority and shared-demand shelf', asy
   assert.doesNotMatch(data, /canonicalWatchlistShelves/);
   assert.doesNotMatch(data, /mirroredShelfCount/);
   assert.match(data, /representativeByIdentity/);
+  assert.match(data, /sortTopmostWatchlistByInterest\([\s\S]*representativeByIdentity\.values\(\)[\s\S]*demandByMediaId/);
   assert.match(data, /virtual: true/);
 });
 

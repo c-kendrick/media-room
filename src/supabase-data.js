@@ -200,6 +200,17 @@ export function mergeSectionSnapshot(current, sectionSnapshot) {
   };
 }
 
+export function sortTopmostWatchlistByInterest(mediaItems, demandByMediaId) {
+  return (mediaItems || [])
+    .map((item, originalIndex) => ({
+      item,
+      originalIndex,
+      interest: demandByMediaId.get(item.id)?.length || 0,
+    }))
+    .sort((left, right) => right.interest - left.interest || left.originalIndex - right.originalIndex)
+    .map(({ item }) => item);
+}
+
 function sectionMediaFilter(section) {
   const types = SECTION_TYPES[section] || SECTION_TYPES.screen;
   return types.length === 1 ? 'eq.' + types[0] : 'in.(' + types.join(',') + ')';
@@ -489,7 +500,10 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
     const current = representativeByIdentity.get(identity);
     if (!current || (mirroredMediaIds.has(item.id) && !mirroredMediaIds.has(current.id))) representativeByIdentity.set(identity, item);
   }
-  const virtualMediaItems = [...representativeByIdentity.values()];
+  const virtualMediaItems = sortTopmostWatchlistByInterest(
+    [...representativeByIdentity.values()],
+    demandByMediaId,
+  );
   const virtualShelf = {
     id: 'main-priority-watchlist', section: 'screen', name: 'Watchlist', subtitle: 'Priority picks and titles wanted by more than one person.',
     owner_name: 'Main', position: -1, deleted_at: null, virtual: true,
