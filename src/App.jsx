@@ -44,8 +44,8 @@ import {
 } from 'lucide-react';
 import { loadMediaSnapshot } from './data.js';
 import { appSiteUrl, consumeRecoverySessionFromUrl, loadAuthenticatedAccount, registerWithPassword, requestPasswordRecovery, signInWithPassword, signOut, signupRateLimitDetails, updateDisplayName, updatePassword } from './auth.js';
-import { loadCollectionLibraries, loadMediaDetails, loadPublicCollections, loadSectionDetails, mergeSectionSnapshot } from './supabase-data.js';
-import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, copyShelfToLibrary, createLibrary, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, moveShelfToLibrary, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderLibraryShelves, reorderMainWatchlist, reorderShelfMedia, searchDetailCandidates, searchPosterCandidates, setMediaDeleted, setMediaStarRating, updateLibrary, updateMediaItem, updateShelf } from './media-write.js';
+import { loadCollectionLibraries, loadLibraryDeletionImpact, loadMediaDetails, loadPublicCollections, loadSectionDetails, mergeSectionSnapshot } from './supabase-data.js';
+import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, copyShelfToLibrary, createLibrary, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, moveShelfToLibrary, permanentlyDeleteLibrary, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderLibraryShelves, reorderMainWatchlist, reorderShelfMedia, searchDetailCandidates, searchPosterCandidates, setMediaDeleted, setMediaStarRating, updateLibrary, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, createClub, deactivateProfile, deleteClub, listClubs, listProfiles, rejectProfile, renameClub, restoreProfile, setUserClubs } from './admin.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
 import { applyShelfMemberships, OPTIMISTIC_APPEND_POSITION } from './shelf-membership.js';
@@ -830,6 +830,9 @@ export default function App() {
     if (!request) {
       request = loadMediaSnapshot({ fresh, collectionId: targetCollectionId, libraryId, section, accessToken: token })
         .then((loaded) => {
+          // A fresh request supersedes any older in-flight read for this
+          // library. Never let that stale response replace newer shelf data.
+          if (sectionRequests.current.get(requestKey) !== request) return loaded;
           mergeLoadedSection(targetCollectionId, loaded);
           return loaded;
         })
@@ -1674,7 +1677,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onInvalidateLibrary={invalidateLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={(itemId, navigation = null) => { setSelectedMediaId(itemId); setSelectedMediaNavigation(navigation); }} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
+          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onInvalidateLibrary={invalidateLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { dataRef.current = nextData; setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={(itemId, navigation = null) => { setSelectedMediaId(itemId); setSelectedMediaNavigation(navigation); }} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
         </main>
         <footer><span>Published from Kit’s Local Media Room.</span><span className="provider-credits">Poster data from <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>, <a href="https://books.google.com/" target="_blank" rel="noreferrer">Google Books</a>, <a href="https://openlibrary.org/" target="_blank" rel="noreferrer">Open Library</a> and <a href="https://www.steamgriddb.com/" target="_blank" rel="noreferrer">SteamGridDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</span></footer>
       </div>
@@ -1987,6 +1990,7 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
   const confirmedShelfOrderRef = useRef([]);
   const shelfOrderDirtyRef = useRef(false);
   const shelfOrderSavingRef = useRef(false);
+  const creatingShelfRequestRef = useRef(false);
 
   useEffect(() => {
     if (!posterRetryAfter && !detailsRetryAfter) return undefined;
@@ -2379,7 +2383,7 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
             data.media,
           );
           if (!shelfItems.length && queryLower) return null;
-          return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} arrangeItems={arrangeItems} onOpen={(itemId) => openMedia(itemId, { shelfId: shelf.shelf_id, shelves: drawerShelves })} canEdit={canEdit && !shelf.virtual} canCopy={Boolean(!canEdit && !data.mainWatchlist && currentUserId && ownCollection && data.ownerId !== currentUserId)} onCopy={() => setShelfTransfer({ mode: 'copy-visitor', shelf, itemCount: arrangeItems.length })} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canCurateMain={canCurateMain} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} onToggleMain={() => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); void refresh({ fresh: true }).catch(() => notify('The order was saved, but the latest collection could not be refreshed. Reload to see the saved order everywhere.')); } catch (error) { notify(error?.message ? `Item order could not be saved: ${error.message}` : 'Item order could not be saved.'); throw error; } }} onRename={(editorActions) => setShelfEditor({ ...shelf, ...editorActions, canCurateMain, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id), onToggleMain: (enabled) => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }, enabled) })} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { const updated = await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); if (!updated?.some((row) => row.id === shelf.shelf_id && row.deleted_at)) throw new Error('Supabase did not move the shelf to the Bin.'); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} />;
+          return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} arrangeItems={arrangeItems} onOpen={(itemId) => openMedia(itemId, { shelfId: shelf.shelf_id, shelves: drawerShelves })} canEdit={canEdit && !shelf.virtual} canCopy={Boolean(!canEdit && !data.mainWatchlist && currentUserId && ownCollection && data.ownerId !== currentUserId)} onCopy={() => setShelfTransfer({ mode: 'copy-visitor', shelf, itemCount: arrangeItems.length })} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); void refresh({ fresh: true }).catch(() => notify('The order was saved, but the latest collection could not be refreshed. Reload to see the saved order everywhere.')); } catch (error) { notify(error?.message ? `Item order could not be saved: ${error.message}` : 'Item order could not be saved.'); throw error; } }} onRename={(editorActions) => setShelfEditor({ ...shelf, ...editorActions, canCurateMain, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id), onToggleMain: (enabled) => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }, enabled) })} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { const updated = await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); if (!updated?.some((row) => row.id === shelf.shelf_id && row.deleted_at)) throw new Error('Supabase did not move the shelf to the Bin.'); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} />;
         })}
       </div>
 
@@ -2399,9 +2403,115 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
           {canEdit && section === 'game' && <Button className="quiet-button" icon={Plus} onClick={() => setBulkImportType('game')}>Bulk Import {bulkImportTerminology('game', currentLibrary).heading}</Button>}
         </div>
       </section>}
-      {creatingShelf && <CreateShelfDialog section={section} terminology={currentLibrary} onClose={() => setCreatingShelf(false)} onSave={async (values) => { setCreatingShelf(false); try { await createShelf(accessToken, { collection_id: data.collectionId, library_id: currentLibrary.id, section: currentLibrary.type === 'other' ? 'screen' : currentLibrary.type, ...values, show_in_main_watchlist: currentLibrary.type === 'screen' ? values.show_in_main_watchlist : false, position: (shelves.at(-1)?.position || 0) + 1000 }); await onLoadLibrary(currentLibrary.id, { fresh: true }); notify('Shelf created.'); } catch { notify('That shelf could not be created. Names must be unique within this library.'); } }} />}
+      {creatingShelf && <CreateShelfDialog section={section} terminology={currentLibrary} onClose={() => setCreatingShelf(false)} onSave={async (values) => {
+        if (creatingShelfRequestRef.current) return;
+        creatingShelfRequestRef.current = true;
+        try {
+          const created = await createShelf(accessToken, {
+            collection_id: data.collectionId,
+            library_id: currentLibrary.id,
+            section: currentLibrary.type === 'other' ? 'screen' : currentLibrary.type,
+            ...values,
+            show_in_main_watchlist: currentLibrary.type === 'screen' ? values.show_in_main_watchlist : false,
+            position: (shelves.at(-1)?.position || 0) + 1000,
+          });
+          const row = created?.[0];
+          if (!row?.id) throw new Error('The shelf was not created.');
+          const createdShelf = {
+            shelf_id: row.id,
+            library_id: row.library_id,
+            name: row.name,
+            subtitle: row.subtitle || '',
+            numbered: Boolean(row.is_numbered),
+            queueList: Boolean(row.is_queue_list),
+            readingList: Boolean(row.is_queue_list),
+            section: row.section,
+            position: row.position,
+            deleted_at: row.deleted_at || null,
+            required: Boolean(row.is_required),
+            showInMainWatchlist: Boolean(row.show_in_main_watchlist),
+            mainWatchlistPosition: row.main_watchlist_position ?? row.position,
+          };
+          onDataChange({
+            ...data,
+            loadedLibraries: [...new Set([...(data.loadedLibraries || []), currentLibrary.id])],
+            mediaShelves: [...(data.mediaShelves || []).filter((shelf) => shelf.shelf_id !== row.id), createdShelf],
+          });
+          setCreatingShelf(false);
+          try {
+            await onLoadLibrary(currentLibrary.id, { fresh: true });
+            notify('Shelf created.');
+          } catch {
+            notify('Shelf created and kept visible. The latest library data could not be reloaded yet.');
+          }
+        } catch (error) {
+          notify(error?.code === '23505'
+            ? 'That shelf could not be created. Names must be unique within this library.'
+            : 'The shelf could not be created. Please try again.');
+          throw error;
+        } finally {
+          creatingShelfRequestRef.current = false;
+        }
+      }} />}
       {addingMedia && <AddMediaDialog section={section} terminology={currentLibrary} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, collection_id: data.collectionId, library_id: currentLibrary.id, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id) => [id, OPTIMISTIC_APPEND_POSITION])), interests: [], likes: [], priorities: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, type: section === 'other' ? 'other' : item.type, collection_id: data.collectionId, library_id: currentLibrary.id }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setMediaReaction(accessToken, created[0].id, 'priority', true); await onLoadLibrary(currentLibrary.id, { fresh: true }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify(`${currentLibrary.singular} added.`); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify(`The ${currentLibrary.singular.toLocaleLowerCase()} could not be saved.`); }); }} />}
-      {binOpen && <CollectionBinDrawer loading={binLoading} error={binError} onRetry={openBin} libraries={binLibraries} media={deletedMedia} shelves={deletedShelves} libraryName={(libraryId) => (data.libraries || []).find((library) => library.id === libraryId)?.name || binLibraries.find((library) => library.id === libraryId)?.name || 'Library'} onClose={() => setBinOpen(false)} onError={notify} onRestoreLibrary={async (library) => { await updateLibrary(accessToken, library.id, { deleted_at: null }); setBinLibraries((rows) => rows.filter((row) => row.id !== library.id)); await onLoadLibrary(library.id, { fresh: true }); setBinOpen(false); notify(`${library.name} restored from Bin.`); }} onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }} onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await onLoadLibrary(item.library_id, { fresh: true, select: false }); notify(`${item.title} restored from Bin.`); }} onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; onDataChange(optimisticData); try { const deleted = await permanentlyDeleteMedia(accessToken, item.database_id); if (!deleted?.length) throw new Error('Supabase did not delete the media item.'); notify(`${item.title} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })} onRestoreShelf={async (shelf) => { const restored = await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); if (!restored?.some((row) => row.id === shelf.shelf_id && !row.deleted_at)) throw new Error('Supabase did not restore the shelf.'); setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); await onLoadLibrary(shelf.library_id, { fresh: true, select: false }); notify(`${shelf.name} restored from Bin.`); }} onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; onDataChange(optimisticData); try { const deleted = await deleteShelf(accessToken, shelf.shelf_id); if (!deleted?.length) throw new Error('Supabase did not delete the shelf.'); notify(`${shelf.name} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })} />}
+      {binOpen && <CollectionBinDrawer
+        loading={binLoading}
+        error={binError}
+        onRetry={openBin}
+        libraries={binLibraries}
+        media={deletedMedia}
+        shelves={deletedShelves}
+        libraryName={(libraryId) => (data.libraries || []).find((library) => library.id === libraryId)?.name || binLibraries.find((library) => library.id === libraryId)?.name || 'Library'}
+        onClose={() => setBinOpen(false)}
+        onError={notify}
+        onRestoreLibrary={async (library) => {
+          await updateLibrary(accessToken, library.id, { deleted_at: null });
+          setBinLibraries((rows) => rows.filter((row) => row.id !== library.id));
+          await onLoadLibrary(library.id, { fresh: true });
+          setBinOpen(false);
+          notify(`${library.name} restored from Bin.`);
+        }}
+        onDeleteLibrary={async (library) => {
+          if (library.protected) throw new Error('Default libraries cannot be permanently deleted.');
+          const { shelfCount, itemCount } = await loadLibraryDeletionImpact({ libraryId: library.id, accessToken });
+          requestConfirmation({
+            title: `Permanently delete ${library.name}?`,
+            message: `${library.name} contains ${shelfCount} ${shelfCount === 1 ? 'shelf' : 'shelves'} and ${itemCount} ${itemCount === 1 ? library.singular : library.plural}. The library and all of these nested records will be deleted. This cannot be undone.`,
+            confirmLabel: 'Delete Library Permanently',
+            tone: 'danger',
+            optimistic: true,
+            onConfirm: async () => {
+              const previousData = data;
+              const previousLibraries = binLibraries;
+              const optimisticData = {
+                ...data,
+                libraries: (data.libraries || []).filter((row) => row.id !== library.id),
+                mediaShelves: (data.mediaShelves || []).filter((row) => row.library_id !== library.id),
+                media: (data.media || []).filter((row) => row.library_id !== library.id),
+                loadedLibraries: (data.loadedLibraries || []).filter((id) => id !== library.id),
+              };
+              setBinLibraries((rows) => rows.filter((row) => row.id !== library.id));
+              onDataChange(optimisticData);
+              onInvalidateLibrary?.(library.id);
+              try {
+                const deleted = await permanentlyDeleteLibrary(accessToken, library.id);
+                if (!deleted?.[0] || deleted[0].library_id !== library.id) throw new Error('Supabase did not delete the library.');
+                notify(`${library.name} and its nested records were permanently deleted.`);
+              } catch (error) {
+                setBinLibraries(previousLibraries);
+                onDataChange(previousData);
+                notify(`${library.name} could not be deleted. It has been restored to the Bin.`);
+                throw error;
+              }
+            },
+          });
+        }}
+        onOpenMedia={(itemId) => { setBinOpen(false); openMedia(itemId); }}
+        onRestoreMedia={async (item) => { await setMediaDeleted(accessToken, item.database_id, false); await onLoadLibrary(item.library_id, { fresh: true, select: false }); notify(`${item.title} restored from Bin.`); }}
+        onDeleteMedia={(item) => requestConfirmation({ title: `Permanently delete ${item.title}?`, message: 'This cannot be undone.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, media: data.media.filter((row) => row.database_id !== item.database_id) }; onDataChange(optimisticData); try { const deleted = await permanentlyDeleteMedia(accessToken, item.database_id); if (!deleted?.length) throw new Error('Supabase did not delete the media item.'); notify(`${item.title} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${item.title} could not be deleted. It has been restored to the Bin.`); throw error; } } })}
+        onRestoreShelf={async (shelf) => { const restored = await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); if (!restored?.some((row) => row.id === shelf.shelf_id && !row.deleted_at)) throw new Error('Supabase did not restore the shelf.'); setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); await onLoadLibrary(shelf.library_id, { fresh: true, select: false }); notify(`${shelf.name} restored from Bin.`); }}
+        onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; onDataChange(optimisticData); try { const deleted = await deleteShelf(accessToken, shelf.shelf_id); if (!deleted?.length) throw new Error('Supabase did not delete the shelf.'); notify(`${shelf.name} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })}
+      />}
       {shelfEditor && <ShelfEditDialog shelf={shelfEditor} canArrange={shelfEditor.canArrange} onArrange={() => { const openArrange = shelfEditor.onArrange; setShelfEditor(null); openArrange?.(); }} canCurateMain={shelfEditor.canCurateMain} onToggleMain={shelfEditor.onToggleMain} canTransfer={Boolean((data.libraries || []).some((library) => library.type === currentLibrary?.type))} onTransfer={(mode) => { const transferShelf = shelfEditor; setShelfEditor(null); setShelfTransfer({ mode, shelf: transferShelf, itemCount: (data.media || []).filter((item) => !item.deleted_at && item.lists?.includes(transferShelf.shelf_id)).length }); }} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList, numbered: changes.is_numbered ?? shelfEditor.numbered } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
       {shelfTransfer && <ShelfTransferDialog transfer={shelfTransfer} sourceLibrary={currentLibrary} sourceOwnerName={sourceOwnerName} ownerData={shelfTransfer.mode === 'copy-visitor' ? null : data} loadDestinations={loadCopyDestinations} ownCollection={ownCollection} onClose={() => setShelfTransfer(null)} onConfirm={async ({ mode, shelf, destinationLibraryId, name }) => {
         const sourceLibraryId = currentLibrary?.id;
@@ -2473,7 +2583,7 @@ function shelfNeedsUniformReactionWrap(shelfElement, currentlyWrapped = false) {
   });
 }
 
-function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canCopy, onCopy, canRate, onRate, canReorderShelf, canCurateMain, canRemoveMirror, onRemoveMirror, onToggleMain, canMoveUp, canMoveDown, onMoveShelf, onAdd, onReorder, onRename, onDelete }) {
+function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canCopy, onCopy, canRate, onRate, canReorderShelf, canRemoveMirror, onRemoveMirror, canMoveUp, canMoveDown, onMoveShelf, onAdd, onReorder, onRename, onDelete }) {
   const shelfRef = useRef(null);
   const trackRef = useRef(null);
   const [displayItems, setDisplayItems] = useState(items);
@@ -2547,7 +2657,7 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canCo
       if (Number.isFinite(previousTop) && Number.isFinite(nextTop)) window.scrollBy({ top: nextTop - previousTop, behavior: 'auto' });
     }));
   };
-  const pagerOnlyActions = !canRemoveMirror && !canEdit && !canCurateMain && !canReorderShelf;
+  const pagerOnlyActions = !canRemoveMirror && !canEdit && !canReorderShelf;
   return <section id={`shelf-${shelf.shelf_id}`} ref={shelfRef} className={cls('media-shelf fixed-set-shelf', shelf.ownerName && 'main-watchlist-shelf', uniformReactionWrap && 'uniform-reaction-wrap')}>
     <div className="shelf-head">
       <div className="shelf-title"><span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2>{shelf.subtitle && <p className="shelf-subtitle">{shelf.subtitle}</p>}</span></div>
@@ -2558,7 +2668,7 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canCo
         </span>
         <span className="shelf-mobile-bottom-row">
           <button type="button" className="button random-pick shelf-pick-action" disabled={!items.length} aria-label={`Pick randomly from ${shelf.name}`} onClick={() => onOpen(pickRandomItem(items).item_id)}><span>Pick</span><Shuffle size={15} /></button>
-          <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && arrangeItems.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}{canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', shelf.showInMainWatchlist && 'active')} aria-pressed={shelf.showInMainWatchlist} onClick={onToggleMain}><span className="main-watchlist-copy"><small>{shelf.showInMainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}</span>
+          <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && arrangeItems.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}</span>
           <span className="shelf-action-group shelf-add-actions">{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
           <span className="shelf-action-group shelf-set-actions"><button aria-label={mobileShelfPaging ? `Show previous items in ${shelf.name}` : `Show previous sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canPrevious : currentSegment <= 0 || segmentCount <= 1} onClick={() => scrollSegment(-1)}><ChevronLeft /></button>{!mobileShelfPaging && segmentCount > 1 && <small>Sets {currentSegment * 2 + 1}{displaySegments[currentSegment]?.[1]?.length ? `\u2013${currentSegment * 2 + 2}` : ''}</small>}<button aria-label={mobileShelfPaging ? `Show next items in ${shelf.name}` : `Show next sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canNext : currentSegment >= segmentCount - 1 || segmentCount <= 1} onClick={() => scrollSegment(1)}><ChevronRight /></button></span>
         </span>
@@ -2641,7 +2751,7 @@ function ArrangeShelfDialog({ shelf, items, onClose, onSave }) {
   </section></div>, document.body);
 }
 
-function CollectionBinDrawer({ loading = false, error = '', onRetry, libraries = [], media, shelves, libraryName, onClose, onError, onRestoreLibrary, onOpenMedia, onRestoreMedia, onDeleteMedia, onRestoreShelf, onDeleteShelf }) {
+function CollectionBinDrawer({ loading = false, error = '', onRetry, libraries = [], media, shelves, libraryName, onClose, onError, onRestoreLibrary, onDeleteLibrary, onOpenMedia, onRestoreMedia, onDeleteMedia, onRestoreShelf, onDeleteShelf }) {
   const [busyId, setBusyId] = useState(null);
   useEscape(onClose);
   const run = async (id, action) => {
@@ -2660,7 +2770,7 @@ function CollectionBinDrawer({ loading = false, error = '', onRetry, libraries =
       {!loading && error && <div className="bin-load-error" role="alert"><span><strong>The complete Bin could not be loaded</strong><small>{error}</small></span><button type="button" onClick={onRetry}>Try again</button></div>}
       {!loading && !error && !libraries.length && !media.length && !shelves.length && <div className="bin-empty"><Trash2 size={20} /><span>The Bin is empty.</span></div>}
       {libraries.length > 0 && <section className="bin-group"><header><span>LIBRARIES</span><small>{libraries.length}</small></header><div className="bin-list">
-        {libraries.map((library) => <article className="bin-row-card shelf" key={library.id}><div className="bin-item-main"><span className="bin-shelf-mark"><BookOpen size={15} /></span><span><strong>{library.name}</strong><small>{LIBRARY_TYPE_DETAILS[library.type]?.label}</small></span></div><div className="bin-row-actions"><button type="button" disabled={busyId === library.id} onClick={() => run(library.id, () => onRestoreLibrary(library))}><RotateCw size={13} />Restore library</button></div></article>)}
+        {libraries.map((library) => <article className="bin-row-card shelf" key={library.id}><div className="bin-item-main"><span className="bin-shelf-mark"><BookOpen size={15} /></span><span><strong>{library.name}</strong><small>{LIBRARY_TYPE_DETAILS[library.type]?.label}</small></span></div><div className="bin-row-actions"><button type="button" disabled={busyId === library.id} onClick={() => run(library.id, () => onRestoreLibrary(library))}><RotateCw size={13} />Restore library</button>{!library.protected && <button className="permanent" type="button" disabled={busyId === library.id} onClick={() => run(library.id, () => onDeleteLibrary(library))}><Trash2 size={13} />Delete forever</button>}</div></article>)}
       </div></section>}
       {media.length > 0 && <section className="bin-group"><header><span>MEDIA</span><small>{media.length}</small></header><div className="bin-list">
         {media.map((item) => <article className="bin-row-card" key={item.database_id}>
@@ -3321,9 +3431,9 @@ function ShelfEditDialog({ shelf, canArrange, onArrange, canCurateMain, onToggle
     {!shelf.required && <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>}
     <label>Subtitle <span className="field-hint">Optional</span><input autoFocus={shelf.required} value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
     <label className="reading-list-designation"><input type="checkbox" checked={numbered} onChange={(event) => setNumbered(event.target.checked)} /><span><b>Numbered shelf</b><small>Show each item's shelf position beneath its card.</small></span></label>
-    {(canArrange || canCurateMain) && <div className="shelf-edit-mobile-actions">
+    {canCurateMain && <label className="reading-list-designation shelf-edit-main-watchlist"><input type="checkbox" checked={mainWatchlist} onChange={async (event) => { const previous = mainWatchlist; const enabled = event.target.checked; setMainWatchlist(enabled); try { await onToggleMain(enabled); } catch { setMainWatchlist(previous); } }} /><span><b>Include this in Main Watchlist</b><small>Mirror this Film & TV shelf in the shared Main Watchlist.</small></span></label>}
+    {canArrange && <div className="shelf-edit-mobile-actions">
       {canArrange && <button className="shelf-control-button arrange-button" type="button" onClick={onArrange}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}
-      {canCurateMain && <button className={cls('shelf-control-button main-watchlist-toggle', mainWatchlist && 'active')} type="button" aria-pressed={mainWatchlist} onClick={async () => { const previous = mainWatchlist; const enabled = !previous; setMainWatchlist(enabled); try { await onToggleMain(enabled); } catch { setMainWatchlist(previous); } }}><span className="main-watchlist-copy"><small>{mainWatchlist ? 'Included in' : 'Include this shelf in'}</small><strong>Main Watchlist</strong></span></button>}
     </div>}
     {canTransfer && <details className="shelf-transfer-section">
       <summary>Move or copy shelf</summary>
@@ -3493,7 +3603,8 @@ function CreateShelfDialog({ section, terminology, onClose, onSave }) {
   const [subtitle, setSubtitle] = useState('');
   const [mainWatchlist, setMainWatchlist] = useState(false);
   const [numbered, setNumbered] = useState(false);
-  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog create-shelf-dialog" onSubmit={(event) => { event.preventDefault(); if (!name.trim()) return; onSave({ name: name.trim(), subtitle: subtitle.trim() || null, is_numbered: numbered, ...(section === 'screen' ? { show_in_main_watchlist: mainWatchlist } : {}) }); }}>
+  const [saving, setSaving] = useState(false);
+  return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}><form className="media-edit-dialog shelf-edit-dialog create-shelf-dialog" onSubmit={async (event) => { event.preventDefault(); if (!name.trim() || saving) return; setSaving(true); try { await onSave({ name: name.trim(), subtitle: subtitle.trim() || null, is_numbered: numbered, ...(section === 'screen' ? { show_in_main_watchlist: mainWatchlist } : {}) }); } catch { setSaving(false); } }}>
     <button className="close" type="button" onClick={onClose} aria-label="Close create shelf"><X /></button>
     <span className="eyebrow">NEW SHELF</span><h2>Create a Shelf</h2><p className="dialog-intro">Organise {terminology?.plural?.toLocaleLowerCase() || 'items'} within this library.</p>
     <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>
@@ -3501,7 +3612,7 @@ function CreateShelfDialog({ section, terminology, onClose, onSave }) {
     <label className="reading-list-designation"><input type="checkbox" checked={numbered} onChange={(event) => setNumbered(event.target.checked)} /><span><b>Numbered shelf</b><small>Show each item's shelf position beneath its card.</small></span></label>
     {section === 'screen' && <label className="reading-list-designation"><input type="checkbox" checked={mainWatchlist} onChange={(event) => setMainWatchlist(event.target.checked)} /><span><b>Include in Main Watchlist</b><small>Mirror this shelf publicly in the shared Main Watchlist.</small></span></label>}
     <small className="character-count">{subtitle.length} / 180</small>
-    <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose}>Cancel</button><Button type="submit" icon={Plus} disabled={!name.trim()}>Create Shelf</Button></div>
+    <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><Button type="submit" icon={Plus} disabled={!name.trim() || saving}>{saving ? 'Creating…' : 'Create Shelf'}</Button></div>
   </form></div>;
 }
 

@@ -145,6 +145,21 @@ export async function loadCollectionLibraries({ collectionId, includeDeleted = f
   return rows.map(normalizeLibrary);
 }
 
+export async function loadLibraryDeletionImpact({ libraryId, fresh = true, accessToken } = {}) {
+  if (!libraryId) throw new Error('A library is required.');
+  const [shelves, mediaItems] = await Promise.all([
+    supabaseSelect(query('shelves', {
+      library_id: 'eq.' + libraryId,
+      select: 'id',
+    }), { fresh, accessToken }),
+    supabaseSelect(query('media_items', {
+      library_id: 'eq.' + libraryId,
+      select: 'id',
+    }), { fresh, accessToken }),
+  ]);
+  return { shelfCount: shelves.length, itemCount: mediaItems.length };
+}
+
 export function mergeSectionSnapshot(current, sectionSnapshot) {
   if (!current || current.collectionId !== sectionSnapshot.collectionId) return sectionSnapshot;
   const incomingSections = new Set(sectionSnapshot.loadedSections || []);

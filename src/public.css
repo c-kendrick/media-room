@@ -955,7 +955,7 @@
 @media(max-width:580px){
   .shelf-actions{display:flex!important;flex-direction:row;flex-wrap:nowrap!important;align-items:center!important;justify-content:flex-end!important;gap:7px!important;box-sizing:border-box;padding-left:0!important}
   .shelf-mobile-bottom-row .shelf-content-actions{display:none}
-  .shelf-edit-mobile-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid #e0d5c8}
+  .shelf-edit-mobile-actions{display:grid;grid-template-columns:1fr;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid #e0d5c8}
   .shelf-edit-mobile-actions .shelf-control-button{width:100%!important}
   .main-watchlist-shelf .shelf-head{display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:center!important;gap:12px}
   .main-watchlist-shelf .shelf-title{width:auto;min-width:0;justify-content:flex-start;text-align:left}
@@ -1112,5 +1112,6 @@
     line-height:0!important;
   }
   .library-create-button svg{position:absolute;left:50%;top:50%;display:block;margin:0;transform:translate(-50%,-50%)}
-  .library-edit-actions{order:3;flex:0 0 auto}
+  .library-edit-actions{order:3;flex:0 0 auto;padding:0}
+  .library-edit-actions>button{width:40px!important;height:40px!important;min-height:40px!important}
 }
