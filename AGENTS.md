@@ -1,57 +1,61 @@
-Three most important rules:
-1. Implement the requested changes, then create a new draft pull request for me to review and merge manually. After you send me a draft PR to merge, assume I have merged it if I ask for more features and work on a new draft PR.
-2. GitHub authentication may already be valid even if the sandbox cannot access the stored keyring credentials. Check for that possibility before asking me to log in with powershell commands. If authentication is genuinely unavailable, give me the exact commands needed to authenticate.
-3. Follow the existing architecture, conventions, and visual design of the project. New UI should be clean, attractive, consistent with existing components, and responsive where relevant. We use a brown-walnut, office-desk type theme.
- 
-## Implementation standards
+# 2 Important Rules
 
-For user-triggered mutations, use optimistic UI where practical. Include rollback or recovery behaviour when the server rejects the change or the request fails.
+1. Implement the requested changes, then create a new draft pull request for me to review and merge manually. After providing the draft PR, treat any later request for features or fixes as new work after that PR has been merged. Start from the updated default branch and create a new branch and draft PR. Do not continue working on the previous PR unless I explicitly state that it has not been merged or ask you to add more work to it.
+2. GitHub authentication is almost always already valid, even when the sandbox cannot access stored keyring credentials or initially appears unauthenticated. Treat existing authentication as the expected default and thoroughly check whether Git and GitHub operations already work before asking me to log in. Only request authentication when you have confirmed that it is genuinely unavailable. If authentication is required, provide the exact PowerShell commands.
 
-Do not add database changes unless they are necessary for the requested feature.
+## Implementation
 
-## Commands requiring my input
+* Add database changes only when required.
+* Use optimistic UI when practical and safe, with rollback or recovery when a request fails or the server rejects the change.
+* Follow the project’s existing architecture, conventions, components, and visual design. Inspect and reuse established UI patterns before creating new ones. New UI must look intentionally designed: clean, attractive, responsive where relevant, and visually consistent with the brown-walnut, office-desk theme. Do not introduce generic default boxes, unstyled browser controls, arbitrary SaaS-style panels, or components that look disconnected from the rest of Media Room.
+* Where it suits the interaction, reuse the project’s existing **accent bar** pattern, such as the bars used for requests to move an item out of a watchlist or remove a Priority Stamp. An accent bar is a short horizontal decorative area containing dots with the ordinary message content displayed separately beneath it. Do not place text on the accent bar because it reduces readability.
 
-When asking me to run a PowerShell command, assume I am starting from a newly opened PowerShell window that:
+## Commands for me
 
-1. Is not in the repository directory.
-2. Is not authenticated with GitHub or Supabase.
-3. Has no project tooling currently running.
+When I must run PowerShell commands, provide one self-contained, copyable command block that works from a newly opened PowerShell window.
 
-Provide the correct `cd` command and every prerequisite command needed to reach the required state. Do not omit earlier setup commands because they appeared in a previous message.
+Assume that the window:
 
-## Completion requirements
+* is not currently in the repository directory;
+* has no project tooling running;
+* may not expose stored GitHub or Supabase credentials through the keyring, even though authentication is likely already valid.
+
+Include the correct repository `cd` command, authentication checks, and every prerequisite command required to reach the necessary state. Do not omit setup commands merely because they appeared in an earlier message.
+
+## Completion
 
 Before finishing:
 
-1. Implement and verify the requested changes.
-2. Create a draft pull request.
-3. Send me the draft pull request link.
-4. Provide a comprehensive but readable list of the features and changes implemented.
-5. If Supabase SQL must be run manually, provide a link to the SQL and clearly explain when it should be executed.
-6. If no manual SQL is required, there's no need to state either way.
-7. Mention any known limitations, unresolved issues, or steps I still need to perform.
+* implement and verify the requested changes;
+* create a new draft pull request;
+* provide the draft PR link;
+* provide a concise but complete summary of the implemented changes and verification performed;
+* identify any known limitations, unresolved issues, or manual steps remaining;
+* when manual Supabase SQL is required, link to the SQL and clearly explain when it must be executed.
+
+Do not mention manual SQL when none is required.
 
 ## Glossary
-* **Collection:** A user’s overall Media Room collection. A collection contains libraries, which contain shelves and media items.
-* **Library:** A subdivision within a collection that contains its own shelves and media items. Examples include Film & TV, Books, Video Games, and user-created libraries.
-* **Protected library:** One of the system-created default libraries: Film & TV, Books, or Video Games. Protected libraries must retain their special status and cannot be permanently removed like ordinary custom libraries.
-* **Custom library:** A user-created library. It has a library type and may use custom terminology for its items and creators.
-* **Library type:** The compatibility category assigned to a library: Film & TV (`screen`), Books (`book`), Video Games (`game`), or Other (`other`). The type determines which media items and shelves are compatible with the library and which metadata or enrichment features are available.
-* **Media type:** The type assigned to an individual media item: film, television, book, game, or other. Do not confuse an item’s media type with its containing library’s broader library type.
-* **Custom terminology:** A library’s configurable singular item term, plural item term, and creator term. For example, a library may use “Album”, “Albums”, and “Artist” instead of the default “Item”, “Items”, and “Creator”.
-* **Shelf:** An ordered group of media items inside one library. A shelf belongs to exactly one library, although it may be moved or copied into another compatible library where permitted.
-* **Protected shelf:** A system shelf with restrictions that ordinary shelves do not have. For example, the default Watchlist must remain undeletable and must not be offered as a movable shelf.
-* **Main Watchlist:** The Club-specific aggregate watchlist page. It is not a normal library or shelf. It contains the selected Club’s Topmost Watchlist followed by mirrored watchlists contributed by Club members.
-* **Topmost (Club) Watchlist:** The first shelf displayed on a Club’s Main Watchlist. It aggregates qualifying media from the Club members’ included watchlists and Priority Stamps.
-* **Included watchlist:** A Film & TV watchlist shelf for which the owner has enabled **Include this in Main Watchlist**. This is the original shelf in the owner’s collection.
-* **Mirrored watchlist:** The read-only representation of an included watchlist displayed on the Club’s Main Watchlist beneath the Topmost Watchlist. It remains associated with the original shelf and its owner.
-* **Priority Stamp:** A user’s explicit priority marker on a media title. Priority Stamps can contribute to Club Main Watchlist and Topmost Watchlist calculations; ordinary Likes do not.
-* **Watchlist request:** A persistent request sent to another user asking them either to remove or retain a Priority Stamp, or to move a watched item out of a watchlist. A request does not directly modify the other user’s data.
-* **Move shelf:** Transfer the existing shelf into another compatible library in the same collection. Moving does not create a duplicate.
-* **Copy shelf:** Create an independent duplicate of a shelf in a compatible destination library. Copies from another user must exclude private or user-specific state such as notes, ratings, ownership, reactions, requests, and Main Watchlist inclusion.
-* **Collection owner:** The user who owns the collection and may manage its libraries, shelves, and media.
-* **Collection visitor:** A person viewing a collection they do not own. The collection remains read-only except for actions explicitly available to visitors, such as permitted reactions or copying a shelf into their own collection.
-* **Secure link:** A long, unguessable, independently revocable link that provides a sanitized, read-only view of a collection.
-* **Short link / Open account:** The stable `/u/username` read-only collection link. It works only while the owner has explicitly set their account to Open; closing the account disables the URL without changing it.
-* **Static fallback:** The read-only `media-data.json` version of the collection used when Supabase is unavailable or the required database migrations have not been applied. Features requiring authenticated database mutations are unavailable in this mode.
 
+* **Collection:** A user’s complete Media Room, containing libraries.
+* **Library:** Contains shelves and media items. It is either a protected default library or a custom library.
+* **Protected library:** Film & TV, Books, or Video Games. It retains system protections and cannot be permanently removed like a custom library.
+* **Custom library:** A user-created library with a library type and optional custom terminology.
+* **Library type:** The compatibility category assigned to a library: Film & TV (`screen`), Books (`book`), Video Games (`game`), or Other (`other`). It determines compatible content and available metadata or enrichment features.
+* **Media type:** The type assigned to an individual item: film, television, book, game, or other. Do not confuse media type with the broader library type.
+* **Custom terminology:** A library’s configurable singular item, plural item, and creator terms.
+* **Shelf:** An ordered group of media items belonging to one library.
+* **Protected shelf:** A system shelf with additional restrictions. The default Watchlist is undeletable and cannot be moved.
+* **Main Watchlist:** A Club-specific aggregate page rather than a normal shelf or library. It displays the Topmost Watchlist followed by Club members’ mirrored watchlists.
+* **Topmost Watchlist:** Aggregates qualifying items from Club members’ included watchlists and Priority Stamps.
+* **Included watchlist:** The owner’s original Film & TV watchlist with **Include this in Main Watchlist** enabled.
+* **Mirrored watchlist:** The read-only Club-page representation of an included watchlist. It remains associated with the original shelf and its owner.
+* **Priority Stamp:** A user’s explicit priority marker. Priority Stamps can affect Main Watchlist aggregation; ordinary Likes cannot.
+* **Watchlist request:** A persistent request asking another user to retain or remove a Priority Stamp, or move a watched item out of a watchlist. It does not directly modify the other user’s data.
+* **Move shelf:** Transfers an existing shelf into another compatible library in the same collection without creating a duplicate.
+* **Copy shelf:** Creates an independent duplicate in a compatible library. Cross-user copies exclude private or user-specific state, including notes, ratings, ownership, reactions, requests, and Main Watchlist inclusion.
+* **Collection owner:** The user who owns and may manage the collection.
+* **Collection visitor:** Someone viewing a collection they do not own. The collection is read-only except for explicitly permitted actions such as reactions or copying a shelf.
+* **Secure link:** A long, unguessable, independently revocable link providing a sanitised, read-only collection view.
+* **Short link / Open account:** The stable `/u/username` read-only link. It works only while the owner has explicitly set the account to Open.
+* **Static fallback:** The read-only `media-data.json` collection used when Supabase or required migrations are unavailable. Authenticated database mutations do not work in this mode.
