@@ -1886,7 +1886,7 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\.pager-only\{justify-content:end!important\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\{[^}]*display:flex!important;flex-direction:row;flex-wrap:nowrap!important;align-items:center!important;justify-content:flex-end!important;gap:7px!important;[^}]*padding-left:0!important/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-mobile-bottom-row \.shelf-content-actions\{display:none\}/);
-  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-edit-mobile-actions\{display:grid;grid-template-columns:1fr 1fr;gap:8px/);
+  assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-edit-mobile-actions\{display:grid;grid-template-columns:1fr;gap:8px/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.main-watchlist-shelf \.shelf-head\{display:grid!important;grid-template-columns:minmax\(0,1fr\) auto;align-items:center!important;gap:12px\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.main-watchlist-shelf \.shelf-title\{width:auto;min-width:0;justify-content:flex-start;text-align:left\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.main-watchlist-shelf \.shelf-actions\{width:auto;margin-left:0;align-self:center\}/);
