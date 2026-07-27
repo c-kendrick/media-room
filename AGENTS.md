@@ -32,5 +32,27 @@ Before finishing:
 7. Mention any known limitations, unresolved issues, or steps I still need to perform.
 
 ## Glossary:
-1. Topmost (Club) Watchlist: the watchlist shelf that is found in the club or main watchlist at the very top that aggregates from the club-included (mirrored) watchlists
-2. Mirrored watchlist: a shelf in a user's collection with the toggle "Include this in Main Watchlist" - this is then mirrored and placed in their club main watchlist underneath the topmost club watchlist. 
+## Glossary
+* **Collection:** A user’s overall Media Room collection. A collection contains libraries, which contain shelves and media items.
+* **Library:** A subdivision within a collection that contains its own shelves and media items. Examples include Film & TV, Books, Video Games, and user-created libraries.
+* **Protected library:** One of the system-created default libraries: Film & TV, Books, or Video Games. Protected libraries must retain their special status and cannot be permanently removed like ordinary custom libraries.
+* **Custom library:** A user-created library. It has a library type and may use custom terminology for its items and creators.
+* **Library type:** The compatibility category assigned to a library: Film & TV (`screen`), Books (`book`), Video Games (`game`), or Other (`other`). The type determines which media items and shelves are compatible with the library and which metadata or enrichment features are available.
+* **Media type:** The type assigned to an individual media item: film, television, book, game, or other. Do not confuse an item’s media type with its containing library’s broader library type.
+* **Custom terminology:** A library’s configurable singular item term, plural item term, and creator term. For example, a library may use “Album”, “Albums”, and “Artist” instead of the default “Item”, “Items”, and “Creator”.
+* **Shelf:** An ordered group of media items inside one library. A shelf belongs to exactly one library, although it may be moved or copied into another compatible library where permitted.
+* **Protected shelf:** A system shelf with restrictions that ordinary shelves do not have. For example, the default Watchlist must remain undeletable and must not be offered as a movable shelf.
+* **Main Watchlist:** The Club-specific aggregate watchlist page. It is not a normal library or shelf. It contains the selected Club’s Topmost Watchlist followed by mirrored watchlists contributed by Club members.
+* **Topmost (Club) Watchlist:** The first shelf displayed on a Club’s Main Watchlist. It aggregates qualifying media from the Club members’ included watchlists and Priority Stamps.
+* **Included watchlist:** A Film & TV watchlist shelf for which the owner has enabled **Include this in Main Watchlist**. This is the original shelf in the owner’s collection.
+* **Mirrored watchlist:** The read-only representation of an included watchlist displayed on the Club’s Main Watchlist beneath the Topmost Watchlist. It remains associated with the original shelf and its owner.
+* **Priority Stamp:** A user’s explicit priority marker on a media title. Priority Stamps can contribute to Club Main Watchlist and Topmost Watchlist calculations; ordinary Likes do not.
+* **Watchlist request:** A persistent request sent to another user asking them either to remove or retain a Priority Stamp, or to move a watched item out of a watchlist. A request does not directly modify the other user’s data.
+* **Move shelf:** Transfer the existing shelf into another compatible library in the same collection. Moving does not create a duplicate.
+* **Copy shelf:** Create an independent duplicate of a shelf in a compatible destination library. Copies from another user must exclude private or user-specific state such as notes, ratings, ownership, reactions, requests, and Main Watchlist inclusion.
+* **Collection owner:** The user who owns the collection and may manage its libraries, shelves, and media.
+* **Collection visitor:** A person viewing a collection they do not own. The collection remains read-only except for actions explicitly available to visitors, such as permitted reactions or copying a shelf into their own collection.
+* **Secure link:** A long, unguessable, independently revocable link that provides a sanitized, read-only view of a collection.
+* **Short link / Open account:** The stable `/u/username` read-only collection link. It works only while the owner has explicitly set their account to Open; closing the account disables the URL without changing it.
+* **Static fallback:** The read-only `media-data.json` version of the collection used when Supabase is unavailable or the required database migrations have not been applied. Features requiring authenticated database mutations are unavailable in this mode.
+
