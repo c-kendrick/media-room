@@ -31,7 +31,6 @@ Before finishing:
 6. If no manual SQL is required, there's no need to state either way.
 7. Mention any known limitations, unresolved issues, or steps I still need to perform.
 
-## Glossary:
 ## Glossary
 * **Collection:** A user’s overall Media Room collection. A collection contains libraries, which contain shelves and media items.
 * **Library:** A subdivision within a collection that contains its own shelves and media items. Examples include Film & TV, Books, Video Games, and user-created libraries.
