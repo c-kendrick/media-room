@@ -209,6 +209,62 @@ test('Main Watchlist demand counts each person once across shelves, copies, and 
   }
 });
 
+test('Main Watchlist Interest counts each person once across included watchlists and Priority Stamps', () => {
+  const media = [
+    { id: 'copy-a', collection_id: 'collection-a', type: 'film', title: 'Aliens', year: 1986 },
+    { id: 'copy-b', collection_id: 'collection-b', type: 'film', title: 'Aliens', year: 1986 },
+    { id: 'copy-c', collection_id: 'collection-c', type: 'film', title: 'Aliens', year: 1986 },
+  ];
+  const collections = [
+    { id: 'collection-a', owner_id: 'user-a', title: 'User A Collection' },
+    { id: 'collection-b', owner_id: 'user-b', title: 'User B Collection' },
+    { id: 'collection-c', owner_id: 'user-c', title: 'User C Collection' },
+  ];
+  const profiles = [
+    { id: 'user-a', display_name: 'User A' },
+    { id: 'user-b', display_name: 'User B' },
+    { id: 'user-c', display_name: 'User C' },
+  ];
+  const includedWatchlistMediaIds = new Set(['copy-a', 'copy-b']);
+  const demandFor = (interests, includedIds = includedWatchlistMediaIds) =>
+    buildWatchDemand(media, collections, interests, profiles, includedIds).get('copy-a').map((person) => person.id);
+
+  assert.deepEqual(
+    demandFor([{ media_item_id: 'copy-c', user_id: 'user-b' }]).sort(),
+    ['user-a', 'user-b'],
+    'User B being both a virtual and explicit contributor must still count once, without adding copy C’s owner',
+  );
+  assert.deepEqual(
+    demandFor([
+      { media_item_id: 'copy-c', user_id: 'user-a' },
+      { media_item_id: 'copy-c', user_id: 'user-b' },
+    ]).sort(),
+    ['user-a', 'user-b'],
+    'Priority Stamps from both included-watchlist owners must not increase Interest above two',
+  );
+  assert.deepEqual(
+    demandFor([
+      { media_item_id: 'copy-c', user_id: 'user-a' },
+      { media_item_id: 'copy-c', user_id: 'user-b' },
+      { media_item_id: 'copy-c', user_id: 'user-c' },
+    ]).sort(),
+    ['user-a', 'user-b', 'user-c'],
+    'a third person’s Priority Stamp must increase Interest to three',
+  );
+  assert.deepEqual(
+    demandFor(
+      [
+        { media_item_id: 'copy-c', user_id: 'user-a' },
+        { media_item_id: 'copy-c', user_id: 'user-b' },
+        { media_item_id: 'copy-c', user_id: 'user-c' },
+      ],
+      new Set(['copy-a', 'copy-b', 'copy-c']),
+    ).sort(),
+    ['user-a', 'user-b', 'user-c'],
+    'the third person also including the work in a watchlist must leave Interest at three',
+  );
+});
+
 test('Topmost Watchlist sorts higher Interest first and preserves existing order for ties', () => {
   const media = [
     { id: 'low' },
