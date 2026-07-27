@@ -54,7 +54,7 @@ import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from './ownership-filter.j
 import { BACKUP_IMPORT_LIMITS, parseCollectionBackup } from './backup-import.js';
 import { buildCollectionShareUrl, buildPublicCollectionUrl, createCollectionShare, deleteCollectionShare, getCollectionShare, getPublicCollectionStatus, loadPublicCollection, loadSharedCollection, readPublicCollectionUsername, readShareToken, restorePublicCollectionRoute, setCollectionShareEnabled, setPublicCollectionOpen } from './collection-share.js';
 import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUserHub, removeClubMember, requestFriend, respondClubInvitation, respondFriendRequest, transferClubOwnership, unfriend } from './social.js';
-import { applyReactionToSnapshot, mediaReactionIdentity, setMediaLoveBatch, setMediaReaction } from './media-reactions.js';
+import { applyReactionToSnapshot, mediaReactionIdentity, priorityInterestPresentation, setMediaLoveBatch, setMediaReaction } from './media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from './identity.js';
 import { clearCachedAccount, deleteCachedSection, invalidateLibrarySnapshot, readCachedSection, writeCachedSnapshot } from './section-cache.js';
 import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershipIdentity, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, SHELF_SET_SIZE, validateShelfDraft } from './shelf-order.js';
@@ -2785,7 +2785,7 @@ function CollectionBinDrawer({ loading = false, error = '', onRetry, libraries =
   </div>, document.body);
 }
 
-function ReactionButton({ kind, people = [], canReact, currentUserId, onChange, labelled = false }) {
+function ReactionButton({ kind, people = [], interestPeople, watchlistedPeople, canReact, currentUserId, onChange, labelled = false }) {
   const [saving, setSaving] = useState(false);
   const active = people.some((person) => person.id === currentUserId);
   const names = people.map((person) => person.display_name || person.username).filter(Boolean);
@@ -2794,11 +2794,17 @@ function ReactionButton({ kind, people = [], canReact, currentUserId, onChange, 
   const summary = names.length
     ? `${isLike ? 'Loved' : 'Priority Watch'} by ${names.join(', ')}`
     : (isLike ? 'No loves yet' : 'No Priority Stamps yet');
-  const tooltip = isLike ? summary : ['Priority Watch Stamp', ...names].join('\n');
+  const priorityPresentation = isLike ? null : priorityInterestPresentation({
+    interestPeople,
+    priorityPeople: people,
+    watchlistedPeople,
+  });
+  const tooltip = isLike ? summary : priorityPresentation.tooltip;
+  const count = isLike ? people.length : priorityPresentation.count;
   const Icon = isLike ? Heart : Stamp;
   return <button
     type="button"
-    className={cls('reaction-button', isLike ? 'like-reaction' : 'priority-reaction', active && 'active', labelled && 'labelled', people.length > 0 && 'has-count')}
+    className={cls('reaction-button', isLike ? 'like-reaction' : 'priority-reaction', active && 'active', labelled && 'labelled', count > 0 && 'has-count')}
     aria-label={`${label}. ${summary}`}
     aria-pressed={active}
     title={tooltip}
@@ -2810,13 +2816,13 @@ function ReactionButton({ kind, people = [], canReact, currentUserId, onChange, 
       setSaving(true);
       try { await onChange(kind, !active); } finally { setSaving(false); }
     }}
-  ><Icon size={labelled ? 15 : 14} fill={isLike && active ? 'currentColor' : 'none'} />{labelled && <span>{label}</span>}{people.length > 0 && <small>{people.length}</small>}</button>;
+  ><Icon size={labelled ? 15 : 14} fill={isLike && active ? 'currentColor' : 'none'} />{labelled && <span>{label}</span>}{count > 0 && <small>{count}</small>}</button>;
 }
 
 function ReactionControls({ item, canReact, currentUserId, onReaction, labelled = false }) {
   const priorityAvailable = ['film', 'television'].includes(item.type);
   return <span className={cls('reaction-controls', labelled && 'labelled')}>
-    {priorityAvailable && <ReactionButton kind="priority" people={item.priorities || []} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />}
+    {priorityAvailable && <ReactionButton kind="priority" people={item.priorities || []} interestPeople={item.watchDemand} watchlistedPeople={item.watchlistedBy} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />}
     <ReactionButton kind="like" people={item.likes || []} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />
   </span>;
 }

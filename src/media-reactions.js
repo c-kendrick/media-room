@@ -21,6 +21,38 @@ export function mediaReactionIdentity(item) {
   return [normalizedReactionType(item?.type), normalizedReactionTitle(item?.title), item?.year ?? ''].join('|');
 }
 
+export function priorityInterestPresentation({
+  interestPeople,
+  priorityPeople = [],
+  watchlistedPeople = [],
+}) {
+  if (!Array.isArray(interestPeople)) {
+    const names = priorityPeople.map((person) => person.display_name || person.username).filter(Boolean);
+    return {
+      count: priorityPeople.length,
+      tooltip: ['Priority Watch Stamp', ...names].join('\n'),
+    };
+  }
+
+  const names = (people) => people
+    .map((person) => person.display_name || person.username)
+    .filter(Boolean);
+  const priorityNames = names(priorityPeople);
+  const watchlistedNames = names(watchlistedPeople);
+
+  return {
+    count: interestPeople.length,
+    tooltip: [
+      `People interested: ${interestPeople.length}`,
+      `Priority Stamps: ${priorityPeople.length}`,
+      ...priorityNames,
+      '',
+      `Watchlisted: ${watchlistedPeople.length}`,
+      ...watchlistedNames,
+    ].join('\n'),
+  };
+}
+
 export function setMediaReaction(accessToken, mediaItemId, kind, enabled) {
   if (!accessToken || !mediaItemId || !['like', 'priority'].includes(kind)) {
     throw new Error('An approved signed-in account and valid reaction are required.');

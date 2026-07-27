@@ -10,10 +10,11 @@ import { parseCollectionBackup, validateCollectionBackup } from '../src/backup-i
 import { supabaseRequest } from '../src/supabase.js';
 import { collectionSummaryStats } from '../src/collection-stats.js';
 import { appSiteUrl, authenticatedProfilePath, selectAuthenticatedProfile, signupRateLimitDetails } from '../src/auth.js';
-import { applyReactionToSnapshot, mediaReactionIdentity } from '../src/media-reactions.js';
+import { applyReactionToSnapshot, mediaReactionIdentity, priorityInterestPresentation } from '../src/media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from '../src/identity.js';
 import {
   buildPriorityStampCounts,
+  buildPriorityStampInterests,
   mapSnapshot,
   mergeSectionSnapshot,
   sortTopmostWatchlistByInterest,
@@ -262,6 +263,51 @@ test('Main Watchlist Interest counts each person once across included watchlists
     ).sort(),
     ['user-a', 'user-b', 'user-c'],
     'the third person also including the work in a watchlist must leave Interest at three',
+  );
+});
+
+test('Main Watchlist Interest uses authoritative Priority Stamp reactions instead of the legacy mirror', () => {
+  const media = [
+    { id: 'aliens', collection_id: 'collection-a', type: 'film', title: 'Aliens', year: 1986 },
+  ];
+  const reactions = [
+    { user_id: 'user-a', kind: 'priority', work_key: 'film|aliens|1986', state: 'active' },
+    { user_id: 'user-b', kind: 'priority', work_key: 'film|aliens|1986', state: 'active' },
+    { user_id: 'user-c', kind: 'priority', work_key: 'film|aliens|1986', state: 'active' },
+    { user_id: 'user-d', kind: 'like', work_key: 'film|aliens|1986', state: 'active' },
+  ];
+  const authoritativeInterests = buildPriorityStampInterests(media, reactions);
+  const demand = buildWatchDemand(
+    media,
+    [{ id: 'collection-a', owner_id: 'user-a', title: 'User A Collection' }],
+    authoritativeInterests,
+    [
+      { id: 'user-a', display_name: 'User A' },
+      { id: 'user-b', display_name: 'User B' },
+      { id: 'user-c', display_name: 'User C' },
+    ],
+    new Set(['aliens']),
+  );
+
+  assert.equal(authoritativeInterests.length, 3);
+  assert.equal(demand.get('aliens').length, 3);
+});
+
+test('Priority Stamp presentation shows distinct Interest with stamp and watchlist breakdowns', () => {
+  const userA = { id: 'user-a', display_name: 'User A' };
+  const userB = { id: 'user-b', display_name: 'User B' };
+  const userC = { id: 'user-c', display_name: 'User C' };
+
+  assert.deepEqual(
+    priorityInterestPresentation({
+      interestPeople: [userA, userB, userC],
+      priorityPeople: [userA, userB],
+      watchlistedPeople: [userA],
+    }),
+    {
+      count: 3,
+      tooltip: 'People interested: 3\nPriority Stamps: 2\nUser A\nUser B\n\nWatchlisted: 1\nUser A',
+    },
   );
 });
 
@@ -1452,10 +1498,11 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.match(loveBatchMigration, /grant execute on function public\.set_media_love_batch\(jsonb\) to authenticated/);
   assert.match(loveBatchMigration, /revoke all on function public\.set_media_love_batch\(jsonb\) from public, anon/);
 
-  assert.match(data, /reactions\.filter\(\(reaction\) => scopedProfileIds\.has\(reaction\.user_id\) && \(!reaction\.state \|\| reaction\.state === 'active'\)\)/);
+  assert.match(data, /const scopedReactions = reactions\.filter\(/);
+  assert.match(data, /const interests = buildPriorityStampInterests\(allMediaItems, scopedReactions\)/);
   assert.match(app, /function ReactionButton/);
   assert.match(app, /const Icon = isLike \? Heart : Stamp/);
-  assert.match(app, /const tooltip = isLike \? summary : \['Priority Watch Stamp', \.\.\.names\]\.join\('\\n'\)/);
+  assert.match(app, /const tooltip = isLike \? summary : priorityPresentation\.tooltip/);
   assert.match(app, /`\$\{isLike \? 'Loved' : 'Priority Watch'\} by/);
   assert.doesNotMatch(app, /\bLiked\b|No likes yet|Added to your likes/);
   assert.match(app, /item\.priorities\?\.map\(\(person\) => <span className="card-interest"/);
@@ -1464,7 +1511,7 @@ test('likes and Priority Stamps are secure, private from share links, and preser
   assert.match(app, /Previous state restored/);
   assert.match(styles, /\.media-card-rating-row/);
   assert.match(styles, /\.reaction-button\.like-reaction\.active/);
-  assert.match(app, /people\.length > 0 && 'has-count'/);
+  assert.match(app, /count > 0 && 'has-count'/);
   assert.match(styles, /\.media-card-rating-row \{[\s\S]*flex-wrap: wrap;[\s\S]*width: 100%;[\s\S]*max-width: 100%;/);
   assert.match(styles, /\.reaction-controls \{[\s\S]*flex: 0 0 auto;[\s\S]*flex-wrap: nowrap;[\s\S]*max-width: 100%;[\s\S]*margin-left: 0;/);
   assert.match(app, /const REACTION_WRAP_RELEASE_PX = 4/);
