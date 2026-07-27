@@ -54,7 +54,7 @@ import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from './ownership-filter.j
 import { BACKUP_IMPORT_LIMITS, parseCollectionBackup } from './backup-import.js';
 import { buildCollectionShareUrl, buildPublicCollectionUrl, createCollectionShare, deleteCollectionShare, getCollectionShare, getPublicCollectionStatus, loadPublicCollection, loadSharedCollection, readPublicCollectionUsername, readShareToken, restorePublicCollectionRoute, setCollectionShareEnabled, setPublicCollectionOpen } from './collection-share.js';
 import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUserHub, removeClubMember, requestFriend, respondClubInvitation, respondFriendRequest, transferClubOwnership, unfriend } from './social.js';
-import { applyReactionToSnapshot, mediaReactionIdentity, priorityInterestPresentation, setMediaLoveBatch, setMediaReaction } from './media-reactions.js';
+import { applyMainWatchlistInterest, applyReactionToSnapshot, mediaReactionIdentity, priorityInterestPresentation, setMediaLoveBatch, setMediaReaction } from './media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from './identity.js';
 import { clearCachedAccount, deleteCachedSection, invalidateLibrarySnapshot, readCachedSection, writeCachedSnapshot } from './section-cache.js';
 import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershipIdentity, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, SHELF_SET_SIZE, validateShelfDraft } from './shelf-order.js';
@@ -776,7 +776,13 @@ export default function App() {
       const progressiveSnapshot = !sharedMode && loadedSnapshot?.collectionId !== MAIN_WATCHLIST_ID && dataRef.current?.collectionId === loadedSnapshot?.collectionId
         ? mergeSectionSnapshot(dataRef.current, loadedSnapshot)
         : loadedSnapshot;
-      const snapshot = applyPendingLoves(progressiveSnapshot);
+      const scopedSnapshot = applyMainWatchlistInterest(
+        progressiveSnapshot,
+        mainWatchlistMemoryScope.current === mainWatchlistScopeKey
+          ? snapshotCache.current.get(MAIN_WATCHLIST_ID)
+          : null,
+      );
+      const snapshot = applyPendingLoves(scopedSnapshot);
       if (!sharedMode) {
         cacheSnapshot(snapshot, targetCollectionId);
         if (fresh && snapshot.collectionId !== MAIN_WATCHLIST_ID) snapshotCache.current.delete(MAIN_WATCHLIST_ID);
@@ -814,7 +820,14 @@ export default function App() {
     const current = dataRef.current?.collectionId === collectionId
       ? dataRef.current
       : snapshotCache.current.get(collectionId);
-    const merged = applyPendingLoves(current ? mergeSectionSnapshot(current, loaded) : loaded);
+    const sectionSnapshot = current ? mergeSectionSnapshot(current, loaded) : loaded;
+    const scopedSnapshot = applyMainWatchlistInterest(
+      sectionSnapshot,
+      mainWatchlistMemoryScope.current === mainWatchlistScopeKey
+        ? snapshotCache.current.get(MAIN_WATCHLIST_ID)
+        : null,
+    );
+    const merged = applyPendingLoves(scopedSnapshot);
     cacheSnapshot(merged, collectionId);
     if (dataRef.current?.collectionId === collectionId || collectionId === collectionIdRef.current) {
       dataRef.current = merged;
@@ -853,6 +866,15 @@ export default function App() {
       request = loadMediaSnapshot({ fresh, collectionId: MAIN_WATCHLIST_ID, section: 'screen', accessToken, mainWatchlistOwnerIds })
         .then((snapshot) => {
           if (snapshot) cacheSnapshot(snapshot, MAIN_WATCHLIST_ID);
+          const current = dataRef.current;
+          if (snapshot && current?.collectionId && !current.mainWatchlist) {
+            const enriched = applyMainWatchlistInterest(current, snapshot);
+            if (enriched !== current) {
+              dataRef.current = enriched;
+              setData(enriched);
+              cacheSnapshot(enriched, enriched.collectionId);
+            }
+          }
           return snapshot;
         })
         .finally(() => {
@@ -2593,7 +2615,7 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canCo
   const [mobileScrollState, setMobileScrollState] = useState({ canPrevious: false, canNext: false });
   const [eagerPosters, setEagerPosters] = useState(false);
   const [uniformReactionWrap, setUniformReactionWrap] = useState(false);
-  const serverOrderKey = items.map((item) => `${item.database_id}:${item.updated_at || ''}:${item.star_rating ?? ''}:${item.list_positions?.[shelf.shelf_id] ?? ''}:${(item.interests || []).map((person) => person.id || person.username).sort().join(',')}:${(item.likes || []).map((person) => person.id).sort().join(',')}:${(item.priorities || []).map((person) => person.id).sort().join(',')}`).join('|');
+  const serverOrderKey = items.map((item) => `${item.database_id}:${item.updated_at || ''}:${item.star_rating ?? ''}:${item.list_positions?.[shelf.shelf_id] ?? ''}:${item.demandCount ?? ''}:${(item.watchlistedBy || []).map((person) => person.id).sort().join(',')}:${(item.interests || []).map((person) => person.id || person.username).sort().join(',')}:${(item.likes || []).map((person) => person.id).sort().join(',')}:${(item.priorities || []).map((person) => person.id).sort().join(',')}`).join('|');
   useEffect(() => { setDisplayItems(items); }, [serverOrderKey]);
   const displaySegments = pairedShelfSegments(displayItems);
   const segmentCount = displaySegments.length;
@@ -2675,7 +2697,7 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canCo
       </div>
     </div>
     <div className="poster-track" ref={trackRef} onScroll={(event) => { const track = event.currentTarget; const segment = track.querySelector('.poster-segment'); const width = (segment?.offsetWidth || track.clientWidth) + 24; const maximumScroll = Math.max(track.scrollWidth - track.clientWidth, 0); setMobileScrollState({ canPrevious: track.scrollLeft > 1, canNext: track.scrollLeft < maximumScroll - 1 }); if (width > 0) setCurrentSegment(Math.max(0, Math.min(Math.round(track.scrollLeft / width), Math.max(segmentCount - 1, 0)))); }}>
-      {displaySegments.map((segmentRows, segmentIndex) => <div className={cls('poster-segment', segmentIndex < displaySegments.length - 1 && 'has-divider')} key={segmentIndex}>{segmentRows.map((row, rowIndex) => row.length > 0 && <div className="poster-set-row" data-set={segmentIndex * 2 + rowIndex + 1} key={rowIndex}>{row.map((item, itemIndex) => <MediaCard key={item.item_id} item={item} shelfRank={shelf.numbered ? segmentIndex * 14 + rowIndex * 7 + itemIndex + 1 : null} eagerPoster={eagerPosters && segmentIndex === 0 && rowIndex === 0} showInterestCount={Boolean(shelf.virtual)} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} />)}</div>)}</div>)}
+      {displaySegments.map((segmentRows, segmentIndex) => <div className={cls('poster-segment', segmentIndex < displaySegments.length - 1 && 'has-divider')} key={segmentIndex}>{segmentRows.map((row, rowIndex) => row.length > 0 && <div className="poster-set-row" data-set={segmentIndex * 2 + rowIndex + 1} key={rowIndex}>{row.map((item, itemIndex) => <MediaCard key={item.item_id} item={item} shelfRank={shelf.numbered ? segmentIndex * 14 + rowIndex * 7 + itemIndex + 1 : null} eagerPoster={eagerPosters && segmentIndex === 0 && rowIndex === 0} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} />)}</div>)}</div>)}
       {!displayItems.length && <div className="empty-poster">No items on this shelf yet.</div>}
     </div>
     {arranging && <ArrangeShelfDialog shelf={shelf} items={arrangeItems} onClose={() => setArranging(false)} onSave={async (nextItems) => { const previous = [...displayItems]; const visibleIdentities = new Set(displayItems.map(membershipIdentity)); setDisplayItems(nextItems.filter((item) => visibleIdentities.has(membershipIdentity(item)))); try { await onReorder(nextItems.map((item) => item.database_id)); } catch (error) { setDisplayItems(previous); throw error; } }} />}
@@ -2785,7 +2807,7 @@ function CollectionBinDrawer({ loading = false, error = '', onRetry, libraries =
   </div>, document.body);
 }
 
-function ReactionButton({ kind, people = [], interestPeople, watchlistedPeople, showInterestCount = false, canReact, currentUserId, onChange, labelled = false }) {
+function ReactionButton({ kind, people = [], interestPeople, interestPriorityPeople, watchlistedPeople, canReact, currentUserId, onChange, labelled = false }) {
   const [saving, setSaving] = useState(false);
   const active = people.some((person) => person.id === currentUserId);
   const names = people.map((person) => person.display_name || person.username).filter(Boolean);
@@ -2796,11 +2818,11 @@ function ReactionButton({ kind, people = [], interestPeople, watchlistedPeople, 
     : (isLike ? 'No loves yet' : 'No Priority Stamps yet');
   const priorityPresentation = isLike ? null : priorityInterestPresentation({
     interestPeople,
-    priorityPeople: people,
+    priorityPeople: interestPriorityPeople || people,
     watchlistedPeople,
   });
   const tooltip = isLike ? summary : priorityPresentation.tooltip;
-  const count = isLike || !showInterestCount ? people.length : priorityPresentation.count;
+  const count = isLike ? people.length : priorityPresentation.count;
   const Icon = isLike ? Heart : Stamp;
   return <button
     type="button"
@@ -2823,7 +2845,7 @@ function ReactionButton({ kind, people = [], interestPeople, watchlistedPeople, 
     {!isLike && priorityPresentation.detailed && <span className="reaction-interest-tooltip" role="tooltip">
       <strong>Interest: {priorityPresentation.count}</strong>
       <span className="reaction-tooltip-section">
-        <b>Priority Stamps: {people.length}</b>
+        <b>Priority Stamps: {priorityPresentation.priorityCount}</b>
         {priorityPresentation.priorityNames.map((person) => <span key={person.id || person.name}>{person.name}</span>)}
       </span>
       <span className="reaction-tooltip-section">
@@ -2834,10 +2856,10 @@ function ReactionButton({ kind, people = [], interestPeople, watchlistedPeople, 
   </button>;
 }
 
-function ReactionControls({ item, showInterestCount = false, canReact, currentUserId, onReaction, labelled = false }) {
+function ReactionControls({ item, canReact, currentUserId, onReaction, labelled = false }) {
   const priorityAvailable = ['film', 'television'].includes(item.type);
   return <span className={cls('reaction-controls', labelled && 'labelled')}>
-    {priorityAvailable && <ReactionButton kind="priority" people={item.priorities || []} interestPeople={item.watchDemand} watchlistedPeople={item.watchlistedBy} showInterestCount={showInterestCount} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />}
+    {priorityAvailable && <ReactionButton kind="priority" people={item.priorities || []} interestPeople={item.watchDemand} interestPriorityPeople={item.interestPriorities} watchlistedPeople={item.watchlistedBy} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />}
     <ReactionButton kind="like" people={item.likes || []} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />
   </span>;
 }
@@ -2868,7 +2890,7 @@ function ProgressivePoster({ src, alt, eager = false }) {
   return <img ref={imageRef} src={shouldLoad ? src : undefined} alt={alt} loading={eager ? 'eager' : 'lazy'} fetchPriority={eager ? 'high' : 'auto'} decoding="async" />;
 }
 
-function MediaCard({ item, shelfRank = null, eagerPoster = false, showInterestCount = false, onClick, canRate, onRate, draggable, dragging, onDragStart, onDragEnd, onDrop }) {
+function MediaCard({ item, shelfRank = null, eagerPoster = false, onClick, canRate, onRate, draggable, dragging, onDragStart, onDragEnd, onDrop }) {
   const tags = mediaCardDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
   return (
@@ -2879,7 +2901,7 @@ function MediaCard({ item, shelfRank = null, eagerPoster = false, showInterestCo
           : <span className="poster-fallback"><Clapperboard /><span>{title}</span></span>}
         <span className="media-card-title">{title}</span>
       </button>
-      <div className="media-card-rating-row"><StarRating value={item.star_rating} editable={canRate} onChange={onRate} label={`${title} rating`} /><ReactionControls item={item} showInterestCount={showInterestCount} {...item.reactionControl} /></div>
+      <div className="media-card-rating-row"><StarRating value={item.star_rating} editable={canRate} onChange={onRate} label={`${title} rating`} /><ReactionControls item={item} {...item.reactionControl} /></div>
       <button className="media-card-meta media-card-open-meta" type="button" title="Open item">
         {tags.length > 0 && (
           <span className="media-format-list">

@@ -1,7 +1,7 @@
 import { supabaseRpc, supabaseSelect } from './supabase.js';
 import { buildWatchDemand, buildWatchGroupIdentities } from './watch-demand.js';
 import { SECTION_NOTE_DEFAULTS } from './section-notes.js';
-import { mediaReactionIdentity } from './media-reactions.js';
+import { mediaReactionIdentity, qualifyingInterestCount } from './media-reactions.js';
 import { chooseLibrary, normalizeLibrary } from './library-system.js';
 
 const MEDIA_SELECT = 'id,legacy_id,collection_id,library_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,owned,runtime,external_ids,deleted_at,created_at,updated_at';
@@ -599,7 +599,12 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
   return { ...snapshot, mainWatchlist: true, media: snapshot.media.map((item) => {
     const watchDemand = demandByMediaId.get(item.database_id) || [];
     const watchlistedBy = watchlistedByMediaId.get(item.database_id) || [];
-    return { ...item, watchDemand, watchlistedBy, demandCount: watchDemand.length };
+    return {
+      ...item,
+      watchDemand,
+      watchlistedBy,
+      demandCount: qualifyingInterestCount(watchDemand.length, item.priorities?.length || 0),
+    };
   }) };
 }
 
