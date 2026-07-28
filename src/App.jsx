@@ -59,6 +59,18 @@ import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayNa
 import { clearCachedAccount, deleteCachedSection, invalidateLibrarySnapshot, readCachedSection, writeCachedSnapshot } from './section-cache.js';
 import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershipIdentity, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, SHELF_SET_SIZE, validateShelfDraft } from './shelf-order.js';
 import { getDrawerNavigationTargets } from './media-drawer-navigation.js';
+import {
+  buildEverythingEverywhereSequence,
+  createFightClubSequenceController,
+  drawerQuoteFor,
+  heartTransformationFor,
+  isWatchlistShelf,
+  matchesEasterEgg,
+  persistThenScheduleEasterEgg,
+  playDrawerSequence,
+  preloadRandomizerItems,
+  successfulBinToast,
+} from './easter-eggs.js';
 import { LightweightMarkdown } from './LightweightMarkdown.jsx';
 import {
   loadWatchlistRequestActions,
@@ -562,6 +574,17 @@ export default function App() {
   const [landingApplied, setLandingApplied] = useState(() => sharedMode);
   const snapshotCache = useRef(new Map());
   const mainWatchlistMemoryScope = useRef(null);
+  const drawerSequenceVersion = useRef(0);
+  const fightClubSequence = useRef(null);
+  if (!fightClubSequence.current) {
+    fightClubSequence.current = createFightClubSequenceController({
+      alert: (message) => window.alert(message),
+      schedule: (work, delay) => window.setTimeout(work, delay),
+      cancelSchedule: (timer) => window.clearTimeout(timer),
+    });
+  }
+
+  useEffect(() => () => fightClubSequence.current?.cancel(), []);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -675,7 +698,7 @@ export default function App() {
     loveFlushTimer.current = null;
     loveActivityCount.current = 0;
     const batch = [...pendingLoves.current.values()];
-    if (!batch.length || !accessToken || !account?.profile) return;
+    if (!batch.length || !accessToken || !account?.profile) return true;
     pendingLoves.current.clear();
     loveFlushChain.current = loveFlushChain.current
       .catch(() => undefined)
@@ -693,8 +716,10 @@ export default function App() {
       });
     try {
       await loveFlushChain.current;
+      return true;
     } catch {
       // The queued rollback above already restored only still-current changes.
+      return false;
     }
   };
   flushPendingLovesRef.current = flushPendingLoves;
@@ -1024,6 +1049,7 @@ export default function App() {
       ? { id: MAIN_WATCHLIST_ID, title: 'Main Watchlist' }
       : collections.find((row) => row.id === nextCollectionId);
     setCollectionId(nextCollectionId);
+    drawerSequenceVersion.current += 1;
     setSelectedMediaId(null);
     setSelectedMediaNavigation(null);
     setError('');
@@ -1359,6 +1385,7 @@ export default function App() {
       }
       if (event.key === 'Escape') {
         setSearchOpen(false);
+        drawerSequenceVersion.current += 1;
         setSelectedMediaId(null);
         setSelectedMediaNavigation(null);
         setMobileNav(false);
@@ -1376,8 +1403,20 @@ export default function App() {
 
   const selectedMedia = data?.media?.find((item) => item.item_id === selectedMediaId);
   const drawerNavigationTargets = getDrawerNavigationTargets(selectedMediaNavigation, selectedMediaId);
+  const openMediaDrawer = (itemId, navigation = null, sequence = null) => {
+    const version = ++drawerSequenceVersion.current;
+    setSelectedMediaNavigation(navigation);
+    if (!sequence?.length) {
+      setSelectedMediaId(itemId);
+      return;
+    }
+    void playDrawerSequence(sequence, (item) => {
+      if (drawerSequenceVersion.current === version) setSelectedMediaId(item.item_id);
+    });
+  };
   const navigateDrawer = (target) => {
     if (!target) return;
+    drawerSequenceVersion.current += 1;
     setSelectedMediaId(target.itemId);
     setSelectedMediaNavigation((navigation) => navigation && { ...navigation, shelfId: target.shelfId });
   };
@@ -1496,6 +1535,7 @@ export default function App() {
   };
 
   const closeSelectedMedia = () => {
+    drawerSequenceVersion.current += 1;
     setSelectedMediaId(null);
     setSelectedMediaNavigation(null);
     setPendingWatchlistRequest(null);
@@ -1579,7 +1619,15 @@ export default function App() {
   const isAdmin = isAdminAccount && viewAsAdmin && !sharedMode;
   const canReact = Boolean(!sharedMode && account?.profile?.approved_at && !account.profile.deactivated_at);
   const canShareCollection = Boolean(account?.profile?.approved_at && !account.profile.deactivated_at && ownCollection);
+  const triggerFightClubEasterEgg = (item) => {
+    fightClubSequence.current?.trigger({
+      item,
+      storage: window.localStorage,
+      userId: account?.profile?.id,
+    });
+  };
   const saveStarRating = async (databaseId, starRating) => {
+    const ratedItem = data.media.find((item) => item.database_id === databaseId);
     const previousData = data;
     const applyRating = (currentData, changes) => ({
       ...currentData,
@@ -1589,7 +1637,10 @@ export default function App() {
     setData(optimisticData);
     cacheSnapshot(optimisticData, data.collectionId);
     try {
-      const updated = await setMediaStarRating(account.session.access_token, databaseId, starRating);
+      const updated = await persistThenScheduleEasterEgg(
+        () => setMediaStarRating(account.session.access_token, databaseId, starRating),
+        () => triggerFightClubEasterEgg(ratedItem),
+      );
       const confirmedData = applyRating(optimisticData, { star_rating: updated.star_rating, updated_at: updated.updated_at });
       setData((currentData) => currentData?.collectionId === data.collectionId ? confirmedData : currentData);
       cacheSnapshot(confirmedData, data.collectionId);
@@ -1605,6 +1656,10 @@ export default function App() {
   const saveReaction = async (item, kind, enabled) => {
     if (kind === 'like') {
       queueLove(item, enabled);
+      if (enabled && matchesEasterEgg(item, 'fightClub')) {
+        const saved = await flushPendingLovesRef.current();
+        if (saved) triggerFightClubEasterEgg(item);
+      }
       return;
     }
     const previousData = data;
@@ -1613,7 +1668,10 @@ export default function App() {
     setData(optimisticData);
     replaceAccountCaches(optimisticData);
     try {
-      await setMediaReaction(account.session.access_token, item.database_id, kind, enabled);
+      await persistThenScheduleEasterEgg(
+        () => setMediaReaction(account.session.access_token, item.database_id, kind, enabled),
+        enabled ? () => triggerFightClubEasterEgg(item) : null,
+      );
       setToast(enabled ? 'Priority Watch added.' : 'Priority Watch removed.');
     } catch (error) {
       setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
@@ -1699,7 +1757,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onInvalidateLibrary={invalidateLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { dataRef.current = nextData; setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={(itemId, navigation = null) => { setSelectedMediaId(itemId); setSelectedMediaNavigation(navigation); }} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
+          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onInvalidateLibrary={invalidateLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { dataRef.current = nextData; setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={openMediaDrawer} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
         </main>
         <footer><span>Published from Kit’s Local Media Room.</span><span className="provider-credits">Poster data from <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>, <a href="https://books.google.com/" target="_blank" rel="noreferrer">Google Books</a>, <a href="https://openlibrary.org/" target="_blank" rel="noreferrer">Open Library</a> and <a href="https://www.steamgriddb.com/" target="_blank" rel="noreferrer">SteamGridDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</span></footer>
       </div>
@@ -1768,12 +1826,18 @@ export default function App() {
           }}
           onUpdateShelves={async (currentShelfIds, selectedShelfIds) => {
             const previousData = data;
+            const addedToWatchlist = selectedShelfIds
+              .filter((shelfId) => !currentShelfIds.includes(shelfId))
+              .some((shelfId) => (data.mediaShelves || []).some((shelf) => shelf.shelf_id === shelfId && isWatchlistShelf(shelf)));
             const optimisticData = applyShelfMemberships(data, selectedMedia.database_id, selectedShelfIds);
             setData(optimisticData);
             cacheSnapshot(optimisticData, data.collectionId);
             snapshotCache.current.delete(MAIN_WATCHLIST_ID);
             try {
-              await replaceMediaShelfMemberships(account.session.access_token, selectedMedia.database_id, currentShelfIds, selectedShelfIds);
+              await persistThenScheduleEasterEgg(
+                () => replaceMediaShelfMemberships(account.session.access_token, selectedMedia.database_id, currentShelfIds, selectedShelfIds),
+                addedToWatchlist ? () => triggerFightClubEasterEgg(selectedMedia) : null,
+              );
               setToast('Shelf membership saved.');
               await refresh({ fresh: true });
             } catch (error) {
@@ -1796,7 +1860,7 @@ export default function App() {
           sourceCollectionTitle={selectedSourceCollectionTitle}
           canImport={canImportSelectedMedia}
           onImport={beginMediaImport}
-          onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const deletedAt = new Date().toISOString(); const optimisticData = { ...data, media: data.media.map((item) => item.database_id === selectedMedia.database_id ? { ...item, deleted_at: deletedAt } : item) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); setSelectedMediaId(null); try { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); snapshotCache.current.delete(MAIN_WATCHLIST_ID); setToast('Media moved to Bin.'); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); setToast('The item could not be moved to Bin.'); throw error; } } })}
+          onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const deletedAt = new Date().toISOString(); const optimisticData = { ...data, media: data.media.map((item) => item.database_id === selectedMedia.database_id ? { ...item, deleted_at: deletedAt } : item) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); setSelectedMediaId(null); try { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); snapshotCache.current.delete(MAIN_WATCHLIST_ID); setToast(successfulBinToast(selectedMedia)); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); setToast('The item could not be moved to Bin.'); throw error; } } })}
           onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
         />
       )}
@@ -2168,14 +2232,31 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
     }
   };
 
-  const pickRandom = () => {
-    if (!randomPool.length) {
+  const openRandomPick = async (pool, navigation = null) => {
+    if (!pool.length) {
       notify('Nothing matches the current media filters.');
       return;
     }
-    const picked = pickRandomItem(randomPool);
-    openMedia(picked.item_id);
+    const picked = pickRandomItem(pool);
+    if (!matchesEasterEgg(picked, 'everythingEverywhere')) {
+      openMedia(picked.item_id, navigation);
+      return;
+    }
+    try {
+      const preparedData = await onEnsureSectionDetails?.(section, currentLibrary?.id) || data;
+      const preparedSelected = preparedData.media.find((item) => item.item_id === picked.item_id) || picked;
+      const sequence = buildEverythingEverywhereSequence(
+        active(preparedData.media),
+        preparedSelected,
+        { reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches },
+      );
+      await preloadRandomizerItems(sequence);
+      openMedia(preparedSelected.item_id, navigation, sequence);
+    } catch {
+      openMedia(picked.item_id, navigation);
+    }
   };
+  const pickRandom = () => void openRandomPick(randomPool);
 
   const clearFilters = () => {
     setQuery('');
@@ -2405,7 +2486,8 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
             data.media,
           );
           if (!shelfItems.length && queryLower) return null;
-          return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} arrangeItems={arrangeItems} onOpen={(itemId) => openMedia(itemId, { shelfId: shelf.shelf_id, shelves: drawerShelves })} canEdit={canEdit && !shelf.virtual} canCopy={Boolean(!canEdit && !data.mainWatchlist && currentUserId && ownCollection && data.ownerId !== currentUserId)} onCopy={() => setShelfTransfer({ mode: 'copy-visitor', shelf, itemCount: arrangeItems.length })} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); void refresh({ fresh: true }).catch(() => notify('The order was saved, but the latest collection could not be refreshed. Reload to see the saved order everywhere.')); } catch (error) { notify(error?.message ? `Item order could not be saved: ${error.message}` : 'Item order could not be saved.'); throw error; } }} onRename={(editorActions) => setShelfEditor({ ...shelf, ...editorActions, canCurateMain, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id), onToggleMain: (enabled) => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }, enabled) })} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { const updated = await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); if (!updated?.some((row) => row.id === shelf.shelf_id && row.deleted_at)) throw new Error('Supabase did not move the shelf to the Bin.'); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} />;
+          const drawerNavigation = { shelfId: shelf.shelf_id, shelves: drawerShelves };
+          return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} arrangeItems={arrangeItems} onOpen={(itemId) => openMedia(itemId, drawerNavigation)} onRandomOpen={() => openRandomPick(shelfItems, drawerNavigation)} canEdit={canEdit && !shelf.virtual} canCopy={Boolean(!canEdit && !data.mainWatchlist && currentUserId && ownCollection && data.ownerId !== currentUserId)} onCopy={() => setShelfTransfer({ mode: 'copy-visitor', shelf, itemCount: arrangeItems.length })} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); void refresh({ fresh: true }).catch(() => notify('The order was saved, but the latest collection could not be refreshed. Reload to see the saved order everywhere.')); } catch (error) { notify(error?.message ? `Item order could not be saved: ${error.message}` : 'Item order could not be saved.'); throw error; } }} onRename={(editorActions) => setShelfEditor({ ...shelf, ...editorActions, canCurateMain, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id), onToggleMain: (enabled) => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }, enabled) })} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { const updated = await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); if (!updated?.some((row) => row.id === shelf.shelf_id && row.deleted_at)) throw new Error('Supabase did not move the shelf to the Bin.'); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} />;
         })}
       </div>
 
@@ -2605,7 +2687,7 @@ function shelfNeedsUniformReactionWrap(shelfElement, currentlyWrapped = false) {
   });
 }
 
-function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canCopy, onCopy, canRate, onRate, canReorderShelf, canRemoveMirror, onRemoveMirror, canMoveUp, canMoveDown, onMoveShelf, onAdd, onReorder, onRename, onDelete }) {
+function MediaShelf({ shelf, items, arrangeItems = items, onOpen, onRandomOpen, canEdit, canCopy, onCopy, canRate, onRate, canReorderShelf, canRemoveMirror, onRemoveMirror, canMoveUp, canMoveDown, onMoveShelf, onAdd, onReorder, onRename, onDelete }) {
   const shelfRef = useRef(null);
   const trackRef = useRef(null);
   const [displayItems, setDisplayItems] = useState(items);
@@ -2689,7 +2771,7 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, canEdit, canCo
           <span className="shelf-action-group shelf-order-actions">{canReorderShelf && <button aria-label={`Move ${shelf.name} up`} title="Move shelf up" disabled={!canMoveUp} onClick={() => moveShelfWithViewport(-1)}><ArrowUp size={15} /></button>}{canReorderShelf && <button aria-label={`Move ${shelf.name} down`} title="Move shelf down" disabled={!canMoveDown} onClick={() => moveShelfWithViewport(1)}><ArrowDown size={15} /></button>}</span>
         </span>
         <span className="shelf-mobile-bottom-row">
-          <button type="button" className="button random-pick shelf-pick-action" disabled={!items.length} aria-label={`Pick randomly from ${shelf.name}`} onClick={() => onOpen(pickRandomItem(items).item_id)}><span>Pick</span><Shuffle size={15} /></button>
+          <button type="button" className="button random-pick shelf-pick-action" disabled={!items.length} aria-label={`Pick randomly from ${shelf.name}`} onClick={onRandomOpen}><span>Pick</span><Shuffle size={15} /></button>
           <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && arrangeItems.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}</span>
           <span className="shelf-action-group shelf-add-actions">{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
           <span className="shelf-action-group shelf-set-actions"><button aria-label={mobileShelfPaging ? `Show previous items in ${shelf.name}` : `Show previous sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canPrevious : currentSegment <= 0 || segmentCount <= 1} onClick={() => scrollSegment(-1)}><ChevronLeft /></button>{!mobileShelfPaging && segmentCount > 1 && <small>Sets {currentSegment * 2 + 1}{displaySegments[currentSegment]?.[1]?.length ? `\u2013${currentSegment * 2 + 2}` : ''}</small>}<button aria-label={mobileShelfPaging ? `Show next items in ${shelf.name}` : `Show next sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canNext : currentSegment >= segmentCount - 1 || segmentCount <= 1} onClick={() => scrollSegment(1)}><ChevronRight /></button></span>
@@ -2807,7 +2889,15 @@ function CollectionBinDrawer({ loading = false, error = '', onRetry, libraries =
   </div>, document.body);
 }
 
-function ReactionButton({ kind, people = [], interestPeople, interestPriorityPeople, watchlistedPeople, canReact, currentUserId, onChange, labelled = false }) {
+function HeartEasterEgg({ variant, size }) {
+  if (variant === 'everything-everywhere') return <span className="heart-easter-icon everything-heart" aria-hidden="true"><Heart size={size} fill="currentColor" /><i /></span>;
+  if (variant === 'one-ring') return <span className="heart-easter-icon one-ring-heart" aria-hidden="true"><i /></span>;
+  if (variant === 'spider-verse') return <span className="heart-easter-icon spider-heart" aria-hidden="true"><b>♥</b><i>THWIP!</i></span>;
+  if (variant === 'pokemon') return <span className="heart-easter-icon pokeball-heart" aria-hidden="true"><i /></span>;
+  return <span className={cls('heart-easter-icon', `${variant}-heart`)} aria-hidden="true">{variant === 'fight-club' ? '👊' : '🧅'}</span>;
+}
+
+function ReactionButton({ item, kind, people = [], interestPeople, interestPriorityPeople, watchlistedPeople, canReact, currentUserId, onChange, labelled = false }) {
   const [saving, setSaving] = useState(false);
   const active = people.some((person) => person.id === currentUserId);
   const names = people.map((person) => person.display_name || person.username).filter(Boolean);
@@ -2824,9 +2914,10 @@ function ReactionButton({ kind, people = [], interestPeople, interestPriorityPeo
   const tooltip = isLike ? summary : priorityPresentation.tooltip;
   const count = isLike ? people.length : priorityPresentation.count;
   const Icon = isLike ? Heart : Stamp;
+  const heartTransformation = isLike ? heartTransformationFor(item, currentUserId, people) : null;
   return <button
     type="button"
-    className={cls('reaction-button', isLike ? 'like-reaction' : 'priority-reaction', active && 'active', labelled && 'labelled', count > 0 && 'has-count')}
+    className={cls('reaction-button', isLike ? 'like-reaction' : 'priority-reaction', active && 'active', labelled && 'labelled', count > 0 && 'has-count', heartTransformation && `heart-transformation ${heartTransformation}`)}
     aria-label={isLike ? `${label}. ${summary}` : tooltip.replace(/\n+/g, '. ')}
     aria-pressed={active}
     title={isLike ? tooltip : undefined}
@@ -2839,7 +2930,9 @@ function ReactionButton({ kind, people = [], interestPeople, interestPriorityPeo
       try { await onChange(kind, !active); } finally { setSaving(false); }
     }}
   >
-    <Icon size={labelled ? 15 : 14} fill={isLike && active ? 'currentColor' : 'none'} />
+    {heartTransformation
+      ? <HeartEasterEgg variant={heartTransformation} size={labelled ? 15 : 14} />
+      : <Icon size={labelled ? 15 : 14} fill={isLike && active ? 'currentColor' : 'none'} />}
     {labelled && <span>{label}</span>}
     {count > 0 && <small>{count}</small>}
     {!isLike && priorityPresentation.detailed && <span className="reaction-interest-tooltip" role="tooltip">
@@ -2859,8 +2952,8 @@ function ReactionButton({ kind, people = [], interestPeople, interestPriorityPeo
 function ReactionControls({ item, canReact, currentUserId, onReaction, labelled = false }) {
   const priorityAvailable = ['film', 'television'].includes(item.type);
   return <span className={cls('reaction-controls', labelled && 'labelled')}>
-    {priorityAvailable && <ReactionButton kind="priority" people={item.priorities || []} interestPeople={item.watchDemand} interestPriorityPeople={item.interestPriorities} watchlistedPeople={item.watchlistedBy} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />}
-    <ReactionButton kind="like" people={item.likes || []} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />
+    {priorityAvailable && <ReactionButton item={item} kind="priority" people={item.priorities || []} interestPeople={item.watchDemand} interestPriorityPeople={item.interestPriorities} watchlistedPeople={item.watchlistedBy} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />}
+    <ReactionButton item={item} kind="like" people={item.likes || []} canReact={canReact} currentUserId={currentUserId} onChange={(kind, enabled) => onReaction(item, kind, enabled)} labelled={labelled} />
   </span>;
 }
 
@@ -2934,6 +3027,7 @@ function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPreviou
   useEffect(() => { optimisticShelvesRef.current = item.lists || []; setOptimisticShelves(item.lists || []); }, [item.lists, item.database_id]);
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
+  const easterEggQuote = drawerQuoteFor(item);
   const toggleShelf = (shelfId) => {
     const previousShelves = [...optimisticShelvesRef.current];
     const nextShelves = previousShelves.includes(shelfId)
@@ -2987,6 +3081,7 @@ function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPreviou
             </div>}
             <LightweightMarkdown className="drawer-description">{item.description || 'No description has been added yet.'}</LightweightMarkdown>
             {item.notes?.trim() && <LightweightMarkdown className="drawer-description drawer-notes">{item.notes}</LightweightMarkdown>}
+            {easterEggQuote && <blockquote className="drawer-easter-quote">{easterEggQuote}</blockquote>}
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-item-actions">
               <span className="drawer-collection-name">{sourceCollectionTitle}</span>

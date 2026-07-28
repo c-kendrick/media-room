@@ -26,6 +26,20 @@ import { getDrawerNavigationTargets } from '../src/media-drawer-navigation.js';
 import { watchlistRequestMessage } from '../src/watchlist-requests.js';
 import { parseLightweightInline, parseLightweightMarkdown } from '../src/lightweight-markdown.js';
 import { bulkImportTerminology, chooseLibrary, copiedShelfName, libraryDefaults, validateLibraryDraft } from '../src/library-system.js';
+import {
+  buildEverythingEverywhereSequence,
+  claimFightClubSequence,
+  createFightClubSequenceController,
+  drawerQuoteFor,
+  FIGHT_CLUB_MESSAGES,
+  FIGHT_CLUB_SHOWN_COOLDOWN_MS,
+  heartTransformationFor,
+  matchesEasterEgg,
+  normalizeEasterEggTitle,
+  persistThenScheduleEasterEgg,
+  playDrawerSequence,
+  successfulBinToast,
+} from '../src/easter-eggs.js';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -970,7 +984,8 @@ test('every shelf has a compact random picker scoped to its visible items', asyn
   const app = await read('src/App.jsx');
   const styles = await read('src/public.css');
   assert.match(app, /function pickRandomItem\(items\)[\s\S]*Math\.floor\(Math\.random\(\) \* items\.length\)/);
-  assert.match(app, /className="button random-pick shelf-pick-action"[\s\S]*disabled=\{!items\.length\}[\s\S]*onClick=\{\(\) => onOpen\(pickRandomItem\(items\)\.item_id\)\}><span>Pick<\/span><Shuffle size=\{15\} \/><\/button>/);
+  assert.match(app, /<MediaShelf[^>]*items=\{shelfItems\}[\s\S]*onRandomOpen=\{\(\) => openRandomPick\(shelfItems, drawerNavigation\)\}/);
+  assert.match(app, /className="button random-pick shelf-pick-action"[\s\S]*disabled=\{!items\.length\}[\s\S]*onClick=\{onRandomOpen\}><span>Pick<\/span><Shuffle size=\{15\} \/><\/button>/);
   assert.match(styles, /\.shelf-pick-action\{align-self:center;flex:0 0 auto\}/);
   assert.match(styles, /@media\(min-width:581px\)\{\.shelf-pick-action\{flex-direction:row-reverse;font-size:11px\}\}/);
   assert.match(styles, /@media\(max-width:580px\)\{\.shelf-pick-action\{order:99;margin-left:auto\}/);
@@ -2290,4 +2305,95 @@ test('media drawer navigation follows item and shelf display order while skippin
   });
   assert.deepEqual(getDrawerNavigationTargets({ shelfId: 'first', shelves }, 'one').previous, null);
   assert.deepEqual(getDrawerNavigationTargets({ shelfId: 'last', shelves }, 'four').next, null);
+});
+
+test('Easter egg matching uses provider IDs and punctuation-tolerant Pokemon title fallbacks', () => {
+  assert.equal(normalizeEasterEggTitle('  POKÉMON:  Detective—Pikachu! '), 'pokemon detective pikachu');
+  assert.equal(matchesEasterEgg({ title: 'Unrecognised import', external_ids: { tmdb: 'movie:550' } }, 'fightClub'), true);
+  assert.equal(matchesEasterEgg({ title: 'Spider Man — Into   the Spider Verse' }, 'spiderVerse'), true);
+  assert.equal(matchesEasterEgg({ title: 'Pokémon: The First Movie' }, 'pokemon'), true);
+  assert.equal(matchesEasterEgg({ title: 'Pokemon Detective Pikachu' }, 'pokemon'), true);
+  assert.equal(matchesEasterEgg({ title: 'The Lord of the Rings: The Two Towers' }, 'lordOfTheRings'), true);
+  assert.equal(matchesEasterEgg({ title: 'The Hobbit: The Two Towers' }, 'lordOfTheRings'), false);
+  assert.equal(matchesEasterEgg({ title: 'The Room Where It Happened' }, 'theRoom'), false);
+  assert.equal(successfulBinToast({ title: 'Terminator 2: Judgment Day', type: 'film' }), 'Media moved to Bin. Hasta la vista.');
+  assert.equal(successfulBinToast({ title: 'The Terminator', type: 'book' }), 'Media moved to Bin.');
+});
+
+test('personal heart transformations require the current user to have hearted the item', () => {
+  const item = { title: 'Fight Club', likes: [{ id: 'someone-else' }] };
+  assert.equal(heartTransformationFor(item, 'current-user'), null);
+  assert.equal(heartTransformationFor({ ...item, likes: [...item.likes, { id: 'current-user' }] }, 'current-user'), 'fight-club');
+  assert.equal(heartTransformationFor({ title: 'The Hobbit', likes: [{ id: 'current-user' }] }, 'current-user'), null);
+  assert.equal(heartTransformationFor({ title: 'The Lord of the Rings: The Return of the King', likes: [{ id: 'current-user' }] }, 'current-user'), 'one-ring');
+  assert.equal(heartTransformationFor({ title: 'Shrek', likes: [{ id: 'current-user' }] }, 'current-user'), 'shrek');
+  assert.equal(heartTransformationFor({ title: 'Spider-Man: Into the Spider-Verse', likes: [{ id: 'current-user' }] }, 'current-user'), 'spider-verse');
+  assert.equal(heartTransformationFor({ title: 'Pokémon: The First Movie', likes: [{ id: 'current-user' }] }, 'current-user'), 'pokemon');
+});
+
+test('Fight Club cooldown is per-user, occasional, long-lived, and prevents overlapping sequences', () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  const now = 2_000_000_000_000;
+  assert.equal(claimFightClubSequence({ storage, userId: 'user-a', now, random: () => 0 }), true);
+  assert.equal(claimFightClubSequence({ storage, userId: 'user-a', now: now + FIGHT_CLUB_SHOWN_COOLDOWN_MS - 1, random: () => 0 }), false);
+  assert.equal(claimFightClubSequence({ storage, userId: 'user-b', now, random: () => 0 }), true);
+
+  const scheduled = [];
+  const alerts = [];
+  const controller = createFightClubSequenceController({
+    alert: (message) => alerts.push(message),
+    schedule: (work, delay) => { scheduled.push({ work, delay }); return scheduled.length; },
+    cancelSchedule: () => {},
+  });
+  const freshStorage = { getItem: () => null, setItem: () => {} };
+  assert.equal(controller.trigger({ item: { title: 'Fight Club' }, storage: freshStorage, userId: 'user', now, random: () => 0 }), true);
+  assert.equal(controller.trigger({ item: { title: 'Fight Club' }, storage: freshStorage, userId: 'user', now, random: () => 0 }), false);
+  scheduled.shift().work();
+  assert.deepEqual(alerts, [FIGHT_CLUB_MESSAGES[0]]);
+  assert.equal(scheduled[0].delay, 1000);
+  scheduled.shift().work();
+  assert.deepEqual(alerts, FIGHT_CLUB_MESSAGES);
+  assert.equal(controller.isActive(), false);
+});
+
+test('Fight Club Easter eggs are scheduled only after persistence and do not await the client-only sequence', async () => {
+  let releaseEasterEgg;
+  const pendingEasterEgg = new Promise((resolve) => { releaseEasterEgg = resolve; });
+  const order = [];
+  const result = await persistThenScheduleEasterEgg(
+    async () => { order.push('persisted'); return 'saved'; },
+    () => { order.push('scheduled'); return pendingEasterEgg; },
+  );
+  assert.equal(result, 'saved');
+  assert.deepEqual(order, ['persisted', 'scheduled']);
+  releaseEasterEgg();
+});
+
+test('drawer quotes are visible only for active title rules and exclude Hobbit titles', () => {
+  assert.equal(drawerQuoteFor({ title: 'Star Wars: Episode IV — A New Hope' }), 'A surprise to be sure, but a welcome one.');
+  assert.equal(drawerQuoteFor({ title: 'The Room' }), 'Anyway, how is your sex life?');
+  assert.equal(drawerQuoteFor({ title: 'The Lord of the Rings: The Fellowship of the Ring' }), 'You have my sword.');
+  assert.equal(drawerQuoteFor({ title: 'The Hobbit: An Unexpected Journey' }), null);
+  assert.equal(drawerQuoteFor({ title: 'Arrival' }), null);
+});
+
+test('Everything Everywhere drawer sequence preselects other screen items and always finishes on the selected film', async () => {
+  const selected = { item_id: 'everything', type: 'film', title: 'Everything Everywhere All at Once' };
+  const items = [
+    selected,
+    { item_id: 'one', type: 'film', title: 'One' },
+    { item_id: 'two', type: 'television', title: 'Two' },
+    { item_id: 'book', type: 'book', title: 'Book' },
+  ];
+  const sequence = buildEverythingEverywhereSequence(items, selected, { random: () => 0, flashCount: 6 });
+  assert.deepEqual(sequence.map((item) => item.item_id), ['two', 'one', 'everything']);
+  const visible = [];
+  const finalItem = await playDrawerSequence(sequence, (item) => visible.push(item.item_id), { wait: async () => {} });
+  assert.equal(finalItem, selected);
+  assert.equal(visible.at(-1), 'everything');
+  assert.deepEqual(buildEverythingEverywhereSequence(items, selected, { reducedMotion: true }), [selected]);
 });
