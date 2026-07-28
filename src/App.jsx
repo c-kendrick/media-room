@@ -563,6 +563,7 @@ export default function App() {
   const [adminClubsReadyFor, setAdminClubsReadyFor] = useState(null);
   const [adminMainClubId, setAdminMainClubId] = useState(() => window.localStorage.getItem(ADMIN_MAIN_CLUB_KEY) || '');
   const [confirmation, setConfirmation] = useState(null);
+  const [fightClubPrompt, setFightClubPrompt] = useState(null);
   const [collections, setCollections] = useState([]);
   const [collectionsReadyFor, setCollectionsReadyFor] = useState(null);
   const [ownCollection, setOwnCollection] = useState(null);
@@ -572,19 +573,20 @@ export default function App() {
   const [collectionId, setCollectionId] = useState(null);
   const [collectionLoading, setCollectionLoading] = useState(false);
   const [landingApplied, setLandingApplied] = useState(() => sharedMode);
+  const [randomizerSelectionId, setRandomizerSelectionId] = useState(null);
   const snapshotCache = useRef(new Map());
   const mainWatchlistMemoryScope = useRef(null);
   const drawerSequenceVersion = useRef(0);
   const fightClubSequence = useRef(null);
   if (!fightClubSequence.current) {
     fightClubSequence.current = createFightClubSequenceController({
-      alert: (message) => window.alert(message),
+      onDialogChange: setFightClubPrompt,
       schedule: (work, delay) => window.setTimeout(work, delay),
       cancelSchedule: (timer) => window.clearTimeout(timer),
     });
   }
 
-  useEffect(() => () => fightClubSequence.current?.cancel(), []);
+  useEffect(() => () => fightClubSequence.current?.cancel(), [account?.profile?.id]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -1050,6 +1052,7 @@ export default function App() {
       : collections.find((row) => row.id === nextCollectionId);
     setCollectionId(nextCollectionId);
     drawerSequenceVersion.current += 1;
+    setRandomizerSelectionId(null);
     setSelectedMediaId(null);
     setSelectedMediaNavigation(null);
     setError('');
@@ -1288,6 +1291,7 @@ export default function App() {
       setCollectionId(request.collection_id);
       rememberedSection.current = section;
       setSelectedMediaNavigation(null);
+      setRandomizerSelectionId(null);
       setSelectedMediaId(item.item_id);
       setPendingWatchlistRequest(request);
       return true;
@@ -1386,6 +1390,7 @@ export default function App() {
       if (event.key === 'Escape') {
         setSearchOpen(false);
         drawerSequenceVersion.current += 1;
+        setRandomizerSelectionId(null);
         setSelectedMediaId(null);
         setSelectedMediaNavigation(null);
         setMobileNav(false);
@@ -1403,8 +1408,9 @@ export default function App() {
 
   const selectedMedia = data?.media?.find((item) => item.item_id === selectedMediaId);
   const drawerNavigationTargets = getDrawerNavigationTargets(selectedMediaNavigation, selectedMediaId);
-  const openMediaDrawer = (itemId, navigation = null, sequence = null) => {
+  const openMediaDrawer = (itemId, navigation = null, sequence = null, randomizerSelected = false) => {
     const version = ++drawerSequenceVersion.current;
+    setRandomizerSelectionId(randomizerSelected ? itemId : null);
     setSelectedMediaNavigation(navigation);
     if (!sequence?.length) {
       setSelectedMediaId(itemId);
@@ -1417,6 +1423,7 @@ export default function App() {
   const navigateDrawer = (target) => {
     if (!target) return;
     drawerSequenceVersion.current += 1;
+    setRandomizerSelectionId(null);
     setSelectedMediaId(target.itemId);
     setSelectedMediaNavigation((navigation) => navigation && { ...navigation, shelfId: target.shelfId });
   };
@@ -1536,6 +1543,7 @@ export default function App() {
 
   const closeSelectedMedia = () => {
     drawerSequenceVersion.current += 1;
+    setRandomizerSelectionId(null);
     setSelectedMediaId(null);
     setSelectedMediaNavigation(null);
     setPendingWatchlistRequest(null);
@@ -1604,6 +1612,7 @@ export default function App() {
       shelvesLoading: !destinationReady,
       shelvesError: '',
     });
+    setRandomizerSelectionId(null);
     setSelectedMediaId(null);
     if (!destinationReady) loadImportDestination(draftKey, ownCollection.id, destinationSection, cachedDestination);
   };
@@ -1624,6 +1633,7 @@ export default function App() {
       item,
       storage: window.localStorage,
       userId: account?.profile?.id,
+      bypassCooldown: isAdmin,
     });
   };
   const saveStarRating = async (databaseId, starRating) => {
@@ -1765,6 +1775,7 @@ export default function App() {
       {selectedMedia && (
         <MediaDrawer
           item={selectedMedia}
+          randomizerSelected={selectedMedia.item_id === randomizerSelectionId}
           shelves={active(data.mainWatchlist ? data.mediaShelves : (data.mediaShelves || []).filter((shelf) => shelf.library_id ? shelf.library_id === selectedMedia.library_id : shelf.section === mediaSection(selectedMedia)))}
           onClose={closeSelectedMedia}
           previousItem={drawerNavigationTargets.previous}
@@ -1860,7 +1871,7 @@ export default function App() {
           sourceCollectionTitle={selectedSourceCollectionTitle}
           canImport={canImportSelectedMedia}
           onImport={beginMediaImport}
-          onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const deletedAt = new Date().toISOString(); const optimisticData = { ...data, media: data.media.map((item) => item.database_id === selectedMedia.database_id ? { ...item, deleted_at: deletedAt } : item) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); setSelectedMediaId(null); try { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); snapshotCache.current.delete(MAIN_WATCHLIST_ID); setToast(successfulBinToast(selectedMedia)); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); setToast('The item could not be moved to Bin.'); throw error; } } })}
+          onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const deletedAt = new Date().toISOString(); const optimisticData = { ...data, media: data.media.map((item) => item.database_id === selectedMedia.database_id ? { ...item, deleted_at: deletedAt } : item) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); setRandomizerSelectionId(null); setSelectedMediaId(null); try { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); snapshotCache.current.delete(MAIN_WATCHLIST_ID); setToast(successfulBinToast(selectedMedia)); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); setToast('The item could not be moved to Bin.'); throw error; } } })}
           onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
         />
       )}
@@ -1924,6 +1935,7 @@ export default function App() {
           onClose={() => setSearchOpen(false)}
           onOpen={(id) => {
             setSearchOpen(false);
+            setRandomizerSelectionId(null);
             setSelectedMediaId(id);
             setSelectedMediaNavigation(null);
           }}
@@ -1993,6 +2005,7 @@ export default function App() {
         }
       }} />}
       {confirmation && <ConfirmDialog {...confirmation} onClose={() => setConfirmation(null)} />}
+      {fightClubPrompt && <FightClubDialog prompt={fightClubPrompt} onConfirm={() => fightClubSequence.current?.confirm()} />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
     </div>
   );
@@ -2239,7 +2252,7 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
     }
     const picked = pickRandomItem(pool);
     if (!matchesEasterEgg(picked, 'everythingEverywhere')) {
-      openMedia(picked.item_id, navigation);
+      openMedia(picked.item_id, navigation, null, true);
       return;
     }
     try {
@@ -2251,9 +2264,9 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
         { reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches },
       );
       await preloadRandomizerItems(sequence);
-      openMedia(preparedSelected.item_id, navigation, sequence);
+      openMedia(preparedSelected.item_id, navigation, sequence, true);
     } catch {
-      openMedia(picked.item_id, navigation);
+      openMedia(picked.item_id, navigation, null, true);
     }
   };
   const pickRandom = () => void openRandomPick(randomPool);
@@ -2892,8 +2905,8 @@ function CollectionBinDrawer({ loading = false, error = '', onRetry, libraries =
 function HeartEasterEgg({ variant, size }) {
   if (variant === 'everything-everywhere') return <span className="heart-easter-icon everything-heart" aria-hidden="true"><Heart size={size} fill="currentColor" /><i /></span>;
   if (variant === 'one-ring') return <span className="heart-easter-icon one-ring-heart" aria-hidden="true"><i /></span>;
-  if (variant === 'spider-verse') return <span className="heart-easter-icon spider-heart" aria-hidden="true"><b>♥</b><i>THWIP!</i></span>;
   if (variant === 'pokemon') return <span className="heart-easter-icon pokeball-heart" aria-hidden="true"><i /></span>;
+  if (variant === 'minecraft') return <span className="heart-easter-icon minecraft-heart" aria-hidden="true"><i /></span>;
   return <span className={cls('heart-easter-icon', `${variant}-heart`)} aria-hidden="true">{variant === 'fight-club' ? '👊' : '🧅'}</span>;
 }
 
@@ -3011,7 +3024,7 @@ function MediaCard({ item, shelfRank = null, eagerPoster = false, onClick, canRa
   );
 }
 
-function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPrevious, onNext, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, sourceCollectionTitle, canImport, onImport, onDelete, onRestore, watchlistRequest, watchlistRequestActions, watchlistRequestBusy, onRequestStampRemoval, onRequestMove, onRespondWatchlistRequest, onDismissWatchlistRequest }) {
+function MediaDrawer({ item, randomizerSelected = false, shelves, onClose, previousItem, nextItem, onPrevious, onNext, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, sourceCollectionTitle, canImport, onImport, onDelete, onRestore, watchlistRequest, watchlistRequestActions, watchlistRequestBusy, onRequestStampRemoval, onRequestMove, onRespondWatchlistRequest, onDismissWatchlistRequest }) {
   const [editing, setEditing] = useState(false);
   const [optimisticShelves, setOptimisticShelves] = useState(item.lists || []);
   const optimisticShelvesRef = useRef(item.lists || []);
@@ -3027,7 +3040,7 @@ function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPreviou
   useEffect(() => { optimisticShelvesRef.current = item.lists || []; setOptimisticShelves(item.lists || []); }, [item.lists, item.database_id]);
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
-  const easterEggQuote = drawerQuoteFor(item);
+  const easterEggQuote = drawerQuoteFor(item, { randomizer: randomizerSelected });
   const toggleShelf = (shelfId) => {
     const previousShelves = [...optimisticShelvesRef.current];
     const nextShelves = previousShelves.includes(shelfId)
@@ -3049,6 +3062,7 @@ function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPreviou
         <button className="close" onClick={onClose}><X /></button>
         <div className="drawer-layout">
           <div className="drawer-poster">
+            {easterEggQuote && <blockquote className="drawer-easter-quote">{easterEggQuote}</blockquote>}
             {item.poster_url
               ? <img src={item.poster_url} alt={`${title} poster`} />
               : <div className="poster-fallback"><Clapperboard /><span>{title}</span></div>}
@@ -3081,7 +3095,6 @@ function MediaDrawer({ item, shelves, onClose, previousItem, nextItem, onPreviou
             </div>}
             <LightweightMarkdown className="drawer-description">{item.description || 'No description has been added yet.'}</LightweightMarkdown>
             {item.notes?.trim() && <LightweightMarkdown className="drawer-description drawer-notes">{item.notes}</LightweightMarkdown>}
-            {easterEggQuote && <blockquote className="drawer-easter-quote">{easterEggQuote}</blockquote>}
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-item-actions">
               <span className="drawer-collection-name">{sourceCollectionTitle}</span>
@@ -3276,6 +3289,52 @@ function ClubMonogram({ name }) {
 
 function HubEmpty({ title, children }) {
   return <div className="hub-empty"><UserRound size={18} /><strong>{title}</strong>{children && <small>{children}</small>}</div>;
+}
+
+function FightClubDialog({ prompt, onConfirm }) {
+  const buttonRef = useRef(null);
+  useEffect(() => {
+    const previouslyFocused = document.activeElement;
+    buttonRef.current?.focus();
+    const containKeyboardFocus = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        buttonRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', containKeyboardFocus, true);
+    return () => {
+      window.removeEventListener('keydown', containKeyboardFocus, true);
+      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+    };
+  }, [prompt.step]);
+
+  return createPortal(
+    <div className="modal-layer fight-club-layer">
+      <section
+        className="media-edit-dialog fight-club-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="fight-club-dialog-title"
+        aria-describedby="fight-club-dialog-message"
+      >
+        <div className="fight-club-dotted-strip" aria-hidden="true" />
+        <div className="fight-club-dialog-body">
+          <span className="eyebrow">FIGHT CLUB · RULE {prompt.step}</span>
+          <h2 id="fight-club-dialog-title">{prompt.step === 1 ? 'The first rule' : 'The second rule'}</h2>
+          <p id="fight-club-dialog-message">{prompt.message}</p>
+          <div className="dialog-actions">
+            <button ref={buttonRef} className="button primary" type="button" onClick={onConfirm}>OK</button>
+          </div>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
 }
 
 function WatchlistRequestListDialog({ requests, onOpen, onClose }) {

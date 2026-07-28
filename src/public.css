@@ -338,7 +338,7 @@
 .owned-toggle.active{color:#514a43}
 .owned-toggle.active span{background:#ddd5ca;border-color:#9a9084;color:#514a43}
 .drawer-notes{margin-top:12px;padding-top:12px;border-top:1px solid #e5dacd;color:#6f655b}
-.drawer-easter-quote{margin:13px 0 0;padding:0 0 0 11px;border-left:2px solid #cbbcae;color:#82776d;font-family:var(--serif);font-size:10px;font-style:italic;line-height:1.45}
+.drawer-poster>.drawer-easter-quote{box-sizing:border-box;width:100%;max-width:360px;margin:0 0 14px;padding:0 12px;border:0;color:#82776d;font-family:var(--serif);font-size:10px;font-style:italic;line-height:1.5;text-align:center;overflow-wrap:anywhere;word-break:normal}
 .drawer-description>p,.drawer-description>blockquote,.drawer-description>ul,.drawer-description>ol{margin:0 0 .8em}
 .drawer-description>:last-child{margin-bottom:0}
 .drawer-description>ul,.drawer-description>ol{padding-left:1.5em}
@@ -654,6 +654,16 @@
 .confirm-dialog{width:min(450px,calc(100vw - 32px));overflow:visible}
 .confirm-dialog h2{margin-bottom:10px}
 .confirm-danger{background:#7d4038!important;border-color:#7d4038!important;color:#fff!important}
+.fight-club-layer{z-index:190;background:rgba(38,28,22,.62)}
+.fight-club-dialog{width:min(480px,calc(100vw - 32px))!important;padding:0!important;overflow:hidden!important;border-color:#8d6d5c!important;background:#f6eee3!important;box-shadow:0 28px 80px rgba(31,20,14,.42)!important}
+.fight-club-dotted-strip{height:9px;background-color:#8b493e;background-image:radial-gradient(circle,#e7cdbb 1px,transparent 1.5px);background-size:7px 7px}
+.fight-club-dialog-body{padding:32px 34px 30px}
+.fight-club-dialog .eyebrow{color:#8b493e}
+.fight-club-dialog h2{margin:8px 0 12px;color:#3d3028}
+.fight-club-dialog p{margin:0;color:#67594f;font-family:var(--serif);font-size:15px;line-height:1.6}
+.fight-club-dialog .dialog-actions{margin-top:26px;justify-content:flex-end}
+.fight-club-dialog .button{min-width:92px;background:#4b3930!important;border-color:#4b3930!important;color:#fffaf2!important}
+.fight-club-dialog .button:focus-visible{outline:3px solid rgba(139,73,62,.32);outline-offset:3px}
 .edit-media-actions{padding-top:18px;border-top:1px solid #e1d6c8}
 .account-dialog{width:min(480px,calc(100vw - 32px))!important;max-height:calc(100dvh - 32px);padding:0!important;overflow:visible;display:grid;grid-template-rows:minmax(0,1fr)}
 .account-dialog-body{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:34px 30px max(30px,env(safe-area-inset-bottom));border-radius:inherit}
@@ -679,6 +689,7 @@
 @media(prefers-reduced-motion:reduce){.opening-screen,.opening-screen .brand-mark,.initial-skeleton,.pokeball-heart{animation:none}.skeleton-line:after,.skeleton-icon:after,.skeleton-avatar:after,.skeleton-search:after,.skeleton-top-action:after,.skeleton-hero-mark:after,.skeleton-stat:after,.skeleton-search-field:after,.skeleton-filter-button:after,.skeleton-pager:after,.skeleton-poster:after{animation:none}.skeleton-detail,.one-ring-heart i::after{transition:none}}
 
 @media(max-width:760px){
+  .fight-club-dialog-body{padding:27px 24px max(24px,env(safe-area-inset-bottom))}
   .initial-skeleton{grid-template-columns:1fr}.initial-skeleton-sidebar{display:none}.initial-skeleton-topbar{height:58px;padding:0 12px;gap:8px}.skeleton-menu{width:36px;height:36px;flex:0 0 36px;display:block;border:1px solid #d9cfc1;background:#f6efe5}.skeleton-search{min-width:0;width:auto;flex:1}.skeleton-top-action{width:40px}.initial-skeleton-topbar>span{margin-left:0}.initial-skeleton-topbar>span .skeleton-detail{display:none}.initial-skeleton-main{padding:24px 14px 48px}.skeleton-hero{min-height:175px;padding:25px 17px;grid-template-columns:auto minmax(0,1fr)}.skeleton-hero>span{grid-column:1/-1;grid-template-columns:repeat(2,minmax(0,1fr))}.skeleton-stat{width:100%}.skeleton-line.title{height:29px;width:85%}.skeleton-tabs{margin-top:20px;grid-template-columns:1fr}.skeleton-tabs i{height:36px}.skeleton-card-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.skeleton-card-grid article:nth-child(n+5){display:none}.skeleton-pager{width:86px}
   .nav-toggle{display:none}
   .nav-collapsed .sidebar{transform:translateX(-100%)}

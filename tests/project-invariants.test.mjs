@@ -2307,12 +2307,16 @@ test('media drawer navigation follows item and shelf display order while skippin
   assert.deepEqual(getDrawerNavigationTargets({ shelfId: 'last', shelves }, 'four').next, null);
 });
 
-test('Easter egg matching uses provider IDs and punctuation-tolerant Pokemon title fallbacks', () => {
+test('Easter egg matching uses provider IDs and punctuation-tolerant bounded title fallbacks', () => {
   assert.equal(normalizeEasterEggTitle('  POKÉMON:  Detective—Pikachu! '), 'pokemon detective pikachu');
   assert.equal(matchesEasterEgg({ title: 'Unrecognised import', external_ids: { tmdb: 'movie:550' } }, 'fightClub'), true);
-  assert.equal(matchesEasterEgg({ title: 'Spider Man — Into   the Spider Verse' }, 'spiderVerse'), true);
   assert.equal(matchesEasterEgg({ title: 'Pokémon: The First Movie' }, 'pokemon'), true);
   assert.equal(matchesEasterEgg({ title: 'Pokemon Detective Pikachu' }, 'pokemon'), true);
+  assert.equal(matchesEasterEgg({ title: 'Indiana Jones and the Last Crusade' }, 'indianaJones'), true);
+  assert.equal(matchesEasterEgg({ title: 'Mission: Impossible — Fallout' }, 'missionImpossible'), true);
+  assert.equal(matchesEasterEgg({ title: 'Saw II' }, 'saw'), true);
+  assert.equal(matchesEasterEgg({ title: 'Seesaw' }, 'saw'), false);
+  assert.equal(matchesEasterEgg({ title: 'Minecraft Dungeons' }, 'minecraft'), true);
   assert.equal(matchesEasterEgg({ title: 'The Lord of the Rings: The Two Towers' }, 'lordOfTheRings'), true);
   assert.equal(matchesEasterEgg({ title: 'The Hobbit: The Two Towers' }, 'lordOfTheRings'), false);
   assert.equal(matchesEasterEgg({ title: 'The Room Where It Happened' }, 'theRoom'), false);
@@ -2327,11 +2331,14 @@ test('personal heart transformations require the current user to have hearted th
   assert.equal(heartTransformationFor({ title: 'The Hobbit', likes: [{ id: 'current-user' }] }, 'current-user'), null);
   assert.equal(heartTransformationFor({ title: 'The Lord of the Rings: The Return of the King', likes: [{ id: 'current-user' }] }, 'current-user'), 'one-ring');
   assert.equal(heartTransformationFor({ title: 'Shrek', likes: [{ id: 'current-user' }] }, 'current-user'), 'shrek');
-  assert.equal(heartTransformationFor({ title: 'Spider-Man: Into the Spider-Verse', likes: [{ id: 'current-user' }] }, 'current-user'), 'spider-verse');
+  assert.equal(heartTransformationFor({ title: 'Spider-Man: Into the Spider-Verse', likes: [{ id: 'current-user' }] }, 'current-user'), null);
   assert.equal(heartTransformationFor({ title: 'Pokémon: The First Movie', likes: [{ id: 'current-user' }] }, 'current-user'), 'pokemon');
+  assert.equal(heartTransformationFor({ title: 'Minecraft', likes: [{ id: 'someone-else' }] }, 'current-user'), null);
+  assert.equal(heartTransformationFor({ title: 'Minecraft: Story Mode', likes: [{ id: 'current-user' }] }, 'current-user'), 'minecraft');
+  assert.equal(heartTransformationFor({ title: 'Minecraft', likes: [] }, 'current-user'), null);
 });
 
-test('Fight Club cooldown is per-user, occasional, long-lived, and prevents overlapping sequences', () => {
+test('Fight Club cooldown and themed confirmation controller are per-user, sequential, and non-overlapping', () => {
   const values = new Map();
   const storage = {
     getItem: (key) => values.get(key) ?? null,
@@ -2343,9 +2350,9 @@ test('Fight Club cooldown is per-user, occasional, long-lived, and prevents over
   assert.equal(claimFightClubSequence({ storage, userId: 'user-b', now, random: () => 0 }), true);
 
   const scheduled = [];
-  const alerts = [];
+  const prompts = [];
   const controller = createFightClubSequenceController({
-    alert: (message) => alerts.push(message),
+    onDialogChange: (prompt) => prompts.push(prompt),
     schedule: (work, delay) => { scheduled.push({ work, delay }); return scheduled.length; },
     cancelSchedule: () => {},
   });
@@ -2353,11 +2360,43 @@ test('Fight Club cooldown is per-user, occasional, long-lived, and prevents over
   assert.equal(controller.trigger({ item: { title: 'Fight Club' }, storage: freshStorage, userId: 'user', now, random: () => 0 }), true);
   assert.equal(controller.trigger({ item: { title: 'Fight Club' }, storage: freshStorage, userId: 'user', now, random: () => 0 }), false);
   scheduled.shift().work();
-  assert.deepEqual(alerts, [FIGHT_CLUB_MESSAGES[0]]);
+  assert.deepEqual(prompts, [{ step: 1, message: FIGHT_CLUB_MESSAGES[0] }]);
+  assert.equal(controller.confirm(), true);
+  assert.equal(prompts.at(-1), null);
   assert.equal(scheduled[0].delay, 1000);
   scheduled.shift().work();
-  assert.deepEqual(alerts, FIGHT_CLUB_MESSAGES);
+  assert.deepEqual(prompts.at(-1), { step: 2, message: FIGHT_CLUB_MESSAGES[1] });
+  assert.equal(controller.confirm(), true);
+  assert.equal(prompts.at(-1), null);
   assert.equal(controller.isActive(), false);
+});
+
+test('active Admin Mode bypasses Fight Club cooldown without granting the bypass to an admin account alone', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /const isAdmin = isAdminAccount && viewAsAdmin && !sharedMode/);
+  assert.match(app, /triggerFightClubEasterEgg[\s\S]*bypassCooldown: isAdmin/);
+
+  const scheduled = [];
+  const prompts = [];
+  const controller = createFightClubSequenceController({
+    onDialogChange: (prompt) => prompts.push(prompt),
+    schedule: (work, delay) => { scheduled.push({ work, delay }); return scheduled.length; },
+    cancelSchedule: () => {},
+  });
+  const blockedStorage = {
+    getItem: () => JSON.stringify({ lastShown: 2_000_000_000_000 }),
+    setItem: () => { throw new Error('cooldown storage must not be mutated'); },
+  };
+  assert.equal(controller.trigger({
+    item: { title: 'Fight Club' },
+    storage: blockedStorage,
+    userId: 'admin',
+    now: 2_000_000_000_001,
+    random: () => 1,
+    bypassCooldown: true,
+  }), true);
+  scheduled.shift().work();
+  assert.equal(prompts.at(-1).message, FIGHT_CLUB_MESSAGES[0]);
 });
 
 test('Fight Club Easter eggs are scheduled only after persistence and do not await the client-only sequence', async () => {
@@ -2373,12 +2412,47 @@ test('Fight Club Easter eggs are scheduled only after persistence and do not awa
   releaseEasterEgg();
 });
 
-test('drawer quotes are visible only for active title rules and exclude Hobbit titles', () => {
+test('drawer quotes retain persistent rules and expose additional matches only to the randomizer', () => {
   assert.equal(drawerQuoteFor({ title: 'Star Wars: Episode IV — A New Hope' }), 'A surprise to be sure, but a welcome one.');
   assert.equal(drawerQuoteFor({ title: 'The Room' }), 'Anyway, how is your sex life?');
   assert.equal(drawerQuoteFor({ title: 'The Lord of the Rings: The Fellowship of the Ring' }), 'You have my sword.');
   assert.equal(drawerQuoteFor({ title: 'The Hobbit: An Unexpected Journey' }), null);
+  assert.equal(drawerQuoteFor({ title: 'The Matrix' }), null);
+  const randomizerQuotes = [
+    ['The Matrix', 'The choice has already been made.'],
+    ['Indiana Jones and the Dial of Destiny', 'It had to be this one.'],
+    ['Mission: Impossible — Dead Reckoning', 'Your mission, should you choose to accept it…'],
+    ['Saw X', 'I want to watch a movie.'],
+    ['Pokémon Legends: Arceus', 'I choose you!'],
+    ['Forrest Gump', 'You never know what you’re gonna get.'],
+    ['Grand Theft Auto V', 'Ah shit, here we go again.'],
+    ['The Legend of Zelda: Tears of the Kingdom', 'It’s dangerous to go alone! Take this.'],
+    ['Fallout: New Vegas', 'The game was rigged from the start.'],
+    ['The Elder Scrolls V: Skyrim Special Edition', 'Hey, you. You’re finally awake.'],
+  ];
+  for (const [title, quote] of randomizerQuotes) {
+    assert.equal(drawerQuoteFor({ title }, { randomizer: true }), quote);
+  }
   assert.equal(drawerQuoteFor({ title: 'Arrival' }), null);
+});
+
+test('drawer quote is conditionally rendered above the poster and Fight Club uses one themed confirmation action', async () => {
+  const [app, publicCss, mediaCss] = await Promise.all([
+    read('src/App.jsx'),
+    read('src/public.css'),
+    read('src/media-layout.css'),
+  ]);
+  assert.match(app, /<div className="drawer-poster">\s*\{easterEggQuote && <blockquote className="drawer-easter-quote">[\s\S]*?\{item\.poster_url/);
+  assert.match(publicCss, /\.drawer-poster>\.drawer-easter-quote\{[^}]*width:100%[^}]*text-align:center[^}]*overflow-wrap:anywhere/);
+  assert.match(app, /function FightClubDialog[\s\S]*role="alertdialog"[\s\S]*aria-modal="true"[\s\S]*<button ref=\{buttonRef\}[^>]*>OK<\/button>/);
+  assert.match(app, /function FightClubDialog[\s\S]*event\.key === 'Escape'[\s\S]*event\.key === 'Tab'[\s\S]*previouslyFocused\.focus\(\)/);
+  assert.match(app, /openMedia\(picked\.item_id, navigation, null, true\)/);
+  assert.match(app, /setRandomizerSelectionId\(null\)/);
+  assert.doesNotMatch(app.match(/function FightClubDialog[\s\S]*?\n\}/)?.[0] || '', />Cancel</);
+  assert.doesNotMatch(app, /window\.alert/);
+  assert.doesNotMatch(app, /spider-heart|spider-verse|THWIP!/);
+  assert.doesNotMatch(mediaCss, /\.spider-heart/);
+  assert.match(mediaCss, /\.minecraft-heart i/);
 });
 
 test('Everything Everywhere drawer sequence preselects other screen items and always finishes on the selected film', async () => {
