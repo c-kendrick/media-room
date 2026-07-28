@@ -59,6 +59,8 @@ import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayNa
 import { clearCachedAccount, deleteCachedSection, invalidateLibrarySnapshot, readCachedSection, writeCachedSnapshot } from './section-cache.js';
 import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershipIdentity, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, SHELF_SET_SIZE, validateShelfDraft } from './shelf-order.js';
 import { getDrawerNavigationTargets } from './media-drawer-navigation.js';
+import { indexShelfItems, sortShelfItems } from './media-index.js';
+import { observeNearbyPoster } from './poster-observer.js';
 import {
   buildEverythingEverywhereSequence,
   createFightClubSequenceController,
@@ -307,19 +309,14 @@ function mediaShelvesForSection(data, section) {
     .sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
 }
 
-function shelfPosition(item, shelfId, fallback = Number.MAX_SAFE_INTEGER) {
-  const value = item.list_positions?.[shelfId];
-  return Number.isFinite(Number(value)) ? Number(value) : fallback;
-}
-
-function sortShelfItems(items, shelfId, sourceOrder = []) {
-  const sourceIndex = new Map(sourceOrder.map((item, index) => [item.item_id, index]));
-  return [...items].sort((a, b) => {
-    const first = shelfPosition(a, shelfId);
-    const second = shelfPosition(b, shelfId);
-    if (first !== second) return first - second;
-    return (sourceIndex.get(a.item_id) ?? 0) - (sourceIndex.get(b.item_id) ?? 0);
-  });
+function mostCompleteSnapshot(snapshots, fallback, { details = false } = {}) {
+  const score = (snapshot) => details
+    ? snapshot.media?.filter((item) => item.details_loaded).length || 0
+    : (snapshot.media?.length || 0) + (snapshot.mediaShelves?.length || 0);
+  return snapshots.filter(Boolean).reduce(
+    (best, snapshot) => score(snapshot) > score(best) ? snapshot : best,
+    fallback,
+  );
 }
 
 function pickRandomItem(items) {
@@ -502,7 +499,7 @@ function InitialLoadingScreen({ stage }) {
         <section className="skeleton-hero"><i className="skeleton-hero-mark" /><div><i className="skeleton-line title" /><i className="skeleton-line wide" /></div><span className="skeleton-detail"><i className="skeleton-stat" /><i className="skeleton-stat" /></span></section>
         <div className="skeleton-tabs"><i /><i /><i /></div>
         <div className="skeleton-command"><i className="skeleton-search-field" /><i className="skeleton-filter-button" /></div>
-        <section className="skeleton-shelf"><header><span><i className="skeleton-line heading" /><i className="skeleton-line medium skeleton-detail" /></span><i className="skeleton-pager" /></header><div className="skeleton-card-grid">{[0, 1, 2, 3, 4, 5].map((item) => <article className={item > 2 ? 'skeleton-detail' : ''} key={item}><i className="skeleton-poster" /><i className="skeleton-line wide" /><i className="skeleton-line short skeleton-detail" /></article>)}</div></section>
+        <section className="skeleton-shelf"><header><span><i className="skeleton-line heading" /><i className="skeleton-line medium skeleton-detail" /></span><i className="skeleton-pager" /></header><div className="skeleton-card-grid">{[0, 1, 2, 3, 4, 5, 6].map((item) => <article className={item > 2 ? 'skeleton-detail' : ''} key={item}><i className="skeleton-poster" /><i className="skeleton-line wide" /><i className="skeleton-line short skeleton-detail" /></article>)}</div></section>
         <section className="skeleton-shelf skeleton-secondary skeleton-detail"><header><span><i className="skeleton-line heading" /><i className="skeleton-line medium" /></span></header></section>
       </main>
     </section>
@@ -523,7 +520,7 @@ function SectionLoadingState({ branded = false }) {
   }
   return <section className={cls('section-loading-state', branded && 'watchlist-loading-skeleton', stage === 'detailed' && 'is-detailed')} aria-live="polite" aria-label={branded ? 'Loading Main Watchlist' : 'Loading section'}>
     <div className="section-loading-head"><i className="skeleton-line heading" /><i className="skeleton-line medium" /></div>
-    <div className="section-loading-posters">{[0, 1, 2, 3, 4, 5].map((item) => <span className={branded && item > 2 ? 'skeleton-detail' : ''} key={item}><i className="skeleton-poster" /><i className="skeleton-line wide" />{branded && <i className="skeleton-line medium skeleton-detail" />}</span>)}</div>
+    <div className="section-loading-posters">{[0, 1, 2, 3, 4, 5, 6].map((item) => <span className={branded && item > 2 ? 'skeleton-detail' : ''} key={item}><i className="skeleton-poster" /><i className="skeleton-line wide" />{branded && <i className="skeleton-line medium skeleton-detail" />}</span>)}</div>
   </section>;
 }
 
@@ -799,7 +796,11 @@ export default function App() {
         loadedSnapshot = targetIsPublicKit && startupKitRequest.current && !fresh
           ? await startupKitRequest.current
           : await fetchSection(targetCollectionId, initialSection, { fresh, libraryId: initialLibraryId });
-      } else loadedSnapshot = await loadMediaSnapshot({ fresh, section: initialSection, accessToken });
+      } else {
+        loadedSnapshot = startupKitRequest.current && !fresh
+          ? await startupKitRequest.current
+          : await loadMediaSnapshot({ fresh, section: initialSection, accessToken });
+      }
       const progressiveSnapshot = !sharedMode && loadedSnapshot?.collectionId !== MAIN_WATCHLIST_ID && dataRef.current?.collectionId === loadedSnapshot?.collectionId
         ? mergeSectionSnapshot(dataRef.current, loadedSnapshot)
         : loadedSnapshot;
@@ -985,30 +986,39 @@ export default function App() {
     if (!current || current.storage !== 'supabase' || current.mainWatchlist) return current;
     if (requestedLibraryId && current.detailedLibraries?.includes(requestedLibraryId)) return current;
     if (!requestedLibraryId && current.detailedSections?.includes(section)) return current;
-    const requestKey = `${current.collectionId}:${requestedLibraryId || section}`;
+    const requestedCollectionId = current.collectionId;
+    const requestedAccountScope = accountScope;
+    const requestKey = `${requestedAccountScope}:${requestedCollectionId}:${requestedLibraryId || section}`;
     let request = sectionDetailRequests.current.get(requestKey);
     if (!request) {
-      request = loadSectionDetails({ collectionId: current.collectionId, section, libraryId: requestedLibraryId, accessToken }).catch((error) => {
+      request = loadSectionDetails({ collectionId: requestedCollectionId, section, libraryId: requestedLibraryId, accessToken }).catch((error) => {
         sectionDetailRequests.current.delete(requestKey);
         throw error;
       });
       sectionDetailRequests.current.set(requestKey, request);
     }
     const rows = await request;
+    if (previousAccountScope.current && previousAccountScope.current !== requestedAccountScope) return dataRef.current;
+    const target = dataRef.current?.collectionId === requestedCollectionId
+      ? dataRef.current
+      : snapshotCache.current.get(requestedCollectionId);
+    if (!target) return dataRef.current;
     const detailsById = new Map(rows.map((row) => [row.id, row]));
     const merged = {
-      ...dataRef.current,
-      detailedSections: [...new Set([...(dataRef.current.detailedSections || []), section])],
+      ...target,
+      detailedSections: [...new Set([...(target.detailedSections || []), section])],
       detailedLibraries: requestedLibraryId
-        ? [...new Set([...(dataRef.current.detailedLibraries || []), requestedLibraryId])]
-        : dataRef.current.detailedLibraries || [],
-      media: dataRef.current.media.map((item) => detailsById.has(item.database_id)
+        ? [...new Set([...(target.detailedLibraries || []), requestedLibraryId])]
+        : target.detailedLibraries || [],
+      media: target.media.map((item) => detailsById.has(item.database_id)
         ? { ...item, ...detailsById.get(item.database_id), details_loaded: true }
         : item),
     };
-    dataRef.current = merged;
-    setData(merged);
     cacheSnapshot(merged, merged.collectionId);
+    if (dataRef.current?.collectionId === requestedCollectionId) {
+      dataRef.current = merged;
+      setData(merged);
+    }
     return merged;
   };
 
@@ -1018,15 +1028,15 @@ export default function App() {
     void (async () => {
       const libraries = dataRef.current?.libraries || [];
       if (libraries.length) {
-        for (const library of libraries) {
+        await Promise.all(libraries.map(async (library) => {
           await loadLibrary(library.id, { select: false });
           await ensureSectionDetails(library.type, library.id);
-        }
+        }));
       } else {
-        for (const section of MEDIA_SECTIONS) {
+        await Promise.all([...MEDIA_SECTIONS].map(async (section) => {
           await loadSection(section);
           await ensureSectionDetails(section);
-        }
+        }));
       }
     })().catch(() => setToast('Some collection search details could not be loaded.'));
   };
@@ -1151,18 +1161,6 @@ export default function App() {
     if (!sharedMode && !landingApplied) return;
     refresh();
   }, [collectionId, accessToken, mainWatchlistScopeKey, shareToken, publicUsername, landingApplied]);
-
-  useEffect(() => {
-    if (sharedMode || !data?.collectionId || data.mainWatchlist || data.storage !== 'supabase' || !allowsBackgroundPrefetch()) return undefined;
-    const targetCollectionId = data.collectionId;
-    const scheduled = scheduleIdle(async () => {
-      for (const section of MEDIA_SECTIONS) {
-        if (dataRef.current?.collectionId !== targetCollectionId) return;
-        if (!dataRef.current?.loadedSections?.includes(section)) await loadSection(section).catch(() => null);
-      }
-    });
-    return () => cancelIdle(scheduled);
-  }, [sharedMode, data?.collectionId, data?.loadedSections?.join('|')]);
 
   useEffect(() => {
     const flushWhenHidden = () => {
@@ -1748,7 +1746,7 @@ export default function App() {
         <header className="topbar">
           <button className="mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button>
           <button className="nav-toggle" onClick={() => setNavCollapsed((current) => !current)} aria-label={navCollapsed ? 'Open navigation' : 'Close navigation'} title={navCollapsed ? 'Open navigation' : 'Close navigation'}>{navCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
-          <button className="search-trigger" onClick={openGlobalSearch}>
+          <button className="search-trigger" onClick={openGlobalSearch} aria-label="Search collection">
             <Search size={17} /><span>Search the collection…</span><kbd>Ctrl K</kbd>
           </button>
           <div className="top-actions">
@@ -2158,13 +2156,11 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
     ? [...new Map(randomPool.map((item) => [item.database_id || item.item_id, item])).values()]
     : [];
   const visibleShelves = shelves.filter((shelf) => !listFilters.length || listFilters.includes(shelf.shelf_id));
+  const arrangeItemsByShelf = indexShelfItems(items.filter((item) => !item.optimistic), data.media);
+  const contentItemsByShelf = indexShelfItems(contentFiltered, data.media);
   const drawerShelves = visibleShelves.map((shelf) => ({
     shelfId: shelf.shelf_id,
-    itemIds: sortShelfItems(
-      contentFiltered.filter((item) => item.lists?.includes(shelf.shelf_id)),
-      shelf.shelf_id,
-      data.media,
-    ).map((item) => item.item_id),
+    itemIds: (contentItemsByShelf.get(shelf.shelf_id) || []).map((item) => item.item_id),
   }));
   const sectionLabel = data.mainWatchlist ? 'Main Watchlist' : currentLibrary?.name || (section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : section === 'game' ? 'Video Games' : 'Other');
   const singularLabel = data.mainWatchlist ? 'item' : (currentLibrary?.singular || libraryDefaults(section).singular).toLocaleLowerCase();
@@ -2207,13 +2203,19 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
     let complete = data;
     if (data.mainWatchlist || data.storage !== 'supabase') return complete;
     if (data.libraries?.length) {
-      for (const library of data.libraries) {
-        complete = await onLoadLibrary?.(library.id, { select: false }) || complete;
-        if (details) complete = await onEnsureSectionDetails?.(library.type, library.id) || complete;
+      const loaded = await Promise.all(data.libraries.map((library) => onLoadLibrary?.(library.id, { select: false })));
+      complete = mostCompleteSnapshot(loaded, complete);
+      if (details) {
+        const detailed = await Promise.all(data.libraries.map((library) => onEnsureSectionDetails?.(library.type, library.id)));
+        complete = mostCompleteSnapshot(detailed, complete, { details: true });
       }
-    } else for (const nextSection of MEDIA_SECTIONS) {
-      complete = await onLoadSection?.(nextSection) || complete;
-      if (details) complete = await onEnsureSectionDetails?.(nextSection) || complete;
+    } else {
+      const loaded = await Promise.all([...MEDIA_SECTIONS].map((nextSection) => onLoadSection?.(nextSection)));
+      complete = mostCompleteSnapshot(loaded, complete);
+      if (details) {
+        const detailed = await Promise.all([...MEDIA_SECTIONS].map((nextSection) => onEnsureSectionDetails?.(nextSection)));
+        complete = mostCompleteSnapshot(detailed, complete, { details: true });
+      }
     }
     return complete;
   };
@@ -2488,16 +2490,8 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
 
       <div className={cls('dynamic-shelves', queryLower && 'has-search-results', sectionLoading && 'is-loading')}>
         {visibleShelves.map((shelf) => {
-          const arrangeItems = sortShelfItems(
-            items.filter((item) => !item.optimistic && item.lists?.includes(shelf.shelf_id)),
-            shelf.shelf_id,
-            data.media,
-          );
-          const shelfItems = sortShelfItems(
-            contentFiltered.filter((item) => item.lists?.includes(shelf.shelf_id)),
-            shelf.shelf_id,
-            data.media,
-          );
+          const arrangeItems = arrangeItemsByShelf.get(shelf.shelf_id) || [];
+          const shelfItems = contentItemsByShelf.get(shelf.shelf_id) || [];
           if (!shelfItems.length && queryLower) return null;
           const drawerNavigation = { shelfId: shelf.shelf_id, shelves: drawerShelves };
           return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} arrangeItems={arrangeItems} onOpen={(itemId) => openMedia(itemId, drawerNavigation)} onRandomOpen={() => openRandomPick(shelfItems, drawerNavigation)} canEdit={canEdit && !shelf.virtual} canCopy={Boolean(!canEdit && !data.mainWatchlist && currentUserId && ownCollection && data.ownerId !== currentUserId)} onCopy={() => setShelfTransfer({ mode: 'copy-visitor', shelf, itemCount: arrangeItems.length })} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); void refresh({ fresh: true }).catch(() => notify('The order was saved, but the latest collection could not be refreshed. Reload to see the saved order everywhere.')); } catch (error) { notify(error?.message ? `Item order could not be saved: ${error.message}` : 'Item order could not be saved.'); throw error; } }} onRename={(editorActions) => setShelfEditor({ ...shelf, ...editorActions, canCurateMain, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id), onToggleMain: (enabled) => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }, enabled) })} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { const updated = await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); if (!updated?.some((row) => row.id === shelf.shelf_id && row.deleted_at)) throw new Error('Supabase did not move the shelf to the Bin.'); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} />;
@@ -2792,7 +2786,10 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, onRandomOpen, 
       </div>
     </div>
     <div className="poster-track" ref={trackRef} onScroll={(event) => { const track = event.currentTarget; const segment = track.querySelector('.poster-segment'); const width = (segment?.offsetWidth || track.clientWidth) + 24; const maximumScroll = Math.max(track.scrollWidth - track.clientWidth, 0); setMobileScrollState({ canPrevious: track.scrollLeft > 1, canNext: track.scrollLeft < maximumScroll - 1 }); if (width > 0) setCurrentSegment(Math.max(0, Math.min(Math.round(track.scrollLeft / width), Math.max(segmentCount - 1, 0)))); }}>
-      {displaySegments.map((segmentRows, segmentIndex) => <div className={cls('poster-segment', segmentIndex < displaySegments.length - 1 && 'has-divider')} key={segmentIndex}>{segmentRows.map((row, rowIndex) => row.length > 0 && <div className="poster-set-row" data-set={segmentIndex * 2 + rowIndex + 1} key={rowIndex}>{row.map((item, itemIndex) => <MediaCard key={item.item_id} item={item} shelfRank={shelf.numbered ? segmentIndex * 14 + rowIndex * 7 + itemIndex + 1 : null} eagerPoster={eagerPosters && segmentIndex === 0 && rowIndex === 0} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} />)}</div>)}</div>)}
+      {displaySegments.map((segmentRows, segmentIndex) => {
+        const renderSegment = mobileShelfPaging || Math.abs(segmentIndex - currentSegment) <= 1;
+        return <div className={cls('poster-segment', segmentIndex < displaySegments.length - 1 && 'has-divider', !renderSegment && 'is-deferred')} aria-hidden={!renderSegment || undefined} key={segmentIndex}>{renderSegment && segmentRows.map((row, rowIndex) => row.length > 0 && <div className="poster-set-row" data-set={segmentIndex * 2 + rowIndex + 1} key={rowIndex}>{row.map((item, itemIndex) => <MediaCard key={item.item_id} item={item} shelfRank={shelf.numbered ? segmentIndex * 14 + rowIndex * 7 + itemIndex + 1 : null} eagerPoster={eagerPosters && segmentIndex === 0} onClick={() => !item.optimistic && onOpen(item.item_id)} canRate={canRate && !item.optimistic} onRate={(starRating) => onRate(item.database_id, starRating)} />)}</div>)}</div>;
+      })}
       {!displayItems.length && <div className="empty-poster">No items on this shelf yet.</div>}
     </div>
     {arranging && <ArrangeShelfDialog shelf={shelf} items={arrangeItems} onClose={() => setArranging(false)} onSave={async (nextItems) => { const previous = [...displayItems]; const visibleIdentities = new Set(displayItems.map(membershipIdentity)); setDisplayItems(nextItems.filter((item) => visibleIdentities.has(membershipIdentity(item)))); try { await onReorder(nextItems.map((item) => item.database_id)); } catch (error) { setDisplayItems(previous); throw error; } }} />}
@@ -2980,18 +2977,13 @@ function ProgressivePoster({ src, alt, eager = false }) {
     }
     if (shouldLoad) return undefined;
     const image = imageRef.current;
-    if (!image || !('IntersectionObserver' in window)) {
+    if (!image) {
       setShouldLoad(true);
       return undefined;
     }
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        setShouldLoad(true);
-        observer.disconnect();
-      }
-    }, { rootMargin: '1400px 500px' });
-    observer.observe(image);
-    return () => observer.disconnect();
+    const stopObserving = observeNearbyPoster(image, () => setShouldLoad(true));
+    if (!stopObserving) setShouldLoad(true);
+    return stopObserving || undefined;
   }, [eager, shouldLoad]);
   return <img ref={imageRef} src={shouldLoad ? src : undefined} alt={alt} loading={eager ? 'eager' : 'lazy'} fetchPriority={eager ? 'high' : 'auto'} decoding="async" />;
 }
@@ -3059,7 +3051,7 @@ function MediaDrawer({ item, randomizerSelected = false, shelves, onClose, previ
   return (
     <div className="drawer-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <aside className="media-drawer public-drawer">
-        <button className="close" onClick={onClose}><X /></button>
+        <button className="close" onClick={onClose} aria-label="Close media details"><X /></button>
         <div className="drawer-layout">
           <div className="drawer-poster">
             {easterEggQuote && <blockquote className="drawer-easter-quote">{easterEggQuote}</blockquote>}
@@ -3248,7 +3240,7 @@ function SearchModal({ data, query, setQuery, onClose, onOpen }) {
         <div className="search-box">
           <Search />
           <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search films, television, books and video games…" />
-          <button onClick={onClose}><X /></button>
+          <button onClick={onClose} aria-label="Close collection search"><X /></button>
         </div>
         <div className="search-results">
           {normalizedQuery && results.slice(0, 40).map((item) => (

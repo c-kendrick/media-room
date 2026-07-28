@@ -23,6 +23,13 @@ import { completeShelfOrder } from '../src/media-write.js';
 import { canPersistSnapshot, invalidateLibrarySnapshot, sectionSnapshot } from '../src/section-cache.js';
 import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
 import { getDrawerNavigationTargets } from '../src/media-drawer-navigation.js';
+import { indexShelfItems, sortShelfItems } from '../src/media-index.js';
+import {
+  createPosterObserverManager,
+  posterPrefetchMargin,
+  POSTER_PREFETCH_MARGIN,
+  REDUCED_DATA_POSTER_PREFETCH_MARGIN,
+} from '../src/poster-observer.js';
 import { watchlistRequestMessage } from '../src/watchlist-requests.js';
 import { parseLightweightInline, parseLightweightMarkdown } from '../src/lightweight-markdown.js';
 import { bulkImportTerminology, chooseLibrary, copiedShelfName, libraryDefaults, validateLibraryDraft } from '../src/library-system.js';
@@ -971,7 +978,8 @@ test('shelf arranging has undo redo, generous drag targets, and button-only debo
 
 test('shelf arranging saves every active item independently of filters and treats refresh as best effort', async () => {
   const app = await read('src/App.jsx');
-  assert.match(app, /const arrangeItems = sortShelfItems\(\s*items\.filter\(\(item\) => !item\.optimistic && item\.lists\?\.includes\(shelf\.shelf_id\)\)/);
+  assert.match(app, /const arrangeItemsByShelf = indexShelfItems\(items\.filter\(\(item\) => !item\.optimistic\), data\.media\)/);
+  assert.match(app, /const arrangeItems = arrangeItemsByShelf\.get\(shelf\.shelf_id\) \|\| \[\]/);
   assert.match(app, /<MediaShelf[^>]*items=\{shelfItems\} arrangeItems=\{arrangeItems\}/);
   assert.match(app, /function MediaShelf\(\{ shelf, items, arrangeItems = items,/);
   assert.match(app, /<ArrangeShelfDialog shelf=\{shelf\} items=\{arrangeItems\}/);
@@ -1844,6 +1852,7 @@ test('collection loading is section-scoped, persistent, and selectively prefetch
   assert.match(app, /scheduleIdle/);
   assert.match(app, /onMouseOver=\{warmCollectionFromNav\} onFocusCapture=\{warmCollectionFromNav\} onPointerDown=\{warmCollectionFromNav\}/);
   assert.doesNotMatch(app, /for \(const collection of displayedCollections\)/);
+  assert.doesNotMatch(app, /for \(const section of MEDIA_SECTIONS\)[\s\S]*loadedSections\?\.includes\(section\)/);
   assert.match(app, /setOwnCollection\(collections\.find/);
   assert.match(cache, /indexedDB\.open\(DATABASE_NAME, SECTION_CACHE_VERSION\)/);
   assert.match(cache, /accountScope/);
@@ -1977,18 +1986,113 @@ test('section snapshot merging is idempotent and heals cache-network duplicates'
 test('drawer details load once while posters use tiered viewport prioritisation', async () => {
   const app = await read('src/App.jsx');
   const layout = await read('src/media-layout.css');
+  const posterObserver = await read('src/poster-observer.js');
   assert.match(app, /detailRequests\.current\.get\(mediaItemId\)/);
   assert.match(app, /loadMediaDetails\(\{ mediaItemId, accessToken \}\)/);
   assert.match(app, /details_loaded: true/);
   assert.match(app, /function ProgressivePoster/);
-  assert.match(app, /IntersectionObserver/);
-  assert.match(app, /rootMargin: '1400px 500px'/);
+  assert.match(app, /observeNearbyPoster/);
+  assert.match(app, /eagerPoster=\{eagerPosters && segmentIndex === 0\}/);
+  assert.match(posterObserver, /POSTER_PREFETCH_MARGIN = '1400px 500px'/);
+  assert.match(posterObserver, /REDUCED_DATA_POSTER_PREFETCH_MARGIN = '360px 160px'/);
   assert.match(app, /loading=\{eager \? 'eager' : 'lazy'\}/);
   assert.match(app, /fetchPriority=\{eager \? 'high' : 'auto'\}/);
   assert.match(app, /function cardPosterUrl/);
   assert.match(app, /\/t\/p\/w342\//);
   assert.match(layout, /content-visibility: auto/);
   assert.match(layout, /contain-intrinsic-size: auto 720px/);
+});
+
+test('static fallback snapshots cannot trigger live-only search or background requests', async () => {
+  const [app, dataSource, cache] = await Promise.all([
+    read('src/App.jsx'),
+    read('src/data.js'),
+    read('src/section-cache.js'),
+  ]);
+  assert.match(dataSource, /withStaticLibraries\(await response\.json\(\)\),\s*[\s\S]*storage: 'static'/);
+  assert.match(app, /dataRef\.current\?\.storage !== 'supabase'/);
+  assert.match(app, /data\.storage !== 'supabase'/);
+  assert.match(app, /loadedSnapshot = startupKitRequest\.current && !fresh[\s\S]*await startupKitRequest\.current/);
+  assert.match(cache, /SECTION_CACHE_VERSION = 5/);
+});
+
+test('shelf indexing performs one membership pass while preserving positions and source order', () => {
+  const source = [
+    { item_id: 'one', lists: ['a', 'b'], list_positions: { a: 2 } },
+    { item_id: 'two', lists: ['a'], list_positions: { a: 1 } },
+    { item_id: 'three', lists: ['a', 'b'], list_positions: {} },
+  ];
+  const indexed = indexShelfItems(source, source);
+  assert.deepEqual(indexed.get('a').map((item) => item.item_id), ['two', 'one', 'three']);
+  assert.deepEqual(indexed.get('b').map((item) => item.item_id), ['one', 'three']);
+  assert.deepEqual(
+    sortShelfItems([source[2], source[0]], 'b', source).map((item) => item.item_id),
+    ['one', 'three'],
+  );
+});
+
+test('poster proximity loading shares one observer, cleans it up, and respects reduced-data signals', () => {
+  const observed = [];
+  const unobserved = [];
+  let disconnected = 0;
+  let observerCallback;
+  const manager = createPosterObserverManager((callback, options) => {
+    observerCallback = callback;
+    assert.deepEqual(options, { rootMargin: POSTER_PREFETCH_MARGIN });
+    return {
+      observe: (element) => observed.push(element),
+      unobserve: (element) => unobserved.push(element),
+      disconnect: () => { disconnected += 1; },
+    };
+  }, POSTER_PREFETCH_MARGIN);
+  const first = {};
+  const second = {};
+  let loaded = 0;
+  manager.observe(first, () => { loaded += 1; });
+  const stopSecond = manager.observe(second, () => { loaded += 1; });
+  assert.deepEqual(observed, [first, second]);
+  assert.equal(manager.pendingCount(), 2);
+
+  observerCallback([{ target: first, isIntersecting: true }, { target: second, isIntersecting: false }]);
+  assert.equal(loaded, 1);
+  assert.equal(manager.pendingCount(), 1);
+  stopSecond();
+  assert.equal(manager.pendingCount(), 0);
+  assert.deepEqual(unobserved, [first, second]);
+  assert.equal(disconnected, 1);
+
+  assert.equal(posterPrefetchMargin({
+    navigator: { connection: { saveData: false, effectiveType: '4g' } },
+    matchMedia: () => ({ matches: false }),
+  }), POSTER_PREFETCH_MARGIN);
+  assert.equal(posterPrefetchMargin({
+    navigator: { connection: { saveData: true } },
+    matchMedia: () => ({ matches: false }),
+  }), REDUCED_DATA_POSTER_PREFETCH_MARGIN);
+});
+
+test('desktop shelves mount only the current and adjacent segments while mobile keeps continuous scrolling', async () => {
+  const [app, layout] = await Promise.all([
+    read('src/App.jsx'),
+    read('src/media-layout.css'),
+  ]);
+  assert.match(app, /const renderSegment = mobileShelfPaging \|\| Math\.abs\(segmentIndex - currentSegment\) <= 1/);
+  assert.match(app, /aria-hidden=\{!renderSegment \|\| undefined\}/);
+  assert.match(layout, /\.poster-segment\.is-deferred \{\s*visibility: hidden;/);
+});
+
+test('loading skeletons use the same seven-card desktop geometry and poster ratio as shelves', async () => {
+  const [app, layout, publicStyles] = await Promise.all([
+    read('src/App.jsx'),
+    read('src/media-layout.css'),
+    read('src/public.css'),
+  ]);
+  assert.match(app, /\[0, 1, 2, 3, 4, 5, 6\]\.map/);
+  assert.match(layout, /\.section-loading-posters \{[^}]*repeat\(7, var\(--media-card-width\)\)/);
+  assert.match(publicStyles, /\.skeleton-card-grid\{[^}]*repeat\(7,minmax\(0,1fr\)\)/);
+  assert.match(publicStyles, /\.skeleton-poster\{[^}]*aspect-ratio:2\/2\.96/);
+  assert.match(publicStyles, /\.skeleton-card-grid\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(publicStyles, /\.skeleton-card-grid article:nth-child\(n\+4\)\{display:none\}/);
 });
 
 test('shelf removal uses the same muted control styling as the edit icon', async () => {
