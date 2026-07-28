@@ -15,7 +15,8 @@ const PROVIDER_IDS = Object.freeze({
   theRoom: { tmdb: ['17473'] },
   lordOfTheRings: { tmdb: ['120', '121', '122'] },
   shrek: { tmdb: ['808'] },
-  spiderVerse: { tmdb: ['324857'] },
+  theMatrix: { tmdb: ['603'] },
+  forrestGump: { tmdb: ['13'] },
   terminator: { tmdb: ['218', '280', '296', '534', '87101', '290859'] },
 });
 
@@ -64,7 +65,21 @@ function exactTitle(title) {
 
 function titleIncludes(phrase) {
   const expected = normalizeEasterEggTitle(phrase);
-  return (item) => normalizeEasterEggTitle(item?.title).includes(expected);
+  return (item) => {
+    const title = normalizeEasterEggTitle(item?.title);
+    return title === expected
+      || title.startsWith(`${expected} `)
+      || title.endsWith(` ${expected}`)
+      || title.includes(` ${expected} `);
+  };
+}
+
+function titleStartsWith(phrase) {
+  const expected = normalizeEasterEggTitle(phrase);
+  return (item) => {
+    const title = normalizeEasterEggTitle(item?.title);
+    return title === expected || title.startsWith(`${expected} `);
+  };
 }
 
 const RULES = Object.freeze({
@@ -91,12 +106,40 @@ const RULES = Object.freeze({
     providerIds: PROVIDER_IDS.shrek,
     fallback: exactTitle('Shrek'),
   },
-  spiderVerse: {
-    providerIds: PROVIDER_IDS.spiderVerse,
-    fallback: exactTitle('Spider-Man: Into the Spider-Verse'),
-  },
   pokemon: {
     fallback: titleIncludes('Pokemon'),
+  },
+  theMatrix: {
+    providerIds: PROVIDER_IDS.theMatrix,
+    fallback: exactTitle('The Matrix'),
+  },
+  indianaJones: {
+    fallback: titleIncludes('Indiana Jones'),
+  },
+  missionImpossible: {
+    fallback: titleIncludes('Mission Impossible'),
+  },
+  saw: {
+    fallback: titleStartsWith('Saw'),
+  },
+  forrestGump: {
+    providerIds: PROVIDER_IDS.forrestGump,
+    fallback: exactTitle('Forrest Gump'),
+  },
+  grandTheftAuto: {
+    fallback: titleIncludes('Grand Theft Auto'),
+  },
+  legendOfZelda: {
+    fallback: titleIncludes('Legend of Zelda'),
+  },
+  falloutNewVegas: {
+    fallback: titleStartsWith('Fallout New Vegas'),
+  },
+  skyrim: {
+    fallback: (item) => titleStartsWith('Skyrim')(item) || titleStartsWith('The Elder Scrolls V Skyrim')(item),
+  },
+  minecraft: {
+    fallback: titleIncludes('Minecraft'),
   },
   terminator: {
     providerIds: PROVIDER_IDS.terminator,
@@ -113,10 +156,21 @@ export function matchesEasterEgg(item, ruleName) {
   return matchesProviderId(item, rule.providerIds) || rule.fallback(item);
 }
 
-export function drawerQuoteFor(item) {
+export function drawerQuoteFor(item, { randomizer = false } = {}) {
   if (matchesEasterEgg(item, 'starWars')) return 'A surprise to be sure, but a welcome one.';
   if (matchesEasterEgg(item, 'theRoom')) return 'Anyway, how is your sex life?';
   if (matchesEasterEgg(item, 'lordOfTheRings')) return 'You have my sword.';
+  if (!randomizer) return null;
+  if (matchesEasterEgg(item, 'theMatrix')) return 'The choice has already been made.';
+  if (matchesEasterEgg(item, 'indianaJones')) return 'It had to be this one.';
+  if (matchesEasterEgg(item, 'missionImpossible')) return 'Your mission, should you choose to accept it…';
+  if (matchesEasterEgg(item, 'saw')) return 'I want to watch a movie.';
+  if (matchesEasterEgg(item, 'pokemon')) return 'I choose you!';
+  if (matchesEasterEgg(item, 'forrestGump')) return 'You never know what you’re gonna get.';
+  if (matchesEasterEgg(item, 'grandTheftAuto')) return 'Ah shit, here we go again.';
+  if (matchesEasterEgg(item, 'legendOfZelda')) return 'It’s dangerous to go alone! Take this.';
+  if (matchesEasterEgg(item, 'falloutNewVegas')) return 'The game was rigged from the start.';
+  if (matchesEasterEgg(item, 'skyrim')) return 'Hey, you. You’re finally awake.';
   return null;
 }
 
@@ -126,8 +180,8 @@ export function heartTransformationFor(item, currentUserId, people = item?.likes
   if (matchesEasterEgg(item, 'everythingEverywhere')) return 'everything-everywhere';
   if (matchesEasterEgg(item, 'lordOfTheRings')) return 'one-ring';
   if (matchesEasterEgg(item, 'shrek')) return 'shrek';
-  if (matchesEasterEgg(item, 'spiderVerse')) return 'spider-verse';
   if (matchesEasterEgg(item, 'pokemon')) return 'pokemon';
+  if (matchesEasterEgg(item, 'minecraft')) return 'minecraft';
   return null;
 }
 
@@ -217,11 +271,12 @@ export function claimFightClubSequence({
 }
 
 export function createFightClubSequenceController({
-  alert: showAlert,
+  onDialogChange,
   schedule = setTimeout,
   cancelSchedule = clearTimeout,
 } = {}) {
   let active = false;
+  let currentStep = null;
   const timers = new Set();
   const later = (work, delay) => {
     const timer = schedule(() => {
@@ -231,26 +286,40 @@ export function createFightClubSequenceController({
     timers.add(timer);
   };
   return {
-    trigger({ item, storage, userId, now, random } = {}) {
+    trigger({ item, storage, userId, now, random, bypassCooldown = false } = {}) {
       if (
         active
         || !matchesEasterEgg(item, 'fightClub')
-        || !claimFightClubSequence({ storage, userId, now, random })
+        || (!bypassCooldown && !claimFightClubSequence({ storage, userId, now, random }))
       ) return false;
       active = true;
       later(() => {
-        showAlert(FIGHT_CLUB_MESSAGES[0]);
-        later(() => {
-          showAlert(FIGHT_CLUB_MESSAGES[1]);
-          active = false;
-        }, 1000);
+        currentStep = 0;
+        onDialogChange?.({ step: 1, message: FIGHT_CLUB_MESSAGES[0] });
       }, 0);
+      return true;
+    },
+    confirm() {
+      if (!active || currentStep === null) return false;
+      const confirmedStep = currentStep;
+      currentStep = null;
+      onDialogChange?.(null);
+      if (confirmedStep === 0) {
+        later(() => {
+          currentStep = 1;
+          onDialogChange?.({ step: 2, message: FIGHT_CLUB_MESSAGES[1] });
+        }, 1000);
+      } else {
+        active = false;
+      }
       return true;
     },
     cancel() {
       for (const timer of timers) cancelSchedule(timer);
       timers.clear();
+      currentStep = null;
       active = false;
+      onDialogChange?.(null);
     },
     isActive() {
       return active;
