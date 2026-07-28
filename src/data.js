@@ -42,7 +42,13 @@ async function loadStaticSnapshot({ fresh = false } = {}) {
   const response = await fetch(url, { cache: fresh ? 'no-store' : 'default' });
   if (!response.ok) throw new Error(`Could not load media-data.json (${response.status}).`);
 
-  return withStaticLibraries(await response.json());
+  return {
+    ...withStaticLibraries(await response.json()),
+    // Exported snapshots can retain their source storage marker. Runtime
+    // behavior must reflect the backend that actually served this response so
+    // search and idle prefetch do not issue live-only follow-up requests.
+    storage: 'static',
+  };
 }
 
 function assertSnapshot(data) {
