@@ -61,6 +61,7 @@ import { appendShelfSet, createShelfDraft, dropIntoSlot, insertBeside, membershi
 import { getDrawerNavigationTargets } from './media-drawer-navigation.js';
 import { indexShelfItems, sortShelfItems } from './media-index.js';
 import { observeNearbyPoster } from './poster-observer.js';
+import { libraryRequestKey, libraryViewState, ScopedRequestRegistry, selectLibrarySnapshot } from './library-loading.js';
 import {
   buildEverythingEverywhereSequence,
   createFightClubSequenceController,
@@ -101,15 +102,9 @@ const AUTO_COLLAPSE_NAV_QUERY = '(max-width: 1280px)';
 const LAST_PAGE_KEY_PREFIX = 'media-room:last-page:';
 const MEDIA_SECTIONS = new Set(['screen', 'book', 'game']);
 
-function allowsBackgroundPrefetch() {
-  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-  if (connection?.saveData || ['slow-2g', '2g'].includes(connection?.effectiveType)) return false;
-  return !window.matchMedia?.('(prefers-reduced-data: reduce)').matches;
-}
-
 function scheduleIdle(work) {
-  if (window.requestIdleCallback) return { id: window.requestIdleCallback(work, { timeout: 2500 }), idle: true };
-  return { id: window.setTimeout(work, 350), idle: false };
+  if (window.requestIdleCallback) return { id: window.requestIdleCallback(work), idle: true };
+  return { id: window.setTimeout(work, 0), idle: false };
 }
 
 function cancelIdle(scheduled) {
@@ -258,7 +253,11 @@ function collectionShell(collection, section = 'screen') {
       game: SECTION_NOTE_DEFAULTS.game,
     },
     loadedSections: [],
+    loadedLibraries: [],
     detailedSections: [],
+    detailedLibraries: [],
+    libraries: [],
+    selectedLibrary: null,
     mediaShelves: [],
     media: [],
     mainWatchlist,
@@ -569,6 +568,7 @@ export default function App() {
   const [collectionsLoading, setCollectionsLoading] = useState(() => !sharedMode);
   const [collectionId, setCollectionId] = useState(null);
   const [collectionLoading, setCollectionLoading] = useState(false);
+  const [libraryLoadStates, setLibraryLoadStates] = useState({});
   const [landingApplied, setLandingApplied] = useState(() => sharedMode);
   const [randomizerSelectionId, setRandomizerSelectionId] = useState(null);
   const snapshotCache = useRef(new Map());
@@ -600,12 +600,13 @@ export default function App() {
     return () => viewport.removeEventListener?.('change', collapseAtMediumWidth);
   }, []);
   const detailRequests = useRef(new Map());
-  const sectionRequests = useRef(new Map());
+  const sectionRequests = useRef(new ScopedRequestRegistry());
   const mainWatchlistRequests = useRef(new Map());
   const sectionDetailRequests = useRef(new Map());
-  const startupKitRequest = useRef(null);
   const previousAccountScope = useRef(null);
   const collectionIdRef = useRef(null);
+  const selectedLibraryRequest = useRef({ collectionId: null, libraryId: null, version: 0 });
+  const libraryLoadSequence = useRef(0);
   const dataRef = useRef(null);
   const pendingLoves = useRef(new Map());
   const loveVersions = useRef(new Map());
@@ -655,6 +656,7 @@ export default function App() {
     mainWatchlistRequests.current.clear();
     sectionDetailRequests.current.clear();
     detailRequests.current.clear();
+    setLibraryLoadStates({});
     if (persistent) void clearCachedAccount(accountScope);
   };
 
@@ -753,6 +755,7 @@ export default function App() {
       const initialLibraryId = targetCollectionId && targetCollectionId !== MAIN_WATCHLIST_ID
         ? (rememberedLibrary.current || readLastLibrary(targetCollectionId))
         : '';
+      let restoredCache = null;
       if (!sharedMode && targetCollectionId && !fresh) {
         const memory = snapshotCache.current.get(targetCollectionId);
         const memoryMatchesScope = targetCollectionId !== MAIN_WATCHLIST_ID || mainWatchlistMemoryScope.current === mainWatchlistScopeKey;
@@ -764,6 +767,7 @@ export default function App() {
           setData(memory);
           setLoading(false);
           setCollectionLoading(false);
+          restoredCache = { snapshot: memory, stale: false };
         } else {
           const cached = await readCachedSection({
             accountScope,
@@ -784,22 +788,22 @@ export default function App() {
             setData(hydrated);
             setLoading(false);
             setCollectionLoading(false);
+            restoredCache = cached;
           }
         }
+      }
+      if (restoredCache && !restoredCache.stale) {
+        if (request !== latestRequest.current) return restoredCache.snapshot;
+        setError('');
+        return dataRef.current || restoredCache.snapshot;
       }
       let loadedSnapshot;
       if (sharedMode) loadedSnapshot = publicUsername ? await loadPublicCollection(publicUsername) : await loadSharedCollection(shareToken);
       else if (targetCollectionId === MAIN_WATCHLIST_ID) loadedSnapshot = await fetchMainWatchlist({ fresh });
       else if (targetCollectionId) {
-        const targetIsPublicKit = accountScope === 'public' && initialSection === 'screen'
-          && collections.some((row) => row.id === targetCollectionId && row.slug === 'kits-collection');
-        loadedSnapshot = targetIsPublicKit && startupKitRequest.current && !fresh
-          ? await startupKitRequest.current
-          : await fetchSection(targetCollectionId, initialSection, { fresh, libraryId: initialLibraryId });
+        loadedSnapshot = await fetchSection(targetCollectionId, initialSection, { fresh, libraryId: initialLibraryId });
       } else {
-        loadedSnapshot = startupKitRequest.current && !fresh
-          ? await startupKitRequest.current
-          : await loadMediaSnapshot({ fresh, section: initialSection, accessToken });
+        loadedSnapshot = await loadMediaSnapshot({ fresh, section: initialSection, accessToken });
       }
       const progressiveSnapshot = !sharedMode && loadedSnapshot?.collectionId !== MAIN_WATCHLIST_ID && dataRef.current?.collectionId === loadedSnapshot?.collectionId
         ? mergeSectionSnapshot(dataRef.current, loadedSnapshot)
@@ -810,7 +814,7 @@ export default function App() {
           ? snapshotCache.current.get(MAIN_WATCHLIST_ID)
           : null,
       );
-      const snapshot = applyPendingLoves(scopedSnapshot);
+      const snapshot = applyPendingLoves(selectLibrarySnapshot(scopedSnapshot, initialLibraryId));
       if (!sharedMode) {
         cacheSnapshot(snapshot, targetCollectionId);
         if (fresh && snapshot.collectionId !== MAIN_WATCHLIST_ID) snapshotCache.current.delete(MAIN_WATCHLIST_ID);
@@ -865,26 +869,18 @@ export default function App() {
   };
 
   const fetchSection = (targetCollectionId, section, { fresh = false, token = accessToken, libraryId = null } = {}) => {
-    const requestKey = `${accountScope}:${targetCollectionId}:${libraryId || section}`;
-    if (fresh) sectionRequests.current.delete(requestKey);
-    let request = sectionRequests.current.get(requestKey);
-    if (!request) {
-      request = loadMediaSnapshot({ fresh, collectionId: targetCollectionId, libraryId, section, accessToken: token })
-        .then((loaded) => {
-          // A fresh request supersedes any older in-flight read for this
-          // library. Never let that stale response replace newer shelf data.
-          if (sectionRequests.current.get(requestKey) !== request) return loaded;
-          mergeLoadedSection(targetCollectionId, loaded);
-          return loaded;
-        })
-        .catch((error) => {
-          sectionRequests.current.delete(requestKey);
-          if (import.meta.env.DEV) console.warn(`[Media Room] Section RPC/fallback failed for ${targetCollectionId}/${section}.`, error);
-          throw error;
-        });
-      sectionRequests.current.set(requestKey, request);
-    }
-    return request;
+    const requestKey = libraryRequestKey(accountScope, targetCollectionId, libraryId || section);
+    return sectionRequests.current.run(
+      requestKey,
+      () => loadMediaSnapshot({ fresh, collectionId: targetCollectionId, libraryId, section, accessToken: token }),
+      {
+        supersede: fresh,
+        onResolve: (loaded) => mergeLoadedSection(targetCollectionId, loaded),
+      },
+    ).catch((error) => {
+      if (import.meta.env.DEV) console.warn(`[Media Room] Library request failed for ${targetCollectionId}/${libraryId || section}.`, error);
+      throw error;
+    });
   };
 
   const fetchMainWatchlist = ({ fresh = false } = {}) => {
@@ -934,39 +930,99 @@ export default function App() {
     return network;
   };
 
-  const loadLibrary = async (libraryId, { collection: requestedCollectionId = dataRef.current?.collectionId, fresh = false, select = true } = {}) => {
+  const loadLibrary = async (libraryId, { collection: requestedCollectionId = dataRef.current?.collectionId, fresh = false, select = true, navigate = false } = {}) => {
     if (!requestedCollectionId || requestedCollectionId === MAIN_WATCHLIST_ID || !libraryId) return dataRef.current;
-    const memory = dataRef.current?.collectionId === requestedCollectionId
+    const loadKey = libraryRequestKey(accountScope, requestedCollectionId, libraryId);
+    const operationId = ++libraryLoadSequence.current;
+    let memory = dataRef.current?.collectionId === requestedCollectionId
       ? dataRef.current
       : snapshotCache.current.get(requestedCollectionId);
-    if (!fresh && memory?.loadedLibraries?.includes(libraryId)) {
-      const library = memory.libraries?.find((entry) => entry.id === libraryId);
-      if (!library) return loadLibrary(libraryId, { collection: requestedCollectionId, fresh: true, select });
-      if (!select) return memory;
-      const selected = { ...memory, selectedLibrary: library };
-      dataRef.current = selected;
-      setData(selected);
+
+    let selectionVersion = selectedLibraryRequest.current.version;
+    const selectIfCurrent = (snapshot) => {
+      if (!select) return snapshot;
+      const target = selectedLibraryRequest.current;
+      if (target.collectionId !== requestedCollectionId || target.libraryId !== libraryId || target.version !== selectionVersion) return snapshot;
+      const selected = selectLibrarySnapshot(snapshot, libraryId);
+      if (dataRef.current?.collectionId === requestedCollectionId) {
+        dataRef.current = selected;
+        setData(selected);
+      }
+      return selected;
+    };
+
+    if (select) {
+      selectionVersion += 1;
+      selectedLibraryRequest.current = { collectionId: requestedCollectionId, libraryId, version: selectionVersion };
+      const immediate = selectLibrarySnapshot(memory, libraryId);
+      if (immediate?.selectedLibrary?.id === libraryId && dataRef.current?.collectionId === requestedCollectionId) {
+        dataRef.current = immediate;
+        setData(immediate);
+      }
       rememberedLibrary.current = libraryId;
       writeLastLibrary(requestedCollectionId, libraryId);
-      return selected;
+      if (navigate) {
+        window.history.pushState({
+          ...(window.history.state || {}),
+          mediaRoomNavigation: { collectionId: requestedCollectionId, libraryId, section: memory?.libraries?.find((entry) => entry.id === libraryId)?.type || 'screen' },
+        }, '', window.location.href);
+      }
     }
-    const loaded = await fetchSection(requestedCollectionId, 'screen', { fresh, libraryId });
-    const merged = snapshotCache.current.get(requestedCollectionId) || loaded;
-    if (!select) return merged;
-    const library = merged.libraries?.find((entry) => entry.id === libraryId)
-      || loaded.selectedLibrary;
-    const selected = { ...merged, selectedLibrary: library };
-    dataRef.current = selected;
-    setData(selected);
-    rememberedLibrary.current = library?.id || libraryId;
-    writeLastLibrary(requestedCollectionId, rememberedLibrary.current);
-    cacheSnapshot(selected, requestedCollectionId);
-    return selected;
+
+    if (!fresh && memory?.loadedLibraries?.includes(libraryId)) {
+      setLibraryLoadStates((current) => ({ ...current, [loadKey]: { status: 'success', error: '', requestId: operationId } }));
+      return selectIfCurrent(memory);
+    }
+
+    let cached = null;
+    if (!fresh && !sharedMode) {
+      setLibraryLoadStates((current) => ({ ...current, [loadKey]: { status: 'restoring', error: '', requestId: operationId } }));
+      cached = await readCachedSection({ accountScope, collectionId: requestedCollectionId, libraryId });
+      if (cached?.snapshot) {
+        memory = mergeLoadedSection(requestedCollectionId, cached.snapshot);
+        selectIfCurrent(memory);
+        if (!cached.stale) {
+          setLibraryLoadStates((current) => current[loadKey]?.requestId === operationId
+            ? { ...current, [loadKey]: { ...current[loadKey], status: 'success', error: '' } }
+            : current);
+          return memory;
+        }
+      }
+    }
+
+    setLibraryLoadStates((current) => ({
+      ...current,
+      [loadKey]: { status: 'loading', error: '', requestId: operationId },
+    }));
+    try {
+      const loaded = await fetchSection(requestedCollectionId, 'screen', { fresh: fresh || Boolean(cached?.stale), libraryId });
+      const merged = snapshotCache.current.get(requestedCollectionId) || loaded;
+      const selected = selectIfCurrent(merged);
+      setLibraryLoadStates((current) => current[loadKey]?.requestId === operationId
+        ? { ...current, [loadKey]: { ...current[loadKey], status: 'success', error: '' } }
+        : current);
+      cacheSnapshot(selected, requestedCollectionId);
+      return selected;
+    } catch (loadError) {
+      setLibraryLoadStates((current) => current[loadKey]?.requestId === operationId
+        ? {
+          ...current,
+          [loadKey]: { ...current[loadKey], status: 'error', error: loadError?.message || 'That library could not be loaded.' },
+        }
+        : current);
+      throw loadError;
+    }
   };
 
   const invalidateLibrary = (libraryId, requestedCollectionId = dataRef.current?.collectionId) => {
     if (!libraryId || !requestedCollectionId) return;
-    sectionRequests.current.delete(`${accountScope}:${requestedCollectionId}:${libraryId}`);
+    sectionRequests.current.delete(libraryRequestKey(accountScope, requestedCollectionId, libraryId));
+    const loadKey = libraryRequestKey(accountScope, requestedCollectionId, libraryId);
+    setLibraryLoadStates((states) => {
+      const next = { ...states };
+      delete next[loadKey];
+      return next;
+    });
     const current = dataRef.current?.collectionId === requestedCollectionId
       ? dataRef.current
       : snapshotCache.current.get(requestedCollectionId);
@@ -1041,13 +1097,8 @@ export default function App() {
     })().catch(() => setToast('Some collection search details could not be loaded.'));
   };
 
-  const warmCollection = (targetCollectionId, section = 'screen') => {
-    if (!allowsBackgroundPrefetch() || !targetCollectionId || targetCollectionId === MAIN_WATCHLIST_ID) return;
-    void loadSection(section, { collection: targetCollectionId }).catch(() => null);
-  };
-
-  const selectCollection = (nextCollectionId, { userInitiated = true } = {}) => {
-    if (nextCollectionId === collectionId || nextCollectionId === data?.collectionId) return;
+  const selectCollection = (nextCollectionId, { userInitiated = true, historyMode = userInitiated ? 'push' : 'none' } = {}) => {
+    if (nextCollectionId === collectionIdRef.current || nextCollectionId === dataRef.current?.collectionId) return;
     if (userInitiated) {
       userSelectedCollection.current = true;
       rememberedSection.current = 'screen';
@@ -1061,6 +1112,22 @@ export default function App() {
       ? { id: MAIN_WATCHLIST_ID, title: 'Main Watchlist' }
       : collections.find((row) => row.id === nextCollectionId);
     setCollectionId(nextCollectionId);
+    if (historyMode !== 'none') {
+      const historyMethod = historyMode === 'replace' ? 'replaceState' : 'pushState';
+      window.history[historyMethod]({
+        ...(window.history.state || {}),
+        mediaRoomNavigation: {
+          collectionId: nextCollectionId,
+          libraryId: rememberedLibrary.current || readLastLibrary(nextCollectionId),
+          section: rememberedSection.current,
+        },
+      }, '', window.location.href);
+    }
+    selectedLibraryRequest.current = {
+      collectionId: nextCollectionId,
+      libraryId: rememberedLibrary.current || readLastLibrary(nextCollectionId),
+      version: selectedLibraryRequest.current.version + 1,
+    };
     drawerSequenceVersion.current += 1;
     setRandomizerSelectionId(null);
     setSelectedMediaId(null);
@@ -1072,6 +1139,27 @@ export default function App() {
     setCollectionLoading(!cached);
     setMobileNav(false);
   };
+
+  useEffect(() => {
+    const restoreNavigation = (event) => {
+      const route = event.state?.mediaRoomNavigation;
+      if (!route?.collectionId || sharedMode) return;
+      rememberedSection.current = MEDIA_SECTIONS.has(route.section) ? route.section : 'screen';
+      rememberedLibrary.current = route.libraryId || '';
+      if (route.collectionId !== dataRef.current?.collectionId) {
+        selectCollection(route.collectionId, { userInitiated: false });
+        return;
+      }
+      const routeLibraryId = route.libraryId
+        || dataRef.current?.libraries?.find((library) => library.type === rememberedSection.current && library.protected)?.id
+        || dataRef.current?.libraries?.find((library) => library.type === rememberedSection.current)?.id;
+      if (routeLibraryId && routeLibraryId !== dataRef.current?.selectedLibrary?.id) {
+        void loadLibrary(routeLibraryId, { collection: route.collectionId }).catch(() => undefined);
+      }
+    };
+    window.addEventListener('popstate', restoreNavigation);
+    return () => window.removeEventListener('popstate', restoreNavigation);
+  }, [sharedMode, accountScope, collections]);
 
   useEffect(() => {
     const viewCopiedShelf = (event) => {
@@ -1099,22 +1187,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (sharedMode || startupKitRequest.current) return;
-    startupKitRequest.current = loadMediaSnapshot({ section: 'screen' })
-      .then((snapshot) => {
-        cacheSnapshot(snapshot);
-        if (import.meta.env.DEV) console.debug('[Media Room] Public Kit Film & TV startup request completed.');
-        return snapshot;
-      })
-      .catch((error) => {
-        startupKitRequest.current = null;
-        if (import.meta.env.DEV) console.warn('[Media Room] Early public section request failed; normal fallback will retry.', error);
-        throw error;
-      });
-    void startupKitRequest.current.catch(() => null);
-  }, [sharedMode]);
-
-  useEffect(() => {
     const previous = previousAccountScope.current;
     previousAccountScope.current = accountScope;
     if (!previous || previous === accountScope) return;
@@ -1124,7 +1196,7 @@ export default function App() {
     mainWatchlistRequests.current.clear();
     sectionDetailRequests.current.clear();
     detailRequests.current.clear();
-    startupKitRequest.current = null;
+    setLibraryLoadStates({});
     if (landingApplied) {
       dataRef.current = null;
       setData(null);
@@ -1133,34 +1205,33 @@ export default function App() {
   }, [accountScope]);
 
   useEffect(() => {
-    if (!accessToken || !account?.profile?.id || !account.profile.approved_at || account.profile.deactivated_at) return;
-    const remembered = readLastPage(account.profile.id);
-    if (!remembered?.collectionId || remembered.collectionId === MAIN_WATCHLIST_ID) return;
-    void loadSection(remembered.section, { collection: remembered.collectionId }).catch(() => null);
-  }, [accessToken, account?.profile?.id, account?.profile?.approved_at, account?.profile?.deactivated_at]);
-
-  useEffect(() => {
-    if (sharedMode || !landingApplied || !data?.collectionId || data.collectionId === MAIN_WATCHLIST_ID || !allowsBackgroundPrefetch()) return undefined;
-    const scheduled = scheduleIdle(async () => {
-      const cached = await readCachedSection({
-        accountScope,
-        collectionId: MAIN_WATCHLIST_ID,
-        section: 'screen',
-        scope: mainWatchlistCacheScope,
-      });
-      if (cached?.snapshot && mainWatchlistMemoryScope.current !== mainWatchlistScopeKey) {
-        snapshotCache.current.set(MAIN_WATCHLIST_ID, applyPendingLoves(cached.snapshot));
-        mainWatchlistMemoryScope.current = mainWatchlistScopeKey;
-      }
-      await fetchMainWatchlist().catch(() => null);
-    });
-    return () => cancelIdle(scheduled);
-  }, [sharedMode, landingApplied, data?.collectionId, accessToken, accountScope, mainWatchlistScopeKey]);
-
-  useEffect(() => {
     if (!sharedMode && !landingApplied) return;
     refresh();
   }, [collectionId, accessToken, mainWatchlistScopeKey, shareToken, publicUsername, landingApplied]);
+
+  useEffect(() => {
+    const selectedLibraryId = data?.selectedLibrary?.id;
+    const selectedLibraryReady = selectedLibraryId
+      ? data.loadedLibraries?.includes(selectedLibraryId)
+      : data?.loadedSections?.includes(rememberedSection.current);
+    if (
+      sharedMode
+      || !landingApplied
+      || !data?.collectionId
+      || data.collectionId === MAIN_WATCHLIST_ID
+      || !selectedLibraryReady
+      || sectionRequests.current.requests.size > 0
+    ) return undefined;
+    const sourceCollectionId = data.collectionId;
+    const scheduled = scheduleIdle(() => {
+      if (
+        dataRef.current?.collectionId !== sourceCollectionId
+        || sectionRequests.current.requests.size > 0
+      ) return;
+      void fetchMainWatchlist().catch(() => undefined);
+    });
+    return () => cancelIdle(scheduled);
+  }, [sharedMode, landingApplied, data?.collectionId, data?.selectedLibrary?.id, data?.loadedLibraries?.join('|'), data?.loadedSections?.join('|'), mainWatchlistScopeKey]);
 
   useEffect(() => {
     const flushWhenHidden = () => {
@@ -1347,7 +1418,7 @@ export default function App() {
     if (!landingCollectionId) return;
     rememberedSection.current = rememberedCollectionIsVisible ? remembered.section : 'screen';
     setLandingApplied(true);
-    selectCollection(landingCollectionId, { userInitiated: false });
+    selectCollection(landingCollectionId, { userInitiated: false, historyMode: 'replace' });
   }, [account, accountScope, authLoading, collections, collectionsReadyFor, adminClubsReadyFor, landingApplied, viewAsAdmin, adminClubs]);
 
   useEffect(() => {
@@ -1707,14 +1778,6 @@ export default function App() {
     }
   };
 
-  const warmCollectionFromNav = (event) => {
-    const button = event.target.closest('button');
-    if (!button || !event.currentTarget.contains(button)) return;
-    const navButtons = [...event.currentTarget.querySelectorAll('button')];
-    const collection = displayedCollections[navButtons.indexOf(button) - 1];
-    if (collection) warmCollection(collection.id);
-  };
-
   return (
     <div className={cls('app-shell media-only-shell public-media-shell', navCollapsed && 'nav-collapsed', sharedMode && 'shared-collection-shell')}>
       <div className="paper-texture" />
@@ -1723,7 +1786,7 @@ export default function App() {
           <span className="brand-mark">KM</span>
           <span><strong>Kit’s Media<br />Room</strong></span>
         </button>
-        {!sharedMode && <nav onMouseOver={warmCollectionFromNav} onFocusCapture={warmCollectionFromNav} onPointerDown={warmCollectionFromNav}>
+        {!sharedMode && <nav>
           {data?.storage === 'supabase' && <button className={data.mainWatchlist ? 'active' : ''} onClick={() => selectCollection(MAIN_WATCHLIST_ID)}><ListOrdered size={17} />Main Watchlist</button>}
           <small className="collection-nav-label">COLLECTIONS</small>
           {data?.storage === 'supabase' && displayedCollections.map((collection) => <button key={collection.id} draggable={isAdmin} className={collection.id === (collectionId || data?.collectionId) ? 'active' : ''} onClick={() => selectCollection(collection.id)} onDragStart={(event) => { if (!isAdmin) return; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', collection.id); setDraggedCollectionId(collection.id); }} onDragEnd={() => setDraggedCollectionId(null)} onDragOver={(event) => { if (isAdmin && draggedCollectionId) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); dropCollection(collection.id); }}>
@@ -1765,7 +1828,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} loading={collectionLoading} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onInvalidateLibrary={invalidateLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { dataRef.current = nextData; setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={openMediaDrawer} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
+          <MediaView key={data.collectionId} data={data} loading={collectionLoading} loadError={error} libraryLoadState={data.selectedLibrary?.id ? libraryLoadStates[libraryRequestKey(accountScope, data.collectionId, data.selectedLibrary.id)] : null} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onRetryLibrary={() => data.selectedLibrary?.id ? loadLibrary(data.selectedLibrary.id, { fresh: true }) : refresh({ fresh: true, targetCollectionId: data.collectionId })} onInvalidateLibrary={invalidateLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { dataRef.current = nextData; setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={openMediaDrawer} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
         </main>
         <footer><span>Published from Kit’s Local Media Room.</span><span className="provider-credits">Poster data from <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>, <a href="https://books.google.com/" target="_blank" rel="noreferrer">Google Books</a>, <a href="https://openlibrary.org/" target="_blank" rel="noreferrer">Open Library</a> and <a href="https://www.steamgriddb.com/" target="_blank" rel="noreferrer">SteamGridDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</span></footer>
       </div>
@@ -2048,7 +2111,7 @@ function StarRating({ value, editable = false, onChange, label = 'Star rating' }
   </span>;
 }
 
-function MediaView({ data, loading = false, initialSection, onLoadSection, onLoadLibrary, onInvalidateLibrary, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, ownCollection, loadCopyDestinations, onViewCopiedShelf, sourceOwnerName, shareToken }) {
+function MediaView({ data, loading = false, loadError = '', libraryLoadState = null, initialSection, onLoadSection, onLoadLibrary, onRetryLibrary, onInvalidateLibrary, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, ownCollection, loadCopyDestinations, onViewCopiedShelf, sourceOwnerName, shareToken }) {
   const [section, setSection] = useState(() => data.selectedLibrary?.type || (MEDIA_SECTIONS.has(initialSection) ? initialSection : 'screen'));
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -2169,9 +2232,20 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
   const canCurateMain = Boolean(!data.mainWatchlist && currentLibrary?.type === 'screen' && (canEdit || isAdmin));
   const advancedFilterCount = [listFilters, typeFilters, stampFilters, ratingFilters, ownershipFilters, formatFilters, genreFilters]
     .reduce((total, values) => total + values.length, 0);
-  const sectionLoading = Boolean(loading || (!data.mainWatchlist && currentLibrary
-    ? !data.loadedLibraries?.includes(currentLibrary.id)
-    : !data.loadedSections?.includes(section)));
+  const confirmedLoaded = Boolean(data.mainWatchlist || (currentLibrary
+    ? data.loadedLibraries?.includes(currentLibrary.id)
+    : data.loadedSections?.includes(section)));
+  const loadView = libraryViewState({
+    request: libraryLoadState,
+    hasData: shelves.length > 0,
+    confirmedLoaded,
+    collectionPending: loading,
+    collectionError: loadError,
+  });
+  const sectionLoading = loadView === 'loading';
+  const sectionError = loadView === 'error' || loadView === 'content-error'
+    ? (libraryLoadState?.error || loadError || 'That library could not be loaded.')
+    : '';
 
   useEffect(() => {
     if (query.trim()) onEnsureSectionDetails?.(section).catch(() => notify('Some detailed search fields could not be loaded.'));
@@ -2196,7 +2270,7 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
     if (!libraryId || libraryId === currentLibrary?.id) return;
     setQuery('');
     clearAdvancedFilters();
-    void onLoadLibrary?.(libraryId).catch(() => notify('That library could not be loaded.'));
+    void onLoadLibrary?.(libraryId, { navigate: true }).catch(() => notify('That library could not be loaded.'));
   };
 
   const loadCompleteCollection = async ({ details = false } = {}) => {
@@ -2498,7 +2572,8 @@ function MediaView({ data, loading = false, initialSection, onLoadSection, onLoa
         })}
       </div>
 
-      {!sectionLoading && !shelves.length && !data.mainWatchlist && <Empty>{canEdit ? `Create a shelf in ${currentLibrary?.name} before adding ${currentLibrary?.plural?.toLocaleLowerCase() || 'items'}.` : `${currentLibrary?.name || 'This library'} has no shelves yet.`}</Empty>}
+      {sectionError && <section className="library-load-error" role="alert"><span><strong>{loadView === 'content-error' ? `${currentLibrary?.name || 'This library'} could not refresh` : `${currentLibrary?.name || 'This library'} could not be loaded`}</strong><small>{sectionError}</small></span><button type="button" onClick={() => onRetryLibrary?.().catch(() => undefined)}>Try again</button></section>}
+      {loadView === 'empty' && !data.mainWatchlist && <Empty>{canEdit ? `Create a shelf in ${currentLibrary?.name || 'this library'} before adding ${currentLibrary?.plural?.toLocaleLowerCase() || 'items'}.` : `${currentLibrary?.name || 'This library'} has no shelves yet.`}</Empty>}
       {!sectionLoading && shelves.length > 0 && !randomPool.length && <Empty>No {currentLibrary?.plural?.toLocaleLowerCase() || 'media'} match those filters.</Empty>}
       {!sectionLoading && !data.mainWatchlist && (canEdit || isAdmin) && <section className="collection-tools">
         <div className="collection-tools-intro"><span className="eyebrow">COLLECTION TOOLS</span><p>{canEdit ? 'Manage this section without cluttering the shelves.' : 'Administrative backup and artwork tools.'}</p></div>

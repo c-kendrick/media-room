@@ -123,14 +123,17 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
   };
 }
 
-export async function loadPublicCollections({ fresh = false, accessToken } = {}) {
+export async function loadPublicCollections({ fresh = false, accessToken, ownerIds } = {}) {
+  const ownerFilter = Array.isArray(ownerIds) && ownerIds.length
+    ? { owner_id: 'in.(' + [...new Set(ownerIds)].join(',') + ')' }
+    : {};
   try {
-    return await supabaseSelect(query('collections', { select: 'id,owner_id,title,slug,description,position', order: 'position.asc,title.asc' }), { fresh, accessToken });
+    return await supabaseSelect(query('collections', { ...ownerFilter, select: 'id,owner_id,title,slug,description,position', order: 'position.asc,title.asc' }), { fresh, accessToken });
   } catch {
     try {
-      return await supabaseSelect(query('collections', { select: 'id,owner_id,title,slug,description', order: 'title.asc' }), { fresh, accessToken });
+      return await supabaseSelect(query('collections', { ...ownerFilter, select: 'id,owner_id,title,slug,description', order: 'title.asc' }), { fresh, accessToken });
     } catch {
-      return supabaseSelect(query('collections', { select: 'id,owner_id,title,slug', order: 'title.asc' }), { fresh, accessToken });
+      return supabaseSelect(query('collections', { ...ownerFilter, select: 'id,owner_id,title,slug', order: 'title.asc' }), { fresh, accessToken });
     }
   }
 }
@@ -444,8 +447,8 @@ export async function loadSectionDetails({ collectionId, section, libraryId = nu
 
 export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken, ownerIds } = {}) {
   const allowedOwnerIds = Array.isArray(ownerIds) ? new Set(ownerIds) : null;
-  const collections = (await loadPublicCollections({ fresh, accessToken }))
-    .filter((collection) => !allowedOwnerIds || allowedOwnerIds.has(collection.owner_id));
+  const scopedOwnerIds = allowedOwnerIds ? [...allowedOwnerIds] : null;
+  const collections = await loadPublicCollections({ fresh, accessToken, ownerIds: scopedOwnerIds });
   if (!collections.length) return null;
 
   const collectionIds = collections.map((collection) => collection.id);
@@ -487,10 +490,19 @@ export async function loadMainWatchlistFromSupabase({ fresh = false, accessToken
     }
   };
   const [publicProfiles, reactions, shelves, allInterestRows] = await Promise.all([
-    supabaseSelect(query('public_profiles', { select: 'id,username,display_name' }), { fresh, accessToken }),
-    accessToken ? supabaseSelect(query('media_reactions', { select: 'user_id,kind,work_key,state' }), { fresh, accessToken }) : Promise.resolve([]),
+    supabaseSelect(query('public_profiles', {
+      ...(scopedOwnerIds?.length ? { id: 'in.(' + scopedOwnerIds.join(',') + ')' } : {}),
+      select: 'id,username,display_name',
+    }), { fresh, accessToken }),
+    accessToken ? supabaseSelect(query('media_reactions', {
+      ...(scopedOwnerIds?.length ? { user_id: 'in.(' + scopedOwnerIds.join(',') + ')' } : {}),
+      select: 'user_id,kind,work_key,state',
+    }), { fresh, accessToken }) : Promise.resolve([]),
     loadShelves(),
-    supabaseSelect(query('media_interest', { select: 'media_item_id,user_id' }), { fresh, accessToken }),
+    supabaseSelect(query('media_interest', {
+      ...(scopedOwnerIds?.length ? { user_id: 'in.(' + scopedOwnerIds.join(',') + ')' } : {}),
+      select: 'media_item_id,user_id',
+    }), { fresh, accessToken }),
   ]);
   const visibleProfileIds = new Set(publicProfiles.map((profile) => profile.id));
   const scopedProfileIds = allowedOwnerIds

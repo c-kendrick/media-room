@@ -1,6 +1,6 @@
 const DATABASE_NAME = 'media-room-cache';
 const STORE_NAME = 'sections';
-export const SECTION_CACHE_VERSION = 5;
+export const SECTION_CACHE_VERSION = 6;
 export const SECTION_CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const SECTION_TYPES = {
