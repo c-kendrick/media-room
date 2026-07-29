@@ -2414,6 +2414,11 @@ test('media drawer navigation follows item and shelf display order while skippin
 test('Easter egg matching uses provider IDs and punctuation-tolerant bounded title fallbacks', () => {
   assert.equal(normalizeEasterEggTitle('  POKÉMON:  Detective—Pikachu! '), 'pokemon detective pikachu');
   assert.equal(matchesEasterEgg({ title: 'Unrecognised import', external_ids: { tmdb: 'movie:550' } }, 'fightClub'), true);
+  assert.equal(matchesEasterEgg({ title: 'Empire Strikes Back' }, 'starWars'), true);
+  assert.equal(matchesEasterEgg({ title: 'The Empire Strikes Back' }, 'starWars'), true);
+  assert.equal(matchesEasterEgg({ title: 'Return of the Jedi' }, 'starWars'), true);
+  assert.equal(matchesEasterEgg({ title: 'Unrecognised import', external_ids: { tmdb: 'movie:1891' } }, 'starWars'), true);
+  assert.equal(matchesEasterEgg({ title: 'Empire Records' }, 'starWars'), false);
   assert.equal(matchesEasterEgg({ title: 'Pokémon: The First Movie' }, 'pokemon'), true);
   assert.equal(matchesEasterEgg({ title: 'Pokemon Detective Pikachu' }, 'pokemon'), true);
   assert.equal(matchesEasterEgg({ title: 'Indiana Jones and the Last Crusade' }, 'indianaJones'), true);
@@ -2516,13 +2521,17 @@ test('Fight Club Easter eggs are scheduled only after persistence and do not awa
   releaseEasterEgg();
 });
 
-test('drawer quotes retain persistent rules and expose additional matches only to the randomizer', () => {
-  assert.equal(drawerQuoteFor({ title: 'Star Wars: Episode IV — A New Hope' }), 'A surprise to be sure, but a welcome one.');
-  assert.equal(drawerQuoteFor({ title: 'The Room' }), 'Anyway, how is your sex life?');
-  assert.equal(drawerQuoteFor({ title: 'The Lord of the Rings: The Fellowship of the Ring' }), 'You have my sword.');
+test('drawer quotes appear only for randomizer selections', () => {
+  assert.equal(drawerQuoteFor({ title: 'Star Wars: Episode IV — A New Hope' }), null);
+  assert.equal(drawerQuoteFor({ title: 'The Room' }), null);
+  assert.equal(drawerQuoteFor({ title: 'The Lord of the Rings: The Fellowship of the Ring' }), null);
   assert.equal(drawerQuoteFor({ title: 'The Hobbit: An Unexpected Journey' }), null);
   assert.equal(drawerQuoteFor({ title: 'The Matrix' }), null);
   const randomizerQuotes = [
+    ['Star Wars: Episode IV — A New Hope', 'A surprise to be sure, but a welcome one.'],
+    ['Empire Strikes Back', 'A surprise to be sure, but a welcome one.'],
+    ['The Room', 'Anyway, how is your sex life?'],
+    ['The Lord of the Rings: The Fellowship of the Ring', 'You have my sword.'],
     ['The Matrix', 'The choice has already been made.'],
     ['Indiana Jones and the Dial of Destiny', 'It had to be this one.'],
     ['Mission: Impossible — Dead Reckoning', 'Your mission, should you choose to accept it…'],
@@ -2550,6 +2559,8 @@ test('drawer quote is conditionally rendered above the poster and Fight Club use
   assert.match(publicCss, /\.drawer-poster>\.drawer-easter-quote\{[^}]*width:100%[^}]*text-align:center[^}]*overflow-wrap:anywhere/);
   assert.match(app, /function FightClubDialog[\s\S]*role="alertdialog"[\s\S]*aria-modal="true"[\s\S]*<button ref=\{buttonRef\}[^>]*>OK<\/button>/);
   assert.match(app, /function FightClubDialog[\s\S]*event\.key === 'Escape'[\s\S]*event\.key === 'Tab'[\s\S]*previouslyFocused\.focus\(\)/);
+  assert.match(app, /const openMediaDrawer = \(itemId, navigation = null, sequence = null, randomizerSelected = false\)/);
+  assert.match(app, /onOpen=\{\(itemId\) => openMedia\(itemId, drawerNavigation\)\}/);
   assert.match(app, /openMedia\(picked\.item_id, navigation, null, true\)/);
   assert.match(app, /setRandomizerSelectionId\(null\)/);
   assert.doesNotMatch(app.match(/function FightClubDialog[\s\S]*?\n\}/)?.[0] || '', />Cancel</);

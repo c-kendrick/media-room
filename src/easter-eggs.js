@@ -12,6 +12,7 @@ export const FIGHT_CLUB_CHANCE = 0.25;
 const PROVIDER_IDS = Object.freeze({
   everythingEverywhere: { tmdb: ['545611'] },
   fightClub: { tmdb: ['550'] },
+  starWars: { tmdb: ['11', '1891', '1892', '1893', '1894', '1895', '140607', '181808', '181812', '330459', '348350'] },
   theRoom: { tmdb: ['17473'] },
   lordOfTheRings: { tmdb: ['120', '121', '122'] },
   shrek: { tmdb: ['808'] },
@@ -63,6 +64,11 @@ function exactTitle(title) {
   return (item) => normalizeEasterEggTitle(item?.title) === expected;
 }
 
+function exactTitles(titles) {
+  const expected = new Set(titles.map(normalizeEasterEggTitle));
+  return (item) => expected.has(normalizeEasterEggTitle(item?.title));
+}
+
 function titleIncludes(phrase) {
   const expected = normalizeEasterEggTitle(phrase);
   return (item) => {
@@ -82,6 +88,20 @@ function titleStartsWith(phrase) {
   };
 }
 
+const matchesStandaloneStarWarsTitle = exactTitles([
+  'A New Hope',
+  'The Empire Strikes Back',
+  'Empire Strikes Back',
+  'Return of the Jedi',
+  'The Phantom Menace',
+  'Attack of the Clones',
+  'Revenge of the Sith',
+  'The Force Awakens',
+  'The Last Jedi',
+  'The Rise of Skywalker',
+  'Rogue One',
+]);
+
 const RULES = Object.freeze({
   everythingEverywhere: {
     providerIds: PROVIDER_IDS.everythingEverywhere,
@@ -92,7 +112,8 @@ const RULES = Object.freeze({
     fallback: exactTitle('Fight Club'),
   },
   starWars: {
-    fallback: titleIncludes('Star Wars'),
+    providerIds: PROVIDER_IDS.starWars,
+    fallback: (item) => titleIncludes('Star Wars')(item) || matchesStandaloneStarWarsTitle(item),
   },
   theRoom: {
     providerIds: PROVIDER_IDS.theRoom,
@@ -157,10 +178,10 @@ export function matchesEasterEgg(item, ruleName) {
 }
 
 export function drawerQuoteFor(item, { randomizer = false } = {}) {
+  if (!randomizer) return null;
   if (matchesEasterEgg(item, 'starWars')) return 'A surprise to be sure, but a welcome one.';
   if (matchesEasterEgg(item, 'theRoom')) return 'Anyway, how is your sex life?';
   if (matchesEasterEgg(item, 'lordOfTheRings')) return 'You have my sword.';
-  if (!randomizer) return null;
   if (matchesEasterEgg(item, 'theMatrix')) return 'The choice has already been made.';
   if (matchesEasterEgg(item, 'indianaJones')) return 'It had to be this one.';
   if (matchesEasterEgg(item, 'missionImpossible')) return 'Your mission, should you choose to accept it…';
