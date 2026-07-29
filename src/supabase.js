@@ -13,6 +13,7 @@ export async function supabaseRequest(path, { fresh = false, headers = {}, metho
     cache: fresh ? 'no-store' : 'default',
     headers: {
       apikey: SUPABASE_PUBLISHABLE_KEY,
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...headers,
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),

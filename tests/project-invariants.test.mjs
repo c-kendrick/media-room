@@ -20,7 +20,7 @@ import {
   sortTopmostWatchlistByInterest,
 } from '../src/supabase-data.js';
 import { completeShelfOrder } from '../src/media-write.js';
-import { canPersistSnapshot, invalidateLibrarySnapshot, sectionSnapshot } from '../src/section-cache.js';
+import { canPersistSnapshot, invalidateLibrarySnapshot, librarySnapshot, sectionSnapshot } from '../src/section-cache.js';
 import { createShelfDraft, dropIntoSlot, insertBeside, legacyVisualOrderToCanonical, moveToOverflow, moveToPosition, pairedShelfSegments, removeEmptyShelfSet, serializeShelfDraft, validateShelfDraft } from '../src/shelf-order.js';
 import { getDrawerNavigationTargets } from '../src/media-drawer-navigation.js';
 import { indexShelfItems, sortShelfItems } from '../src/media-index.js';
@@ -33,6 +33,7 @@ import {
 import { watchlistRequestMessage } from '../src/watchlist-requests.js';
 import { parseLightweightInline, parseLightweightMarkdown } from '../src/lightweight-markdown.js';
 import { bulkImportTerminology, chooseLibrary, copiedShelfName, libraryDefaults, validateLibraryDraft } from '../src/library-system.js';
+import { libraryRequestKey, libraryViewState, ScopedRequestRegistry, selectLibrarySnapshot } from '../src/library-loading.js';
 import {
   buildEverythingEverywhereSequence,
   claimFightClubSequence,
@@ -118,7 +119,7 @@ test('custom libraries are migrated non-destructively and shelf transfers stay a
   assert.doesNotMatch(migration, /insert into public\.media_reactions|insert into public\.watchlist_requests/);
   assert.doesNotMatch(app, /updateLibraryRoute|libraryRouteId|searchParams\.set\(['"]library/);
   assert.match(app, /<MediaView key=\{data\.collectionId\}/);
-  assert.match(app, /if \(!select\) return merged/);
+  assert.match(app, /if \(!select\) return snapshot/);
   assert.match(app, /const openBin = \(\) => \{\s*setBinOpen\(true\);\s*setBinLoading\(true\);/);
   assert.match(app, /onLoadLibrary\?\.\(library\.id, \{ select: false \}\)/);
   assert.match(app, /onLoadLibrary\(sourceLibraryId, \{ fresh: true, select: false \}\)/);
@@ -863,6 +864,28 @@ test('backup import execution is hardened and database errors reach the UI', asy
   }
 });
 
+test('Supabase RPC bodies are sent as JSON so PostgREST resolves named function arguments', async () => {
+  const originalFetch = globalThis.fetch;
+  let captured;
+  globalThis.fetch = async (url, options) => {
+    captured = { url, options };
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  try {
+    await supabaseRequest('/rest/v1/rpc/load_collection_library', {
+      method: 'POST',
+      body: { target_collection_id: 'collection-a', target_library_id: 'library-a' },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(captured.options.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(captured.options.body), {
+    target_collection_id: 'collection-a',
+    target_library_id: 'library-a',
+  });
+});
+
 test('backup import repairs older schemas missing provider metadata', async () => {
   const migration = await read('supabase/migrations/20260713120000_ensure_backup_external_ids.sql');
   assert.match(migration, /add column if not exists external_ids jsonb not null default '\{\}'::jsonb/);
@@ -915,7 +938,7 @@ test('custom libraries can be permanently deleted from the Bin without weakening
 
 test('shelf creation remains cache-authoritative after reload failures and stale library responses', async () => {
   const app = await read('src/App.jsx');
-  assert.match(app, /if \(sectionRequests\.current\.get\(requestKey\) !== request\) return loaded;/);
+  assert.match(app, /sectionRequests\.current\.run\([\s\S]*onResolve: \(loaded\) => mergeLoadedSection\(targetCollectionId, loaded\)/);
   assert.match(app, /const created = await createShelf[\s\S]*const row = created\?\.\[0\]/);
   assert.match(app, /loadedLibraries: \[\.\.\.new Set\([\s\S]*currentLibrary\.id/);
   assert.match(app, /mediaShelves: \[\.\.\.\(data\.mediaShelves \|\| \[\]\)\.filter[\s\S]*createdShelf\]/);
@@ -1840,7 +1863,7 @@ test('initial opening progresses from branding to a responsive skeleton without 
   assert.match(styles, /@media\(prefers-reduced-motion:reduce\)/);
 });
 
-test('collection loading is section-scoped, persistent, and selectively prefetched', async () => {
+test('collection loading is library-scoped, persistent, and free of unrelated startup prefetches', async () => {
   const app = await read('src/App.jsx');
   const data = await read('src/supabase-data.js');
   const cache = await read('src/section-cache.js');
@@ -1848,9 +1871,10 @@ test('collection loading is section-scoped, persistent, and selectively prefetch
 
   assert.match(app, /section: rememberedSection\.current/);
   assert.match(app, /memory\?\.loadedSections\?\.includes\(section\)/);
-  assert.match(app, /sectionRequests\.current\.get\(requestKey\)/);
-  assert.match(app, /scheduleIdle/);
-  assert.match(app, /onMouseOver=\{warmCollectionFromNav\} onFocusCapture=\{warmCollectionFromNav\} onPointerDown=\{warmCollectionFromNav\}/);
+  assert.match(app, /sectionRequests\.current\.run/);
+  assert.match(app, /readCachedSection\(\{ accountScope, collectionId: requestedCollectionId, libraryId \}\)/);
+  assert.doesNotMatch(app, /warmCollectionFromNav|startupKitRequest/);
+  assert.match(app, /selectedLibraryReady[\s\S]*sectionRequests\.current\.requests\.size > 0[\s\S]*scheduleIdle/);
   assert.doesNotMatch(app, /for \(const collection of displayedCollections\)/);
   assert.doesNotMatch(app, /for \(const section of MEDIA_SECTIONS\)[\s\S]*loadedSections\?\.includes\(section\)/);
   assert.match(app, /setOwnCollection\(collections\.find/);
@@ -1882,12 +1906,14 @@ test('Main Watchlist uses an account-and-club-scoped stale cache with a progress
   assert.match(app, /scope: targetCollectionId === MAIN_WATCHLIST_ID \? mainWatchlistCacheScope : 'collection'/);
   assert.match(app, /setCollectionLoading\(!cached\)/);
   assert.match(app, /const fetchMainWatchlist = \(\{ fresh = false \} = \{\}\) =>/);
-  assert.match(app, /scheduleIdle\(async \(\) => \{[\s\S]*collectionId: MAIN_WATCHLIST_ID[\s\S]*await fetchMainWatchlist\(\)/);
+  assert.match(app, /selectedLibraryReady[\s\S]*scheduleIdle\(\(\) => \{[\s\S]*fetchMainWatchlist\(\)/);
   assert.match(app, /<SectionLoadingState branded=\{data\.mainWatchlist\} \/>/);
   assert.match(app, /Opening Main Watchlist…/);
   assert.match(layout, /\.watchlist-loading-brand/);
   assert.match(layout, /\.watchlist-loading-skeleton\.is-detailed/);
   assert.match(data, /const \[publicProfiles, reactions, shelves, allInterestRows\] = await Promise\.all/);
+  assert.match(data, /loadPublicCollections\(\{ fresh, accessToken, ownerIds: scopedOwnerIds \}\)/);
+  assert.match(data, /user_id: 'in\.\(' \+ scopedOwnerIds\.join\(','\) \+ '\)'/);
   assert.doesNotMatch(data, /candidateMemberships|candidateMediaItems/);
 });
 
@@ -1953,6 +1979,123 @@ test('invalidating a moved shelf destination forces its next library load to ref
   assert.deepEqual(snapshot.loadedLibraries, ['books', 'comics', 'games']);
 });
 
+test('library loading transitions never confuse pending or failed reads with a genuine empty library', () => {
+  assert.equal(libraryViewState({
+    request: { status: 'loading' },
+    hasData: false,
+    confirmedLoaded: false,
+  }), 'loading');
+  assert.equal(libraryViewState({
+    request: { status: 'restoring' },
+    hasData: false,
+    confirmedLoaded: false,
+  }), 'loading');
+  assert.equal(libraryViewState({
+    request: { status: 'success' },
+    hasData: false,
+    confirmedLoaded: true,
+  }), 'empty');
+  assert.equal(libraryViewState({
+    request: { status: 'error', error: 'Network failed' },
+    hasData: false,
+    confirmedLoaded: false,
+  }), 'error');
+  assert.equal(libraryViewState({
+    request: { status: 'loading' },
+    hasData: true,
+    confirmedLoaded: true,
+  }), 'content');
+  assert.equal(libraryViewState({
+    request: { status: 'error', error: 'Refresh failed' },
+    hasData: true,
+    confirmedLoaded: true,
+  }), 'content-error');
+});
+
+test('library request deduplication is scoped and stale out-of-order completions cannot publish', async () => {
+  const registry = new ScopedRequestRegistry({ timeoutMs: 0 });
+  const published = [];
+  let resolveOld;
+  let resolveNew;
+  let resolveOther;
+  const old = registry.run('user-a:collection-a:films', () => new Promise((resolve) => { resolveOld = resolve; }), {
+    onResolve: (value) => published.push(value),
+  });
+  const duplicate = registry.run('user-a:collection-a:films', () => Promise.resolve('duplicate'));
+  assert.equal(duplicate, old);
+  const other = registry.run('user-a:collection-a:books', () => new Promise((resolve) => { resolveOther = resolve; }), {
+    onResolve: (value) => published.push(value),
+  });
+  const replacement = registry.run('user-a:collection-a:films', () => new Promise((resolve) => { resolveNew = resolve; }), {
+    supersede: true,
+    onResolve: (value) => published.push(value),
+  });
+
+  resolveNew('new films');
+  resolveOther('books');
+  await Promise.all([replacement, other]);
+  resolveOld('stale films');
+  await old;
+
+  assert.deepEqual(published, ['new films', 'books']);
+  assert.equal(registry.requests.size, 0);
+  assert.notEqual(
+    libraryRequestKey('user-a', 'collection-a', 'films'),
+    libraryRequestKey('user-b', 'collection-a', 'films'),
+  );
+  assert.notEqual(
+    libraryRequestKey('user-a', 'collection-a', 'films'),
+    libraryRequestKey('user-a', 'collection-b', 'films'),
+  );
+});
+
+test('rapid library switching selects only the requested library and cache snapshots stay isolated', () => {
+  const snapshot = {
+    storage: 'supabase',
+    collectionId: 'collection-a',
+    libraries: [
+      { id: 'films', name: 'Film & TV', type: 'screen' },
+      { id: 'books', name: 'Books', type: 'book' },
+    ],
+    selectedLibrary: { id: 'films', name: 'Film & TV', type: 'screen' },
+    loadedLibraries: ['films', 'books'],
+    detailedLibraries: [],
+    mediaShelves: [
+      { shelf_id: 'film-shelf', library_id: 'films' },
+      { shelf_id: 'book-shelf', library_id: 'books' },
+    ],
+    media: [
+      { database_id: 'film', library_id: 'films', lists: ['film-shelf'], list_positions: { 'film-shelf': 1 } },
+      { database_id: 'book', library_id: 'books', lists: ['book-shelf'], list_positions: { 'book-shelf': 1 } },
+    ],
+  };
+  const booksSelected = selectLibrarySnapshot(snapshot, 'books');
+  const filmsSelected = selectLibrarySnapshot(booksSelected, 'films');
+  assert.equal(booksSelected.selectedLibrary.id, 'books');
+  assert.equal(filmsSelected.selectedLibrary.id, 'films');
+
+  const booksCache = librarySnapshot(snapshot, 'books');
+  const filmsCache = librarySnapshot(snapshot, 'films');
+  assert.deepEqual(booksCache.mediaShelves.map((row) => row.shelf_id), ['book-shelf']);
+  assert.deepEqual(booksCache.media.map((row) => row.database_id), ['book']);
+  assert.deepEqual(filmsCache.mediaShelves.map((row) => row.shelf_id), ['film-shelf']);
+  assert.deepEqual(filmsCache.media.map((row) => row.database_id), ['film']);
+});
+
+test('authenticated startup and Main Watchlist navigation do not initialise collection library caches', async () => {
+  const app = await read('src/App.jsx');
+  assert.doesNotMatch(app, /loadSection\(remembered\.section/);
+  assert.match(app, /selectedLibraryReady[\s\S]*sectionRequests\.current\.requests\.size > 0[\s\S]*fetchMainWatchlist/);
+  assert.match(app, /initialLibraryId[\s\S]*readLastLibrary\(targetCollectionId\)/);
+  assert.match(app, /selectLibrarySnapshot\(scopedSnapshot, initialLibraryId\)/);
+  assert.match(app, /const requestKey = libraryRequestKey\(accountScope, targetCollectionId, libraryId \|\| section\)/);
+  assert.match(app, /mediaRoomNavigation: \{ collectionId: requestedCollectionId, libraryId, section:/);
+  assert.match(app, /window\.addEventListener\('popstate', restoreNavigation\)/);
+  assert.match(app, /loadLibrary\(routeLibraryId, \{ collection: route\.collectionId \}\)/);
+  assert.match(app, /role="alert"[\s\S]*onRetryLibrary/);
+  assert.match(app, /loadView === 'empty'[\s\S]*Create a shelf in \$\{currentLibrary\?\.name \|\| 'this library'\}/);
+});
+
 test('section snapshot merging is idempotent and heals cache-network duplicates', async () => {
   const app = await read('src/App.jsx');
   const screen = {
@@ -1980,7 +2123,7 @@ test('section snapshot merging is idempotent and heals cache-network duplicates'
   assert.deepEqual(repeated.media.map((row) => row.database_id), ['screen-item', 'book-item']);
   assert.deepEqual(healed.mediaShelves.map((row) => row.shelf_id), ['screen-shelf', 'book-shelf']);
   assert.deepEqual(healed.media.map((row) => row.database_id), ['screen-item', 'book-item']);
-  assert.match(app, /mergeLoadedSection\(targetCollectionId, loaded\);\s*return loaded;/);
+  assert.match(app, /onResolve: \(loaded\) => mergeLoadedSection\(targetCollectionId, loaded\)/);
 });
 
 test('drawer details load once while posters use tiered viewport prioritisation', async () => {
@@ -2012,8 +2155,9 @@ test('static fallback snapshots cannot trigger live-only search or background re
   assert.match(dataSource, /withStaticLibraries\(await response\.json\(\)\),\s*[\s\S]*storage: 'static'/);
   assert.match(app, /dataRef\.current\?\.storage !== 'supabase'/);
   assert.match(app, /data\.storage !== 'supabase'/);
-  assert.match(app, /loadedSnapshot = startupKitRequest\.current && !fresh[\s\S]*await startupKitRequest\.current/);
-  assert.match(cache, /SECTION_CACHE_VERSION = 5/);
+  assert.doesNotMatch(app, /startupKitRequest|warmCollectionFromNav/);
+  assert.match(app, /data\?\.loadedSections\?\.includes\(rememberedSection\.current\)/);
+  assert.match(cache, /SECTION_CACHE_VERSION = 6/);
 });
 
 test('shelf indexing performs one membership pass while preserving positions and source order', () => {
@@ -2088,7 +2232,9 @@ test('loading skeletons use the same seven-card desktop geometry and poster rati
     read('src/public.css'),
   ]);
   assert.match(app, /\[0, 1, 2, 3, 4, 5, 6\]\.map/);
-  assert.match(layout, /\.section-loading-posters \{[^}]*repeat\(7, var\(--media-card-width\)\)/);
+  assert.match(layout, /\.section-loading-posters \{[^}]*repeat\(7, minmax\(var\(--shelf-card-min\), 1fr\)\)/);
+  assert.match(layout, /\.section-loading-posters \{[^}]*min-width: var\(--shelf-segment-min\)/);
+  assert.match(layout, /\.section-loading-posters \.skeleton-poster \{[^}]*aspect-ratio: 2 \/ 2\.96/);
   assert.match(publicStyles, /\.skeleton-card-grid\{[^}]*repeat\(7,minmax\(0,1fr\)\)/);
   assert.match(publicStyles, /\.skeleton-poster\{[^}]*aspect-ratio:2\/2\.96/);
   assert.match(publicStyles, /\.skeleton-card-grid\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);

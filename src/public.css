@@ -884,9 +884,11 @@
 .bin-loading>span,.bin-load-error>span{display:grid;gap:4px}.bin-loading strong,.bin-load-error strong{font-family:var(--serif);font-size:14px;color:#4b3d36}.bin-loading small,.bin-load-error small{font-size:9px;line-height:1.45}
 .bin-loading>svg{color:#8b503f;animation:bin-spin 1.2s linear infinite}
 .bin-load-error{border-color:#d5b8b1;color:#8d4a42}.bin-load-error button{margin-left:auto;min-height:34px;border:1px solid #c7a49c;border-radius:4px;background:transparent;color:#7d4039;padding:0 11px;cursor:pointer}
+.library-load-error{display:flex;align-items:center;gap:14px;margin:20px 0;padding:15px 17px;border:1px solid #d5b8b1;border-left:5px solid #a85d4e;background:rgba(249,236,231,.72);color:#7d4039}.library-load-error>span{display:grid;gap:4px;min-width:0;flex:1}.library-load-error strong{font-family:var(--serif);font-size:16px;color:#4b3d36}.library-load-error small{font-size:9px;line-height:1.45}.library-load-error button{min-height:34px;border:1px solid #c7a49c;border-radius:4px;background:#fffaf2;color:#7d4039;padding:0 12px;cursor:pointer}
 @keyframes bin-spin{to{transform:rotate(360deg)}}
 
 @media(max-width:760px){
+.library-load-error{align-items:flex-start;flex-direction:column}.library-load-error button{width:100%}
   .library-header-controls{align-items:stretch;justify-content:flex-start}
   .library-selector{order:-1;flex:1 1 100%;max-width:none;margin:0 0 2px}
   .library-create-button,.library-text-action{flex:1 1 0;justify-content:center!important}
