@@ -32,7 +32,7 @@ import {
 } from '../src/poster-observer.js';
 import { watchlistRequestMessage } from '../src/watchlist-requests.js';
 import { parseLightweightInline, parseLightweightMarkdown } from '../src/lightweight-markdown.js';
-import { bulkImportTerminology, chooseLibrary, copiedShelfName, libraryDefaults, validateLibraryDraft } from '../src/library-system.js';
+import { bulkImportTerminology, chooseLibrary, copiedShelfName, libraryDefaults, libraryTypeLabel, validateLibraryDraft } from '../src/library-system.js';
 import { libraryRequestKey, libraryViewState, ScopedRequestRegistry, selectLibrarySnapshot } from '../src/library-loading.js';
 import {
   buildEverythingEverywhereSequence,
@@ -59,6 +59,8 @@ test('custom library helpers provide deterministic defaults, routing, validation
     creator: 'Creator',
     mediaTypes: ['other'],
   });
+  assert.equal(libraryTypeLabel('other'), 'Other');
+  assert.equal(libraryTypeLabel('unknown'), 'Other');
   const libraries = [
     { id: 'custom', name: 'Anime', type: 'screen', protected: false, position: 40 },
     { id: 'film', name: 'Film & TV', type: 'screen', protected: true, position: 10 },
@@ -202,7 +204,7 @@ test('bulk imports remain owner-only and section constrained', async () => {
 test('responsive media controls use shrink-safe grids', async () => {
   const styles = await read('src/public.css');
   assert.match(styles, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-  assert.match(styles, /\.public-media-command,\.media-filters,\.media-search,\.multi-select\{min-width:0/);
+  assert.match(styles, /\.public-media-command,\.media-search,\.multi-select\{min-width:0/);
 });
 
 test('Main Watchlist demand counts each person once across shelves, copies, and stamps', () => {
@@ -797,8 +799,6 @@ test('book cards show the author while drawer and filters retain format', async 
 
 test('ownership filtering is available everywhere and matches Owned and Unowned explicitly', async () => {
   const app = await read('src/App.jsx');
-  const styles = await read('src/media-layout.css');
-
   assert.deepEqual(OWNERSHIP_FILTER_OPTIONS, [['owned', 'Owned'], ['unowned', 'Unowned']]);
   assert.equal(matchesOwnership(true, []), true);
   assert.equal(matchesOwnership(false, []), true);
@@ -811,7 +811,6 @@ test('ownership filtering is available everywhere and matches Owned and Unowned 
   assert.match(app, /matchesOwnership\(item\.owned, ownershipFilters\)/);
   assert.match(app, /MultiSelect label="Ownership"[\s\S]*OWNERSHIP_FILTER_OPTIONS/);
   assert.doesNotMatch(app, /data\.mainWatchlist && <MultiSelect label="Ownership"/);
-  assert.match(styles, /repeat\(6, minmax\(128px, auto\)\)/);
 });
 
 test('exported backups can be validated and imported through the owner-only merge workflow', async () => {
@@ -1788,7 +1787,6 @@ test('mobile page width is constrained while poster shelves keep their own horiz
 test('mobile shelves and two-row search results share three-card sizing without sacrificing collision safety', async () => {
   const app = await read('src/App.jsx');
   const mediaStyles = await read('src/media-layout.css');
-  const publicStyles = await read('src/public.css');
 
   assert.match(mediaStyles, /--mobile-media-card-width: clamp\(82px, calc\(\(100vw - 76px\) \/ 3\), 108px\)/);
   assert.match(mediaStyles, /--shelf-card-min: var\(--mobile-media-card-width\)/);
@@ -1800,7 +1798,6 @@ test('mobile shelves and two-row search results share three-card sizing without 
   assert.match(mediaStyles, /@container shelf-card \(max-width: 76px\)[\s\S]*\.star-half \{ width: 3px/);
   assert.match(mediaStyles, /@container shelf-card \(max-width: 56px\)[\s\S]*flex-direction: column/);
   assert.match(mediaStyles, /grid-template-rows: repeat\(2, auto\)/);
-  assert.match(publicStyles, /\.media-tabs\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)!important\}/);
   assert.match(app, /shelfNeedsUniformReactionWrap[\s\S]*starWidth \+ reactionWidth \+ inlineGap > row\.clientWidth/);
   assert.match(app, /uniformReactionWrap && 'uniform-reaction-wrap'/);
 });
@@ -1829,7 +1826,7 @@ test('media filters live in an Advanced Search dialog and mobile top-bar icons a
   assert.match(styles, /\.media-search-row>\.media-search\{grid-column:1;grid-row:1\}/);
   assert.match(styles, /\.media-search-row>\.advanced-search-trigger\{grid-column:2;grid-row:1;min-width:0\}/);
   assert.doesNotMatch(styles, /@media\(max-width:1200px\) and \(min-width:761px\)[\s\S]*?\n\s*\.media-search\{grid-column:1\/-1!important\}/);
-  assert.match(styles, /\.media-filters \.media-search\{grid-column:1\/-1!important\}/);
+  assert.doesNotMatch(styles, /\.media-tabs(?:[.{:\s])|\.media-filters(?:[.{:\s])/);
   assert.match(styles, /\.share-collection-button,\.topbar-action-button,\.account-button\{[^}]*display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:0!important/);
 });
 
@@ -2126,13 +2123,17 @@ test('section snapshot merging is idempotent and heals cache-network duplicates'
   assert.match(app, /onResolve: \(loaded\) => mergeLoadedSection\(targetCollectionId, loaded\)/);
 });
 
-test('drawer details load once while posters use tiered viewport prioritisation', async () => {
+test('drawer detail requests deduplicate in flight without retaining stale results', async () => {
   const app = await read('src/App.jsx');
   const layout = await read('src/media-layout.css');
   const posterObserver = await read('src/poster-observer.js');
   assert.match(app, /detailRequests\.current\.get\(mediaItemId\)/);
   assert.match(app, /loadMediaDetails\(\{ mediaItemId, accessToken \}\)/);
+  assert.match(app, /detailRequests\.current\.get\(mediaItemId\) === request/);
+  assert.match(app, /sectionDetailRequests\.current\.get\(requestKey\) === request/);
   assert.match(app, /details_loaded: true/);
+  assert.match(app, /setPosterCandidates\(null\);[\s\S]*setPosterReviewOpen\(false\);[\s\S]*\}, \[item\.database_id\]\)/);
+  assert.match(app, /currentItemId\.current === requestedItemId/);
   assert.match(app, /function ProgressivePoster/);
   assert.match(app, /observeNearbyPoster/);
   assert.match(app, /eagerPoster=\{eagerPosters && segmentIndex === 0\}/);
@@ -2485,9 +2486,7 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.doesNotMatch(mediaShelf, /main-watchlist-toggle|Include this in Main Watchlist/);
   assert.match(styles, /\.shelf-heading-copy h2\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);
   assert.match(styles, /\.media-command-heading h1\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);
-  assert.match(styles, /\.main-owner-intro h2\{[^}]*color:var\(--brand-brown\);font-family:var\(--brand-serif\);font-size:30px/);
-  assert.match(styles, /@media\(max-width:560px\)[\s\S]*\.main-owner-intro h2\{font-size:25px\}/);
-  assert.match(styles, /@media\(max-width:580px\)\{\.shelf-heading-copy h2,\.media-command-heading h1\{font-size:25px\}\.media-command-heading h1,\.main-owner-intro h2\{text-align:right\}\.watchlist-title-selector\{margin-left:auto\}\}/);
+  assert.match(styles, /@media\(max-width:580px\)\{\.shelf-heading-copy h2,\.media-command-heading h1\{font-size:25px\}\.media-command-heading h1\{text-align:right\}\.watchlist-title-selector\{margin-left:auto\}\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-title\{width:100%;justify-content:flex-end;text-align:right\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-heading-copy\{justify-items:end\}/);
   assert.match(styles, /@media\(max-width:580px\)[\s\S]*\.shelf-actions\{[^}]*display:flex!important;flex-direction:column;flex-wrap:nowrap!important;align-items:flex-end!important;[^}]*gap:7px!important;[^}]*padding-left:0!important/);

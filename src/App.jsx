@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowDown,
@@ -83,7 +83,7 @@ import {
   respondWatchlistRequest,
   watchlistRequestMessage,
 } from './watchlist-requests.js';
-import { bulkImportTerminology, copiedShelfName, filmLibrary, libraryDefaults, libraryMemoryKey, LIBRARY_TYPE_DETAILS, LIBRARY_TYPES, validateLibraryDraft } from './library-system.js';
+import { bulkImportTerminology, copiedShelfName, filmLibrary, libraryDefaults, libraryMemoryKey, libraryTypeLabel, LIBRARY_TYPE_DETAILS, LIBRARY_TYPES, validateLibraryDraft } from './library-system.js';
 
 function cls(...values) {
   return values.filter(Boolean).join(' ');
@@ -1047,13 +1047,15 @@ export default function App() {
     const requestKey = `${requestedAccountScope}:${requestedCollectionId}:${requestedLibraryId || section}`;
     let request = sectionDetailRequests.current.get(requestKey);
     if (!request) {
-      request = loadSectionDetails({ collectionId: requestedCollectionId, section, libraryId: requestedLibraryId, accessToken }).catch((error) => {
-        sectionDetailRequests.current.delete(requestKey);
-        throw error;
-      });
+      request = loadSectionDetails({ collectionId: requestedCollectionId, section, libraryId: requestedLibraryId, accessToken });
       sectionDetailRequests.current.set(requestKey, request);
     }
-    const rows = await request;
+    let rows;
+    try {
+      rows = await request;
+    } finally {
+      if (sectionDetailRequests.current.get(requestKey) === request) sectionDetailRequests.current.delete(requestKey);
+    }
     if (previousAccountScope.current && previousAccountScope.current !== requestedAccountScope) return dataRef.current;
     const target = dataRef.current?.collectionId === requestedCollectionId
       ? dataRef.current
@@ -1514,8 +1516,9 @@ export default function App() {
       setData(next);
       for (const [key, snapshot] of snapshotCache.current) snapshotCache.current.set(key, applyDetails(snapshot));
     }).catch(() => {
-      detailRequests.current.delete(mediaItemId);
       setToast('Full item details could not be loaded.');
+    }).finally(() => {
+      if (detailRequests.current.get(mediaItemId) === request) detailRequests.current.delete(mediaItemId);
     });
   }, [selectedMedia?.database_id, selectedMedia?.details_loaded, accessToken]);
 
@@ -2225,7 +2228,7 @@ function MediaView({ data, loading = false, loadError = '', libraryLoadState = n
     shelfId: shelf.shelf_id,
     itemIds: (contentItemsByShelf.get(shelf.shelf_id) || []).map((item) => item.item_id),
   }));
-  const sectionLabel = data.mainWatchlist ? 'Main Watchlist' : currentLibrary?.name || (section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : section === 'game' ? 'Video Games' : 'Other');
+  const sectionLabel = data.mainWatchlist ? 'Main Watchlist' : currentLibrary?.name || libraryTypeLabel(section);
   const singularLabel = data.mainWatchlist ? 'item' : (currentLibrary?.singular || libraryDefaults(section).singular).toLocaleLowerCase();
   const canReorderShelves = canEdit || Boolean(data.mainWatchlist && isAdmin);
   const reorderableShelves = shelves.filter((shelf) => !shelf.virtual);
@@ -2250,21 +2253,6 @@ function MediaView({ data, loading = false, loadError = '', libraryLoadState = n
   useEffect(() => {
     if (query.trim()) onEnsureSectionDetails?.(section).catch(() => notify('Some detailed search fields could not be loaded.'));
   }, [query, section]);
-
-  const switchSection = (next) => {
-    if (next === section) return;
-    setSection(next);
-    onSectionChange(next);
-    setQuery('');
-    setListFilters([]);
-    setFormatFilters([]);
-    setGenreFilters([]);
-    setTypeFilters([]);
-    setRatingFilters([]);
-    setOwnershipFilters([]);
-    setStampFilters([]);
-    void onLoadSection?.(next).catch(() => notify(`${sectionName(next)} could not be loaded.`));
-  };
 
   const switchLibrary = (libraryId) => {
     if (!libraryId || libraryId === currentLibrary?.id) return;
@@ -2947,8 +2935,6 @@ function CollectionBinDrawer({ loading = false, error = '', onRetry, libraries =
     setBusyId(id);
     try { await action(); } catch (error) { onError(error?.message ? `Bin update failed: ${error.message}` : 'That Bin item could not be updated.'); } finally { setBusyId(null); }
   };
-  const sectionName = (section) => section === 'screen' ? 'Film & TV' : section === 'book' ? 'Books' : 'Video Games';
-
   return createPortal(<div className="drawer-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <aside className="collection-bin-drawer">
       <button className="close" type="button" onClick={onClose} aria-label="Close Bin"><X /></button>
@@ -2963,12 +2949,12 @@ function CollectionBinDrawer({ loading = false, error = '', onRetry, libraries =
       </div></section>}
       {media.length > 0 && <section className="bin-group"><header><span>MEDIA</span><small>{media.length}</small></header><div className="bin-list">
         {media.map((item) => <article className="bin-row-card" key={item.database_id}>
-          <button className="bin-item-main" onClick={() => onOpenMedia(item.item_id)}>{item.poster_url ? <img src={item.poster_url} alt="" /> : <span className="bin-poster-fallback"><Clapperboard size={14} /></span>}<span><strong>{cleanImportedMediaTitle(item.title)}</strong><small>{sectionName(mediaSection(item))}{item.year ? ` · ${item.year}` : ''}</small></span></button>
+          <button className="bin-item-main" onClick={() => onOpenMedia(item.item_id)}>{item.poster_url ? <img src={item.poster_url} alt="" /> : <span className="bin-poster-fallback"><Clapperboard size={14} /></span>}<span><strong>{cleanImportedMediaTitle(item.title)}</strong><small>{libraryTypeLabel(mediaSection(item))}{item.year ? ` · ${item.year}` : ''}</small></span></button>
           <div className="bin-row-actions"><button disabled={busyId === item.database_id} onClick={() => run(item.database_id, () => onRestoreMedia(item))}><RotateCw size={13} />Restore</button><button className="permanent" disabled={busyId === item.database_id} onClick={() => run(item.database_id, () => onDeleteMedia(item))}><Trash2 size={13} />Delete forever</button></div>
         </article>)}
       </div></section>}
       {shelves.length > 0 && <section className="bin-group"><header><span>SHELVES</span><small>{shelves.length}</small></header><div className="bin-list">
-        {shelves.map((shelf) => <article className="bin-row-card shelf" key={shelf.shelf_id}><div className="bin-item-main"><span className="bin-shelf-mark"><ListOrdered size={15} /></span><span><strong>{shelf.name}</strong><small>{sectionName(shelf.section)}</small></span></div><div className="bin-row-actions"><button disabled={busyId === shelf.shelf_id} onClick={() => run(shelf.shelf_id, () => onRestoreShelf(shelf))}><RotateCw size={13} />Restore</button><button className="permanent" disabled={busyId === shelf.shelf_id} onClick={() => run(shelf.shelf_id, () => onDeleteShelf(shelf))}><Trash2 size={13} />Delete forever</button></div></article>)}
+        {shelves.map((shelf) => <article className="bin-row-card shelf" key={shelf.shelf_id}><div className="bin-item-main"><span className="bin-shelf-mark"><ListOrdered size={15} /></span><span><strong>{shelf.name}</strong><small>{libraryTypeLabel(shelf.section)}</small></span></div><div className="bin-row-actions"><button disabled={busyId === shelf.shelf_id} onClick={() => run(shelf.shelf_id, () => onRestoreShelf(shelf))}><RotateCw size={13} />Restore</button><button className="permanent" disabled={busyId === shelf.shelf_id} onClick={() => run(shelf.shelf_id, () => onDeleteShelf(shelf))}><Trash2 size={13} />Delete forever</button></div></article>)}
       </div></section>}
     </aside>
   </div>, document.body);
@@ -3102,9 +3088,18 @@ function MediaDrawer({ item, randomizerSelected = false, shelves, onClose, previ
   const [posterReviewOpen, setPosterReviewOpen] = useState(false);
   const [detailReviewOpen, setDetailReviewOpen] = useState(false);
   const [shelvesOpen, setShelvesOpen] = useState(false);
+  const currentItemId = useRef(item.database_id);
+  currentItemId.current = item.database_id;
   useEscape(onClose, !editing && !posterReviewOpen && !detailReviewOpen && !shelvesOpen && !watchlistRequest);
   useEffect(() => { setOptimisticOwned(Boolean(item.owned)); }, [item.owned, item.database_id]);
   useEffect(() => { optimisticShelvesRef.current = item.lists || []; setOptimisticShelves(item.lists || []); }, [item.lists, item.database_id]);
+  useEffect(() => {
+    setPosterCandidates(null);
+    setPosterReviewBusy(false);
+    setPosterReviewError('');
+    setPosterReviewOpen(false);
+    setDetailReviewOpen(false);
+  }, [item.database_id]);
   const tags = mediaDisplayTags(item);
   const title = cleanImportedMediaTitle(item.title);
   const easterEggQuote = drawerQuoteFor(item, { randomizer: randomizerSelected });
@@ -3181,7 +3176,7 @@ function MediaDrawer({ item, randomizerSelected = false, shelves, onClose, previ
         setEditing(false);
       }} />}
       {shelvesOpen && <ShelfMembershipDialog collectionTitle={sourceCollectionTitle} itemTitle={title} shelves={shelves} selectedShelfIds={optimisticShelves} canEdit={canEdit} onToggle={toggleShelf} onClose={() => setShelvesOpen(false)} />}
-      {posterReviewOpen && <PosterEnrichmentDialog item={item} candidates={posterCandidates} busy={posterReviewBusy} error={posterReviewError} onClose={() => setPosterReviewOpen(false)} onLoad={async () => { setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); setPosterCandidates(result?.candidates || []); } catch (error) { setPosterReviewError(error?.message || 'Provider candidates could not be loaded.'); } finally { setPosterReviewBusy(false); } }} onChoose={(candidate) => { setPosterReviewOpen(false); setPosterReviewBusy(false); setPosterReviewError(''); onChoosePoster(candidate.poster_url).catch(() => null); }} />}
+      {posterReviewOpen && <PosterEnrichmentDialog item={item} candidates={posterCandidates} busy={posterReviewBusy} error={posterReviewError} onClose={() => setPosterReviewOpen(false)} onLoad={async () => { const requestedItemId = item.database_id; setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); if (currentItemId.current === requestedItemId) setPosterCandidates(result?.candidates || []); } catch (error) { if (currentItemId.current === requestedItemId) setPosterReviewError(error?.message || 'Provider candidates could not be loaded.'); } finally { if (currentItemId.current === requestedItemId) setPosterReviewBusy(false); } }} onChoose={(candidate) => { setPosterReviewOpen(false); setPosterReviewBusy(false); setPosterReviewError(''); onChoosePoster(candidate.poster_url).catch(() => null); }} />}
       {detailReviewOpen && <DetailEnrichmentDialog item={item} onClose={() => setDetailReviewOpen(false)} onLoad={onFindDetails} onChoose={async (candidate) => { await onChooseDetails(candidate); setDetailReviewOpen(false); }} />}
       {watchlistRequest && <WatchlistRequestDialog request={watchlistRequest} shelves={shelves} busy={watchlistRequestBusy} onRespond={onRespondWatchlistRequest} onDismiss={onDismissWatchlistRequest} />}
     </div>

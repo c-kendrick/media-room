@@ -11,6 +11,10 @@ export function libraryDefaults(type) {
   return LIBRARY_TYPE_DETAILS[type] || LIBRARY_TYPE_DETAILS.other;
 }
 
+export function libraryTypeLabel(type) {
+  return libraryDefaults(type).label;
+}
+
 export function libraryTypeForMedia(mediaType) {
   if (mediaType === 'book') return 'book';
   if (mediaType === 'game') return 'game';
