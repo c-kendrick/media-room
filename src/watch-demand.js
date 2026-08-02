@@ -47,6 +47,7 @@ export function buildWatchGroupIdentities(mediaItems) {
 
 export function buildWatchDemand(mediaItems, collections, interests, profiles, virtualMediaIds = null) {
   const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
+  const collectionByOwnerId = new Map(collections.map((collection) => [collection.owner_id, collection]));
   const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
   const identityByMediaId = buildWatchGroupIdentities(mediaItems);
   const virtualMediaIdSet = virtualMediaIds ? new Set(virtualMediaIds) : null;
@@ -68,7 +69,7 @@ export function buildWatchDemand(mediaItems, collections, interests, profiles, v
   return new Map(mediaItems.map((item) => {
     const people = [...(peopleByIdentity.get(identityByMediaId.get(item.id)) || [])].map((id) => {
       const profile = profileById.get(id);
-      const collection = collections.find((entry) => entry.owner_id === id);
+      const collection = collectionByOwnerId.get(id);
       const fallbackName = collection?.title?.replace(/['\u2019]s Collection$/i, '') || 'Member';
       return profile || { id, username: `member-${String(id).slice(0, 8)}`, display_name: fallbackName };
     });
