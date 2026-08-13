@@ -117,6 +117,14 @@ export function createMediaItem(accessToken, item) {
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', Prefer: 'return=representation' } });
 }
 
+export function createCollaborativeShelfItem(accessToken, shelfId, item) {
+  return supabaseRequest('/rest/v1/rpc/create_collaborative_shelf_item', {
+    method: 'POST', fresh: true,
+    body: { target_shelf_id: shelfId, item_payload: item },
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+  });
+}
+
 export function permanentlyDeleteMedia(accessToken, databaseId) {
   return supabaseRequest('/rest/v1/media_items?id=eq.' + encodeURIComponent(databaseId), {
     method: 'DELETE', fresh: true,
