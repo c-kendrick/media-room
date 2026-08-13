@@ -45,7 +45,7 @@ import {
 import { loadMediaSnapshot } from './data.js';
 import { appSiteUrl, consumeRecoverySessionFromUrl, loadAuthenticatedAccount, registerWithPassword, requestPasswordRecovery, signInWithPassword, signOut, signupRateLimitDetails, updateDisplayName, updatePassword } from './auth.js';
 import { loadCollectionLibraries, loadLibraryDeletionImpact, loadMediaDetails, loadPublicCollections, loadSectionDetails, mergeSectionSnapshot } from './supabase-data.js';
-import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, copyShelfToLibrary, createLibrary, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, moveShelfToLibrary, permanentlyDeleteLibrary, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderLibraryShelves, reorderMainWatchlist, reorderShelfMedia, searchDetailCandidates, searchPosterCandidates, setMediaDeleted, setMediaStarRating, updateLibrary, updateMediaItem, updateShelf } from './media-write.js';
+import { bulkImportMedia, chooseDetailCandidate, choosePosterCandidate, copyShelfToLibrary, createCollaborativeShelfItem, createLibrary, createMediaItem, createShelf, deleteShelf, enrichSectionDetails, enrichSectionPosters, importCollectionBackup, moveShelfToLibrary, permanentlyDeleteLibrary, permanentlyDeleteMedia, replaceMediaShelfMemberships, reorderCollections, reorderLibraryShelves, reorderMainWatchlist, reorderShelfMedia, searchDetailCandidates, searchPosterCandidates, setMediaDeleted, setMediaStarRating, updateLibrary, updateMediaItem, updateShelf } from './media-write.js';
 import { approveProfile, createClub, deactivateProfile, deleteClub, listClubs, listProfiles, rejectProfile, renameClub, restoreProfile, setUserClubs } from './admin.js';
 import { matchesStarRatings, normalizeStarRating, STAR_RATING_STEPS } from './star-rating.js';
 import { applyShelfMemberships, OPTIMISTIC_APPEND_POSITION } from './shelf-membership.js';
@@ -53,7 +53,7 @@ import { SECTION_NOTE_DEFAULTS } from './section-notes.js';
 import { matchesOwnership, OWNERSHIP_FILTER_OPTIONS } from './ownership-filter.js';
 import { BACKUP_IMPORT_LIMITS, parseCollectionBackup } from './backup-import.js';
 import { buildCollectionShareUrl, buildPublicCollectionUrl, createCollectionShare, deleteCollectionShare, getCollectionShare, getPublicCollectionStatus, loadPublicCollection, loadSharedCollection, readPublicCollectionUsername, readShareToken, restorePublicCollectionRoute, setCollectionShareEnabled, setPublicCollectionOpen } from './collection-share.js';
-import { cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUserHub, removeClubMember, requestFriend, respondClubInvitation, respondFriendRequest, transferClubOwnership, unfriend } from './social.js';
+import { acknowledgeShelfCollaboration, cancelFriendRequest, createMemberClub, inviteToClub, leaveClub, loadUserHub, removeClubMember, requestFriend, respondClubInvitation, respondFriendRequest, setShelfCollaborator, transferClubOwnership, unfriend } from './social.js';
 import { applyMainWatchlistInterest, applyReactionToSnapshot, mediaReactionIdentity, priorityInterestPresentation, setMediaLoveBatch, setMediaReaction } from './media-reactions.js';
 import { avatarToneClass, clubInitials, collectionOwnerIdentity, personDisplayName, personInitial } from './identity.js';
 import { clearCachedAccount, deleteCachedSection, invalidateLibrarySnapshot, readCachedSection, writeCachedSnapshot } from './section-cache.js';
@@ -551,6 +551,7 @@ export default function App() {
   const [watchlistRequestListOpen, setWatchlistRequestListOpen] = useState(false);
   const [watchlistRequestActions, setWatchlistRequestActions] = useState(null);
   const [watchlistRequestBusy, setWatchlistRequestBusy] = useState(false);
+  const [collaborationInvitePopup, setCollaborationInvitePopup] = useState(null);
   const [mainWatchlistClubId, setMainWatchlistClubId] = useState(() => window.localStorage.getItem(MAIN_WATCHLIST_CLUB_KEY) || '');
   const [viewAsAdmin, setViewAsAdmin] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
@@ -617,6 +618,7 @@ export default function App() {
   const latestRequest = useRef(0);
   const userSelectedCollection = useRef(false);
   const requestLoginHandled = useRef('');
+  const collaborationLoginHandled = useRef('');
   const requestReturnToList = useRef(false);
   const pendingRequestOpenVersion = useRef(0);
   const rememberedSection = useRef('screen');
@@ -1333,6 +1335,37 @@ export default function App() {
     return nextHub;
   };
 
+  const acknowledgeCollaborationInvite = async (notification) => {
+    if (!notification?.id || !accessToken) return;
+    setCollaborationInvitePopup((current) => current?.id === notification.id ? null : current);
+    setUserHub((current) => current ? {
+      ...current,
+      shelf_collaboration_notifications: (current.shelf_collaboration_notifications || []).map((entry) => entry.id === notification.id
+        ? { ...entry, popup_acknowledged_at: entry.popup_acknowledged_at || new Date().toISOString() }
+        : entry),
+      notification_count: notification.popup_acknowledged_at ? current.notification_count : Math.max(0, current.notification_count - 1),
+    } : current);
+    try {
+      await acknowledgeShelfCollaboration(accessToken, notification.id);
+    } catch {
+      await refreshUserHub().catch(() => null);
+      setToast('The collaboration notice could not be acknowledged.');
+    }
+  };
+
+  const openCollaborativeShelf = async (notification) => {
+    if (!notification?.collection_id || !notification?.shelf_id) return;
+    await acknowledgeCollaborationInvite(notification);
+    setAccountOpen(false);
+    setUsersOpen(false);
+    if (notification.library_id) writeLastLibrary(notification.collection_id, notification.library_id);
+    window.dispatchEvent(new CustomEvent('media-room:view-copied-shelf', { detail: {
+      collection_id: notification.collection_id,
+      library_id: notification.library_id,
+      shelf_id: notification.shelf_id,
+    } }));
+  };
+
   async function openPendingWatchlistRequest(request, { fromList = false } = {}) {
     if (!request?.media_item_id || !accessToken) return false;
     const openVersion = ++pendingRequestOpenVersion.current;
@@ -1388,6 +1421,15 @@ export default function App() {
     requestLoginHandled.current = profileId;
     if (requests.length === 1) void openPendingWatchlistRequest(requests[0]);
     else if (requests.length > 1) setWatchlistRequestListOpen(true);
+  }, [account?.profile?.id, userHub]);
+
+  useEffect(() => {
+    const profileId = account?.profile?.id;
+    const notifications = userHub?.shelf_collaboration_notifications || [];
+    if (!profileId || !userHub || collaborationLoginHandled.current === profileId) return;
+    collaborationLoginHandled.current = profileId;
+    const nextInvitation = notifications.find((notification) => !notification.popup_acknowledged_at);
+    if (nextInvitation) setCollaborationInvitePopup(nextInvitation);
   }, [account?.profile?.id, userHub]);
 
   useEffect(() => {
@@ -1696,6 +1738,13 @@ export default function App() {
     && data.ownerId
     && account.profile.id === data.ownerId,
   );
+  const selectedContributionShelf = (data.mediaShelves || []).find((shelf) => shelf.shelf_id === selectedMedia?.contributedShelfId);
+  const canEditSelectedMedia = Boolean(
+    canEditCollection
+    || (selectedMedia?.contributorId === account?.profile?.id
+      && selectedMedia?.lists?.includes(selectedMedia.contributedShelfId)
+      && selectedContributionShelf?.canCollaborate),
+  );
   const isAdminAccount = account?.profile?.role === 'admin';
   const isAdmin = isAdminAccount && viewAsAdmin && !sharedMode;
   const canReact = Boolean(!sharedMode && account?.profile?.approved_at && !account.profile.deactivated_at);
@@ -1754,6 +1803,7 @@ export default function App() {
         () => setMediaReaction(account.session.access_token, item.database_id, kind, enabled),
         enabled ? () => triggerFightClubEasterEgg(item) : null,
       );
+      await refreshUserHub().catch(() => null);
       setToast(enabled ? 'Priority Watch added.' : 'Priority Watch removed.');
     } catch (error) {
       setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData);
@@ -1831,7 +1881,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} loading={collectionLoading} loadError={error} libraryLoadState={data.selectedLibrary?.id ? libraryLoadStates[libraryRequestKey(accountScope, data.collectionId, data.selectedLibrary.id)] : null} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onRetryLibrary={() => data.selectedLibrary?.id ? loadLibrary(data.selectedLibrary.id, { fresh: true }) : refresh({ fresh: true, targetCollectionId: data.collectionId })} onInvalidateLibrary={invalidateLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { dataRef.current = nextData; setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={openMediaDrawer} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} shareToken={shareToken} />
+          <MediaView key={data.collectionId} data={data} loading={collectionLoading} loadError={error} libraryLoadState={data.selectedLibrary?.id ? libraryLoadStates[libraryRequestKey(accountScope, data.collectionId, data.selectedLibrary.id)] : null} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onRetryLibrary={() => data.selectedLibrary?.id ? loadLibrary(data.selectedLibrary.id, { fresh: true }) : refresh({ fresh: true, targetCollectionId: data.collectionId })} onInvalidateLibrary={invalidateLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { dataRef.current = nextData; setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={openMediaDrawer} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} collaborationCandidates={(userHub?.users || []).filter((user) => user.friend || user.shared_clubs?.length)} shareToken={shareToken} />
         </main>
         <footer><span>Published from Kit’s Local Media Room.</span><span className="provider-credits">Poster data from <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>, <a href="https://books.google.com/" target="_blank" rel="noreferrer">Google Books</a>, <a href="https://openlibrary.org/" target="_blank" rel="noreferrer">Open Library</a> and <a href="https://www.steamgriddb.com/" target="_blank" rel="noreferrer">SteamGridDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</span></footer>
       </div>
@@ -1846,7 +1896,8 @@ export default function App() {
           nextItem={drawerNavigationTargets.next}
           onPrevious={() => navigateDrawer(drawerNavigationTargets.previous)}
           onNext={() => navigateDrawer(drawerNavigationTargets.next)}
-          canEdit={canEditCollection}
+          canEdit={canEditSelectedMedia}
+          canManageShelves={canEditCollection}
           onStarRatingChange={(starRating) => saveStarRating(selectedMedia.database_id, starRating)}
           canReviewPoster={Boolean((canEditCollection || isAdmin) && !data.mainWatchlist && selectedMedia.type !== 'other')}
           onFindPosters={() => searchPosterCandidates(account.session.access_token, selectedMedia.database_id)}
@@ -1935,7 +1986,7 @@ export default function App() {
           sourceCollectionTitle={selectedSourceCollectionTitle}
           canImport={canImportSelectedMedia}
           onImport={beginMediaImport}
-          onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const deletedAt = new Date().toISOString(); const optimisticData = { ...data, media: data.media.map((item) => item.database_id === selectedMedia.database_id ? { ...item, deleted_at: deletedAt } : item) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); setRandomizerSelectionId(null); setSelectedMediaId(null); try { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); snapshotCache.current.delete(MAIN_WATCHLIST_ID); setToast(successfulBinToast(selectedMedia)); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); setToast('The item could not be moved to Bin.'); throw error; } } })}
+          onDelete={() => setConfirmation({ title: 'Move item to Bin?', message: `${cleanImportedMediaTitle(selectedMedia.title)} can be restored later from the Bin.`, confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const deletedAt = new Date().toISOString(); const optimisticData = { ...data, media: data.media.map((item) => item.database_id === selectedMedia.database_id ? { ...item, deleted_at: deletedAt } : item) }; setData(optimisticData); cacheSnapshot(optimisticData, data.collectionId); setRandomizerSelectionId(null); setSelectedMediaId(null); try { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, true); snapshotCache.current.delete(MAIN_WATCHLIST_ID); await refreshUserHub().catch(() => null); setToast(successfulBinToast(selectedMedia)); } catch (error) { setData((currentData) => currentData?.collectionId === previousData.collectionId ? previousData : currentData); cacheSnapshot(previousData, previousData.collectionId); setToast('The item could not be moved to Bin.'); throw error; } } })}
           onRestore={async () => { await setMediaDeleted(account.session.access_token, selectedMedia.database_id, false); await refresh({ fresh: true }); setToast('Media restored.'); }}
         />
       )}
@@ -2018,6 +2069,8 @@ export default function App() {
             setLandingApplied(false);
             userSelectedCollection.current = false;
             requestLoginHandled.current = '';
+            collaborationLoginHandled.current = '';
+            setCollaborationInvitePopup(null);
             setToast('Signed in securely.');
           }}
           onSignedOut={() => {
@@ -2028,12 +2081,16 @@ export default function App() {
             setLandingApplied(false);
             userSelectedCollection.current = false;
             requestLoginHandled.current = '';
+            collaborationLoginHandled.current = '';
             setPendingWatchlistRequest(null);
+            setCollaborationInvitePopup(null);
             setWatchlistRequestListOpen(false);
             setToast('Signed out.');
           }}
           onManageUsers={() => { setAccountOpen(false); setAdminOpen(true); }}
           watchlistRequests={pendingWatchlistRequests}
+          collaborationNotifications={userHub?.shelf_collaboration_notifications || []}
+          onOpenCollaboration={openCollaborativeShelf}
           onOpenWatchlistRequest={async (request) => {
             const opened = await openPendingWatchlistRequest(request);
             if (opened) setAccountOpen(false);
@@ -2051,6 +2108,7 @@ export default function App() {
       {usersOpen && <UsersDialog accessToken={accessToken} currentUser={account.profile} hub={userHub} setHub={setUserHub} refreshHub={refreshUserHub} notify={setToast} onClose={() => setUsersOpen(false)} onVisibilityChanged={async () => { const nextCollections = await loadPublicCollections({ fresh: true, accessToken }); setCollections(nextCollections); clearSnapshotCaches({ persistent: true }); }} />}
 
       {watchlistRequestListOpen && <WatchlistRequestListDialog requests={userHub?.watchlist_requests || []} onOpen={(request) => openPendingWatchlistRequest(request, { fromList: true })} onClose={() => setWatchlistRequestListOpen(false)} />}
+      {collaborationInvitePopup && <ShelfCollaborationInviteDialog notification={collaborationInvitePopup} onOpen={() => openCollaborativeShelf(collaborationInvitePopup)} onDismiss={() => acknowledgeCollaborationInvite(collaborationInvitePopup)} />}
 
       {adminOpen && <AdminUsers accessToken={accessToken} clubs={adminClubs} onClubsChange={setAdminClubs} mainWatchlistClubId={adminMainClubId} onMainWatchlistClubChange={(clubId) => {
         if (clubId) window.localStorage.setItem(ADMIN_MAIN_CLUB_KEY, clubId);
@@ -2114,7 +2172,7 @@ function StarRating({ value, editable = false, onChange, label = 'Star rating' }
   </span>;
 }
 
-function MediaView({ data, loading = false, loadError = '', libraryLoadState = null, initialSection, onLoadSection, onLoadLibrary, onRetryLibrary, onInvalidateLibrary, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, ownCollection, loadCopyDestinations, onViewCopiedShelf, sourceOwnerName, shareToken }) {
+function MediaView({ data, loading = false, loadError = '', libraryLoadState = null, initialSection, onLoadSection, onLoadLibrary, onRetryLibrary, onInvalidateLibrary, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, ownCollection, loadCopyDestinations, onViewCopiedShelf, sourceOwnerName, collaborationCandidates = [], shareToken }) {
   const [section, setSection] = useState(() => data.selectedLibrary?.type || (MEDIA_SECTIONS.has(initialSection) ? initialSection : 'screen'));
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -2187,6 +2245,10 @@ function MediaView({ data, loading = false, loadError = '', libraryLoadState = n
   useEffect(() => { setOptimisticMainShelfIds(data.mediaShelves.filter((shelf) => !shelf.deleted_at && shelf.section === 'screen' && shelf.showInMainWatchlist).map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves]);
   const shelfIndex = new Map(optimisticShelfIds.map((id, index) => [id, index]));
   const shelves = sourceShelves.map((shelf) => ({ ...shelf, ...(optimisticShelfDetails[shelf.shelf_id] || {}) })).sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
+  const collaborativeAddShelf = !canEdit
+    ? shelves.find((shelf) => addToShelfIds.includes(shelf.shelf_id) && shelf.canCollaborate)
+    : null;
+  const addMediaShelves = collaborativeAddShelf ? [collaborativeAddShelf] : shelves;
   const items = [...active(data.media), ...optimisticMediaItems]
     .filter((item) => data.mainWatchlist || (currentLibrary ? item.library_id === currentLibrary.id : mediaSection(item) === section))
     .map((item) => ({ ...item, reactionControl: { canReact, currentUserId, onReaction } }));
@@ -2556,7 +2618,7 @@ function MediaView({ data, loading = false, loadError = '', libraryLoadState = n
           const shelfItems = contentItemsByShelf.get(shelf.shelf_id) || [];
           if (!shelfItems.length && queryLower) return null;
           const drawerNavigation = { shelfId: shelf.shelf_id, shelves: drawerShelves };
-          return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} arrangeItems={arrangeItems} onOpen={(itemId) => openMedia(itemId, drawerNavigation)} onRandomOpen={() => openRandomPick(shelfItems, drawerNavigation)} canEdit={canEdit && !shelf.virtual} canCopy={Boolean(!canEdit && !data.mainWatchlist && currentUserId && ownCollection && data.ownerId !== currentUserId)} onCopy={() => setShelfTransfer({ mode: 'copy-visitor', shelf, itemCount: arrangeItems.length })} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); void refresh({ fresh: true }).catch(() => notify('The order was saved, but the latest collection could not be refreshed. Reload to see the saved order everywhere.')); } catch (error) { notify(error?.message ? `Item order could not be saved: ${error.message}` : 'Item order could not be saved.'); throw error; } }} onRename={(editorActions) => setShelfEditor({ ...shelf, ...editorActions, canCurateMain, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id), onToggleMain: (enabled) => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }, enabled) })} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { const updated = await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); if (!updated?.some((row) => row.id === shelf.shelf_id && row.deleted_at)) throw new Error('Supabase did not move the shelf to the Bin.'); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} />;
+          return <MediaShelf key={shelf.shelf_id} shelf={{ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }} items={shelfItems} arrangeItems={arrangeItems} onOpen={(itemId) => openMedia(itemId, drawerNavigation)} onRandomOpen={() => openRandomPick(shelfItems, drawerNavigation)} canEdit={canEdit && !shelf.virtual} canAdd={(canEdit || shelf.canCollaborate) && !shelf.virtual} canCopy={Boolean(!canEdit && !data.mainWatchlist && currentUserId && ownCollection && data.ownerId !== currentUserId)} onCopy={() => setShelfTransfer({ mode: 'copy-visitor', shelf, itemCount: arrangeItems.length })} canRate={canEdit} onRate={onStarRatingChange} canReorderShelf={canReorderShelves && !shelf.virtual} canRemoveMirror={Boolean(data.mainWatchlist && isAdmin && !shelf.virtual)} onRemoveMirror={() => requestConfirmation({ title: 'Remove shelf from Main Watchlist?', message: `${shelf.name} will remain untouched in its owner’s collection.`, confirmLabel: 'Remove from Main', onConfirm: async () => { await updateShelf(accessToken, shelf.shelf_id, { show_in_main_watchlist: false }); await refresh({ fresh: true }); notify(`${shelf.name} removed from Main Watchlist.`); } })} canMoveUp={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) > 0} canMoveDown={!shelf.virtual && reorderableShelves.findIndex((row) => row.shelf_id === shelf.shelf_id) < reorderableShelves.length - 1} onMoveShelf={(direction) => moveShelf(shelf.shelf_id, direction)} onAdd={() => { setAddToShelfIds([shelf.shelf_id]); setAddingMedia(true); }} onReorder={async (ordered) => { try { await reorderShelfMedia(accessToken, shelf.shelf_id, ordered); notify('Item order saved.'); void refresh({ fresh: true }).catch(() => notify('The order was saved, but the latest collection could not be refreshed. Reload to see the saved order everywhere.')); } catch (error) { notify(error?.message ? `Item order could not be saved: ${error.message}` : 'Item order could not be saved.'); throw error; } }} onRename={(editorActions) => setShelfEditor({ ...shelf, ...editorActions, canCurateMain, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id), onToggleMain: (enabled) => toggleMainWatchlistShelf({ ...shelf, showInMainWatchlist: optimisticMainShelfIds.includes(shelf.shelf_id) }, enabled) })} onDelete={() => requestConfirmation({ title: `Move ${shelf.name} to Bin?`, message: 'The shelf can be restored later and its media items will remain in the collection.', confirmLabel: 'Move to Bin', tone: 'danger', optimistic: true, onConfirm: async () => { setOptimisticDeletedShelfIds((ids) => [...ids, shelf.shelf_id]); try { const updated = await updateShelf(accessToken, shelf.shelf_id, { deleted_at: new Date().toISOString() }); if (!updated?.some((row) => row.id === shelf.shelf_id && row.deleted_at)) throw new Error('Supabase did not move the shelf to the Bin.'); await refresh({ fresh: true }); notify(`${shelf.name} moved to Bin.`); } catch (error) { setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); notify('The shelf could not be moved to Bin.'); throw error; } } })} />;
         })}
       </div>
 
@@ -2627,7 +2689,29 @@ function MediaView({ data, loading = false, loadError = '', libraryLoadState = n
           creatingShelfRequestRef.current = false;
         }
       }} />}
-      {addingMedia && <AddMediaDialog section={section} terminology={currentLibrary} shelves={shelves} initialShelfIds={addToShelfIds} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => { const temporaryId = `optimistic-${Date.now()}`; const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, collection_id: data.collectionId, library_id: currentLibrary.id, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id) => [id, OPTIMISTIC_APPEND_POSITION])), interests: [], likes: [], priorities: [], optimistic: true, created_at: new Date().toISOString() }; setOptimisticMediaItems((rows) => [...rows, temporaryItem]); setAddingMedia(false); setAddToShelfIds([]); createMediaItem(accessToken, { ...item, type: section === 'other' ? 'other' : item.type, collection_id: data.collectionId, library_id: currentLibrary.id }).then(async (created) => { await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds); if (priorityWatch && currentUserId) await setMediaReaction(accessToken, created[0].id, 'priority', true); await onLoadLibrary(currentLibrary.id, { fresh: true }); setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify(`${currentLibrary.singular} added.`); }).catch(() => { setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId)); notify(`The ${currentLibrary.singular.toLocaleLowerCase()} could not be saved.`); }); }} />}
+      {addingMedia && <AddMediaDialog section={section} terminology={currentLibrary} shelves={addMediaShelves} initialShelfIds={addToShelfIds} fixedShelf={Boolean(collaborativeAddShelf)} onClose={() => { setAddingMedia(false); setAddToShelfIds([]); }} onSave={(item, shelfIds, priorityWatch) => {
+        const temporaryId = `optimistic-${Date.now()}`;
+        const temporaryItem = { ...item, item_id: temporaryId, database_id: temporaryId, collection_id: data.collectionId, library_id: currentLibrary.id, lists: shelfIds, list_positions: Object.fromEntries(shelfIds.map((id) => [id, OPTIMISTIC_APPEND_POSITION])), interests: [], likes: [], priorities: [], optimistic: true, created_at: new Date().toISOString() };
+        setOptimisticMediaItems((rows) => [...rows, temporaryItem]);
+        setAddingMedia(false);
+        setAddToShelfIds([]);
+        const saveItem = collaborativeAddShelf
+          ? createCollaborativeShelfItem(accessToken, collaborativeAddShelf.shelf_id, { ...item, type: section === 'other' ? 'other' : item.type })
+          : createMediaItem(accessToken, { ...item, type: section === 'other' ? 'other' : item.type, collection_id: data.collectionId, library_id: currentLibrary.id })
+            .then(async (created) => {
+              await replaceMediaShelfMemberships(accessToken, created[0].id, [], shelfIds);
+              return created[0];
+            });
+        saveItem.then(async (created) => {
+          if (priorityWatch && currentUserId) await setMediaReaction(accessToken, created.id, 'priority', true);
+          await onLoadLibrary(currentLibrary.id, { fresh: true });
+          setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId));
+          notify(`${currentLibrary.singular} added${collaborativeAddShelf ? ` to ${collaborativeAddShelf.name}` : ''}.`);
+        }).catch(() => {
+          setOptimisticMediaItems((rows) => rows.filter((row) => row.database_id !== temporaryId));
+          notify(collaborativeAddShelf ? 'Collaboration access changed before the item could be saved.' : `The ${currentLibrary.singular.toLocaleLowerCase()} could not be saved.`);
+        });
+      }} />}
       {binOpen && <CollectionBinDrawer
         loading={binLoading}
         error={binError}
@@ -2686,7 +2770,23 @@ function MediaView({ data, loading = false, loadError = '', libraryLoadState = n
         onRestoreShelf={async (shelf) => { const restored = await updateShelf(accessToken, shelf.shelf_id, { deleted_at: null }); if (!restored?.some((row) => row.id === shelf.shelf_id && !row.deleted_at)) throw new Error('Supabase did not restore the shelf.'); setOptimisticDeletedShelfIds((ids) => ids.filter((id) => id !== shelf.shelf_id)); await onLoadLibrary(shelf.library_id, { fresh: true, select: false }); notify(`${shelf.name} restored from Bin.`); }}
         onDeleteShelf={(shelf) => requestConfirmation({ title: `Permanently delete ${shelf.name}?`, message: 'The shelf cannot be restored after this. Its media items will remain in the collection.', confirmLabel: 'Delete Permanently', tone: 'danger', optimistic: true, onConfirm: async () => { const previousData = data; const optimisticData = { ...data, mediaShelves: data.mediaShelves.filter((row) => row.shelf_id !== shelf.shelf_id) }; onDataChange(optimisticData); try { const deleted = await deleteShelf(accessToken, shelf.shelf_id); if (!deleted?.length) throw new Error('Supabase did not delete the shelf.'); notify(`${shelf.name} permanently deleted.`); } catch (error) { onDataChange(previousData); notify(`${shelf.name} could not be deleted. It has been restored to the Bin.`); throw error; } } })}
       />}
-      {shelfEditor && <ShelfEditDialog shelf={shelfEditor} canArrange={shelfEditor.canArrange} onArrange={() => { const openArrange = shelfEditor.onArrange; setShelfEditor(null); openArrange?.(); }} canCurateMain={shelfEditor.canCurateMain} onToggleMain={shelfEditor.onToggleMain} canTransfer={Boolean((data.libraries || []).some((library) => library.type === currentLibrary?.type))} onTransfer={(mode) => { const transferShelf = shelfEditor; setShelfEditor(null); setShelfTransfer({ mode, shelf: transferShelf, itemCount: (data.media || []).filter((item) => !item.deleted_at && item.lists?.includes(transferShelf.shelf_id)).length }); }} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList, numbered: changes.is_numbered ?? shelfEditor.numbered } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
+      {shelfEditor && <ShelfEditDialog shelf={shelfEditor} collaborationCandidates={collaborationCandidates} onCollaborationChange={async (userId, enabled) => {
+        const shelfId = shelfEditor.shelf_id;
+        const previousIds = shelfEditor.collaboratorIds || [];
+        const nextIds = enabled ? unique([...previousIds, userId]) : previousIds.filter((id) => id !== userId);
+        setShelfEditor((current) => current ? { ...current, collaboratorIds: nextIds, collaborative: nextIds.length > 0 } : current);
+        setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), collaboratorIds: nextIds, collaborative: nextIds.length > 0 } }));
+        try {
+          await setShelfCollaborator(accessToken, shelfId, userId, enabled);
+          await onLoadLibrary(currentLibrary.id, { fresh: true });
+          notify(enabled ? 'Collaboration invitation sent.' : 'Collaboration access revoked.');
+        } catch (collaborationError) {
+          setShelfEditor((current) => current ? { ...current, collaboratorIds: previousIds, collaborative: previousIds.length > 0 } : current);
+          setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), collaboratorIds: previousIds, collaborative: previousIds.length > 0 } }));
+          notify(collaborationError?.message || 'Collaboration access could not be changed.');
+          throw collaborationError;
+        }
+      }} canArrange={shelfEditor.canArrange} onArrange={() => { const openArrange = shelfEditor.onArrange; setShelfEditor(null); openArrange?.(); }} canCurateMain={shelfEditor.canCurateMain} onToggleMain={shelfEditor.onToggleMain} canTransfer={Boolean((data.libraries || []).some((library) => library.type === currentLibrary?.type))} onTransfer={(mode) => { const transferShelf = shelfEditor; setShelfEditor(null); setShelfTransfer({ mode, shelf: transferShelf, itemCount: (data.media || []).filter((item) => !item.deleted_at && item.lists?.includes(transferShelf.shelf_id)).length }); }} onClose={() => setShelfEditor(null)} onSave={(changes) => { const shelfId = shelfEditor.shelf_id; setOptimisticShelfDetails((current) => ({ ...current, [shelfId]: { ...(current[shelfId] || {}), ...changes, queueList: changes.is_queue_list ?? shelfEditor.queueList, numbered: changes.is_numbered ?? shelfEditor.numbered } })); updateShelf(accessToken, shelfId, changes).then(async () => { await refresh({ fresh: true }); notify('Shelf saved.'); }).catch(() => { setOptimisticShelfDetails((current) => { const next = { ...current }; delete next[shelfId]; return next; }); notify('The shelf could not be saved. Previous details restored.'); }); }} />}
       {shelfTransfer && <ShelfTransferDialog transfer={shelfTransfer} sourceLibrary={currentLibrary} sourceOwnerName={sourceOwnerName} ownerData={shelfTransfer.mode === 'copy-visitor' ? null : data} loadDestinations={loadCopyDestinations} ownCollection={ownCollection} onClose={() => setShelfTransfer(null)} onConfirm={async ({ mode, shelf, destinationLibraryId, name }) => {
         const sourceLibraryId = currentLibrary?.id;
         const result = mode === 'move'
@@ -2757,7 +2857,7 @@ function shelfNeedsUniformReactionWrap(shelfElement, currentlyWrapped = false) {
   });
 }
 
-function MediaShelf({ shelf, items, arrangeItems = items, onOpen, onRandomOpen, canEdit, canCopy, onCopy, canRate, onRate, canReorderShelf, canRemoveMirror, onRemoveMirror, canMoveUp, canMoveDown, onMoveShelf, onAdd, onReorder, onRename, onDelete }) {
+function MediaShelf({ shelf, items, arrangeItems = items, onOpen, onRandomOpen, canEdit, canAdd = canEdit, canCopy, onCopy, canRate, onRate, canReorderShelf, canRemoveMirror, onRemoveMirror, canMoveUp, canMoveDown, onMoveShelf, onAdd, onReorder, onRename, onDelete }) {
   const shelfRef = useRef(null);
   const trackRef = useRef(null);
   const [displayItems, setDisplayItems] = useState(items);
@@ -2831,10 +2931,10 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, onRandomOpen, 
       if (Number.isFinite(previousTop) && Number.isFinite(nextTop)) window.scrollBy({ top: nextTop - previousTop, behavior: 'auto' });
     }));
   };
-  const pagerOnlyActions = !canRemoveMirror && !canEdit && !canReorderShelf;
+  const pagerOnlyActions = !canRemoveMirror && !canEdit && !canAdd && !canReorderShelf;
   return <section id={`shelf-${shelf.shelf_id}`} ref={shelfRef} className={cls('media-shelf fixed-set-shelf', shelf.ownerName && 'main-watchlist-shelf', uniformReactionWrap && 'uniform-reaction-wrap')}>
     <div className="shelf-head">
-      <div className="shelf-title"><span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2>{shelf.subtitle && <p className="shelf-subtitle">{shelf.subtitle}</p>}</span></div>
+      <div className="shelf-title"><span className="shelf-heading-copy">{shelf.ownerName && <small>{shelf.ownerName}</small>}<h2>{shelf.name}<span>{items.length}</span></h2>{shelf.subtitle && <p className="shelf-subtitle">{shelf.subtitle}</p>}{shelf.collaborative && <small className="collaborative-shelf-label"><Users size={12} />Collaborative shelf</small>}</span></div>
       <div className={cls('shelf-actions', pagerOnlyActions && 'pager-only')}>
         <span className="shelf-mobile-top-row">
           <span className="shelf-action-group shelf-edit-actions">{canEdit && <button aria-label={`Edit ${shelf.name}`} onClick={() => onRename({ canArrange: arrangeItems.length > 1, onArrange: () => setArranging(true) })}><Pencil size={15} /></button>}{canEdit && !shelf.required && <button className="delete-shelf" aria-label={`Move ${shelf.name} to Bin`} onClick={onDelete}><Trash2 size={15} /></button>}{canCopy && <button className="copy-foreign-shelf" aria-label={`Copy ${shelf.name} to your collection`} title="Copy shelf" onClick={onCopy}><Copy size={15} /><span>Copy shelf</span></button>}</span>
@@ -2843,7 +2943,7 @@ function MediaShelf({ shelf, items, arrangeItems = items, onOpen, onRandomOpen, 
         <span className="shelf-mobile-bottom-row">
           <button type="button" className="button random-pick shelf-pick-action" disabled={!items.length} aria-label={`Pick randomly from ${shelf.name}`} onClick={onRandomOpen}><span>Pick</span><Shuffle size={15} /></button>
           <span className="shelf-action-group shelf-content-actions">{canRemoveMirror && <button className="remove-main-mirror" onClick={onRemoveMirror} title="Remove this mirror; the original shelf stays unchanged"><X size={14} /><span>Remove from Main</span></button>}{canEdit && arrangeItems.length > 1 && <button className="shelf-control-button arrange-button" aria-label={`Arrange items in ${shelf.name}`} title="Arrange Shelf" onClick={() => setArranging(true)}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}</span>
-          <span className="shelf-action-group shelf-add-actions">{canEdit && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
+          <span className="shelf-action-group shelf-add-actions">{canAdd && <Button className="shelf-control-button shelf-add-button" icon={Plus} onClick={onAdd}>Add Item</Button>}</span>
           <span className="shelf-action-group shelf-set-actions"><button aria-label={mobileShelfPaging ? `Show previous items in ${shelf.name}` : `Show previous sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canPrevious : currentSegment <= 0 || segmentCount <= 1} onClick={() => scrollSegment(-1)}><ChevronLeft /></button>{!mobileShelfPaging && segmentCount > 1 && <small>Sets {currentSegment * 2 + 1}{displaySegments[currentSegment]?.[1]?.length ? `\u2013${currentSegment * 2 + 2}` : ''}</small>}<button aria-label={mobileShelfPaging ? `Show next items in ${shelf.name}` : `Show next sets in ${shelf.name}`} disabled={mobileShelfPaging ? !mobileScrollState.canNext : currentSegment >= segmentCount - 1 || segmentCount <= 1} onClick={() => scrollSegment(1)}><ChevronRight /></button></span>
         </span>
       </div>
@@ -3077,7 +3177,7 @@ function MediaCard({ item, shelfRank = null, eagerPoster = false, onClick, canRa
   );
 }
 
-function MediaDrawer({ item, randomizerSelected = false, shelves, onClose, previousItem, nextItem, onPrevious, onNext, canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, sourceCollectionTitle, canImport, onImport, onDelete, onRestore, watchlistRequest, watchlistRequestActions, watchlistRequestBusy, onRequestStampRemoval, onRequestMove, onRespondWatchlistRequest, onDismissWatchlistRequest }) {
+function MediaDrawer({ item, randomizerSelected = false, shelves, onClose, previousItem, nextItem, onPrevious, onNext, canEdit, canManageShelves = canEdit, onStarRatingChange, canReviewPoster, onFindPosters, onChoosePoster, onFindDetails, onChooseDetails, onUpdate, onUpdateShelves, canReact, currentUserId, onReaction, sourceCollectionTitle, canImport, onImport, onDelete, onRestore, watchlistRequest, watchlistRequestActions, watchlistRequestBusy, onRequestStampRemoval, onRequestMove, onRespondWatchlistRequest, onDismissWatchlistRequest }) {
   const [editing, setEditing] = useState(false);
   const [optimisticShelves, setOptimisticShelves] = useState(item.lists || []);
   const optimisticShelvesRef = useRef(item.lists || []);
@@ -3160,6 +3260,7 @@ function MediaDrawer({ item, randomizerSelected = false, shelves, onClose, previ
             <div className="genre-row">{item.genres?.map((genre) => <span key={genre}>{genre}</span>)}</div>
             <div className="drawer-item-actions">
               <span className="drawer-collection-name">{sourceCollectionTitle}</span>
+              {item.contributor && item.contributedShelfId && <span className="drawer-contributor"><UserRound size={13} />{personDisplayName(item.contributor)} added</span>}
               <button type="button" aria-label="Shelves" onClick={() => setShelvesOpen(true)}><ListOrdered size={14} />Shelves</button>
               {canEdit && !item.poster_url && canReviewPoster && <button aria-label="Enrich poster" onClick={() => setPosterReviewOpen(true)}><Search size={14} />Enrich poster</button>}
               {canEdit && canReviewPoster && <button aria-label="Enrich details" onClick={() => setDetailReviewOpen(true)}><Search size={14} />Enrich details</button>}
@@ -3175,7 +3276,7 @@ function MediaDrawer({ item, randomizerSelected = false, shelves, onClose, previ
         await onUpdate(changes);
         setEditing(false);
       }} />}
-      {shelvesOpen && <ShelfMembershipDialog collectionTitle={sourceCollectionTitle} itemTitle={title} shelves={shelves} selectedShelfIds={optimisticShelves} canEdit={canEdit} onToggle={toggleShelf} onClose={() => setShelvesOpen(false)} />}
+      {shelvesOpen && <ShelfMembershipDialog collectionTitle={sourceCollectionTitle} itemTitle={title} shelves={shelves} selectedShelfIds={optimisticShelves} canEdit={canManageShelves} onToggle={toggleShelf} onClose={() => setShelvesOpen(false)} />}
       {posterReviewOpen && <PosterEnrichmentDialog item={item} candidates={posterCandidates} busy={posterReviewBusy} error={posterReviewError} onClose={() => setPosterReviewOpen(false)} onLoad={async () => { const requestedItemId = item.database_id; setPosterReviewBusy(true); setPosterReviewError(''); try { const result = await onFindPosters(); if (currentItemId.current === requestedItemId) setPosterCandidates(result?.candidates || []); } catch (error) { if (currentItemId.current === requestedItemId) setPosterReviewError(error?.message || 'Provider candidates could not be loaded.'); } finally { if (currentItemId.current === requestedItemId) setPosterReviewBusy(false); } }} onChoose={(candidate) => { setPosterReviewOpen(false); setPosterReviewBusy(false); setPosterReviewError(''); onChoosePoster(candidate.poster_url).catch(() => null); }} />}
       {detailReviewOpen && <DetailEnrichmentDialog item={item} onClose={() => setDetailReviewOpen(false)} onLoad={onFindDetails} onChoose={async (candidate) => { await onChooseDetails(candidate); setDetailReviewOpen(false); }} />}
       {watchlistRequest && <WatchlistRequestDialog request={watchlistRequest} shelves={shelves} busy={watchlistRequestBusy} onRespond={onRespondWatchlistRequest} onDismiss={onDismissWatchlistRequest} />}
@@ -3216,6 +3317,7 @@ function WatchlistRequestDialog({ request, shelves, busy, onRespond, onDismiss }
           {!isStampRequest && request.source_shelf_name && <p className="watchlist-request-source"><ListOrdered size={15} /><span><small>CURRENT SHELF</small><strong>{request.source_shelf_name}</strong></span></p>}
           {isStampRequest
             ? <div className="watchlist-request-actions">
+              <button className="watchlist-not-now" type="button" disabled={busy} onClick={onDismiss}>Not now</button>
               <button className="secondary-button" type="button" disabled={busy} onClick={() => respond('keep_stamp')}>Keep my stamp</button>
               <Button type="button" disabled={busy} onClick={() => respond('clear_stamp')}>Clear my stamp</Button>
             </div>
@@ -3397,6 +3499,23 @@ function FightClubDialog({ prompt, onConfirm }) {
     </div>,
     document.body,
   );
+}
+
+function ShelfCollaborationInviteDialog({ notification, onOpen, onDismiss }) {
+  useEscape(onDismiss);
+  return createPortal(<div className="modal-layer editor-layer shelf-collaboration-invite-layer">
+    <section className="media-edit-dialog shelf-collaboration-invite-dialog" role="dialog" aria-modal="true" aria-labelledby="shelf-collaboration-invite-title">
+      <button className="close" type="button" onClick={onDismiss} aria-label="Acknowledge collaboration invitation"><X /></button>
+      <div className="shelf-collaboration-dotted-strip" aria-hidden="true" />
+      <div className="shelf-collaboration-invite-body">
+        <span className="shelf-collaboration-invite-mark"><Users size={22} /></span>
+        <span className="eyebrow">SHELF COLLABORATION</span>
+        <h2 id="shelf-collaboration-invite-title">{notification.owner_name} invited you</h2>
+        <p>You can add items to <strong>{notification.shelf_name}</strong>, then edit or move to Bin only the items you personally contribute.</p>
+        <div className="dialog-actions"><button className="text-button" type="button" onClick={onDismiss}>Later</button><Button type="button" icon={ChevronRight} onClick={onOpen}>Open Shelf</Button></div>
+      </div>
+    </section>
+  </div>, document.body);
 }
 
 function WatchlistRequestListDialog({ requests, onOpen, onClose }) {
@@ -3678,12 +3797,25 @@ function ShareCollectionDialog({ accessToken, collectionId, collectionTitle, not
   </section></div>;
 }
 
-function ShelfEditDialog({ shelf, canArrange, onArrange, canCurateMain, onToggleMain, canTransfer, onTransfer, onClose, onSave }) {
+function ShelfEditDialog({ shelf, collaborationCandidates = [], onCollaborationChange, canArrange, onArrange, canCurateMain, onToggleMain, canTransfer, onTransfer, onClose, onSave }) {
   useEscape(onClose);
   const [name, setName] = useState(shelf.name);
   const [subtitle, setSubtitle] = useState(shelf.subtitle || '');
   const [numbered, setNumbered] = useState(Boolean(shelf.numbered));
   const [mainWatchlist, setMainWatchlist] = useState(Boolean(shelf.showInMainWatchlist));
+  const [collaboratorsOpen, setCollaboratorsOpen] = useState(false);
+  const [collaborationBusy, setCollaborationBusy] = useState([]);
+  const [collaborationError, setCollaborationError] = useState('');
+  const collaboratorIds = shelf.collaboratorIds || [];
+  const toggleCollaboration = async (user) => {
+    if (collaborationBusy.includes(user.id)) return;
+    const enabled = !collaboratorIds.includes(user.id);
+    setCollaborationBusy((current) => [...current, user.id]);
+    setCollaborationError('');
+    try { await onCollaborationChange(user.id, enabled); }
+    catch (error) { setCollaborationError(error?.message || 'Collaboration access could not be changed.'); }
+    finally { setCollaborationBusy((current) => current.filter((id) => id !== user.id)); }
+  };
   return <div className="modal-layer editor-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="media-edit-dialog shelf-edit-dialog" onSubmit={(event) => { event.preventDefault(); const cleanedName = name.trim(); const cleanedSubtitle = subtitle.trim(); if ((!shelf.required && !cleanedName) || cleanedSubtitle.length > 180) return; onSave({ ...(shelf.required ? {} : { name: cleanedName }), subtitle: cleanedSubtitle || null, is_numbered: numbered }); onClose(); }}>
     <button className="close" type="button" onClick={onClose} aria-label="Close shelf editor"><X /></button>
     <span className="eyebrow">EDIT SHELF</span><h2>{shelf.name}</h2>
@@ -3691,6 +3823,27 @@ function ShelfEditDialog({ shelf, canArrange, onArrange, canCurateMain, onToggle
     <label>Subtitle <span className="field-hint">Optional</span><input autoFocus={shelf.required} value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
     <label className="reading-list-designation"><input type="checkbox" checked={numbered} onChange={(event) => setNumbered(event.target.checked)} /><span><b>Numbered shelf</b><small>Show each item's shelf position beneath its card.</small></span></label>
     {canCurateMain && <label className="reading-list-designation shelf-edit-main-watchlist"><input type="checkbox" checked={mainWatchlist} onChange={async (event) => { const previous = mainWatchlist; const enabled = event.target.checked; setMainWatchlist(enabled); try { await onToggleMain(enabled); } catch { setMainWatchlist(previous); } }} /><span><b>Include this in Main Watchlist</b><small>Mirror this Film & TV shelf in the shared Main Watchlist.</small></span></label>}
+    <section className={cls('shelf-collaboration-editor', collaboratorsOpen && 'open')}>
+      <div className="shelf-collaboration-dotted-strip" aria-hidden="true" />
+      <button className="shelf-collaboration-toggle" type="button" aria-expanded={collaboratorsOpen} onClick={() => setCollaboratorsOpen((open) => !open)}>
+        <span className="shelf-collaboration-mark"><Users size={16} /></span>
+        <span><b>Invite to collaborate</b><small>Friends and mutual Club members can add and manage only their own contributions.</small></span>
+        <ChevronDown size={16} />
+      </button>
+      {collaboratorsOpen && <div className="shelf-collaboration-people">
+        {collaborationCandidates.length ? collaborationCandidates.map((user) => {
+          const enabled = collaboratorIds.includes(user.id);
+          const busy = collaborationBusy.includes(user.id);
+          const connection = user.friend ? 'Friend' : `Mutual Club${user.shared_clubs?.length > 1 ? 's' : ''}`;
+          return <button type="button" className={cls('shelf-collaborator-row', enabled && 'active')} disabled={busy} aria-pressed={enabled} onClick={() => toggleCollaboration(user)} key={user.id}>
+            <UserAvatar person={user} />
+            <span><strong>{personDisplayName(user)}</strong><small>{connection}</small></span>
+            <span className="shelf-collaboration-state">{busy ? 'Saving…' : enabled ? <><Check size={13} />Collaborator</> : <><Plus size={13} />Invite</>}</span>
+          </button>;
+        }) : <p className="shelf-collaboration-empty">Add a friend or join a Club together before inviting collaborators.</p>}
+        {collaborationError && <p className="auth-error" role="alert">{collaborationError}</p>}
+      </div>}
+    </section>
     {canArrange && <div className="shelf-edit-mobile-actions">
       {canArrange && <button className="shelf-control-button arrange-button" type="button" onClick={onArrange}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}
     </div>}
@@ -3909,7 +4062,17 @@ function AccountWatchlistRequests({ requests, openingRequestId, onOpen }) {
   </section>;
 }
 
-function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers, watchlistRequests = [], onOpenWatchlistRequest, viewAsAdmin, onViewAsAdminChange, onAccountUpdated, notify }) {
+function AccountShelfCollaborations({ notifications, onOpen }) {
+  return <section className="account-shelf-collaborations" aria-labelledby="account-collaborations-title">
+    <div className="shelf-collaboration-dotted-strip" aria-hidden="true" />
+    <header><span className="account-request-mark"><Users size={16} /></span><span><small>COLLABORATIVE SHELVES</small><strong id="account-collaborations-title">Shared with you</strong></span></header>
+    <div>{notifications.map((notification) => <button type="button" onClick={() => onOpen(notification)} key={notification.id}>
+      <span><strong>{notification.shelf_name}</strong><small>{notification.owner_name} invited you to contribute.</small></span><ChevronRight size={16} />
+    </button>)}</div>
+  </section>;
+}
+
+function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUsers, watchlistRequests = [], collaborationNotifications = [], onOpenWatchlistRequest, onOpenCollaboration, viewAsAdmin, onViewAsAdminChange, onAccountUpdated, notify }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -3997,6 +4160,7 @@ function AccountDialog({ account, onClose, onSignedIn, onSignedOut, onManageUser
             <span className="eyebrow">SIGNED IN</span>
             <div className="account-identity"><UserAvatar person={account.profile} size="large" /><div><h2>{personDisplayName(account.profile, 'Media Room member')}</h2><p>{account.profile?.role === 'admin' && viewAsAdmin ? 'Administrator account' : account.profile?.deactivated_at ? 'Account deactivated — your library is safely stored.' : account.profile?.approved_at ? 'Approved member' : 'Pending approval'}</p></div></div>
             {watchlistRequests.length > 0 && <AccountWatchlistRequests requests={watchlistRequests} openingRequestId={openingRequestId} onOpen={openAccountWatchlistRequest} />}
+            {collaborationNotifications.length > 0 && <AccountShelfCollaborations notifications={collaborationNotifications} onOpen={onOpenCollaboration} />}
             {account.profile?.role === 'admin' && <label className="admin-view-toggle"><input type="checkbox" checked={viewAsAdmin} onChange={(event) => onViewAsAdminChange(event.target.checked)} /><span><b>View as Admin</b><small>Turn on administrator controls and the full collection view.</small></span></label>}
             <button className="account-settings-toggle" type="button" onClick={() => { setSettingsOpen((current) => !current); setError(''); }}>{settingsOpen ? 'Hide account settings' : 'Display name & password'}</button>
             {settingsOpen && <form className="account-settings" onSubmit={async (event) => { event.preventDefault(); setSubmitting(true); setError(''); try { let profile = account.profile; if (nextDisplayName.trim() !== account.profile.display_name) profile = await updateDisplayName(account.session.access_token, nextDisplayName.trim()); if (nextPassword) { if (nextPassword.length < 8) throw new Error('short-password'); await updatePassword(account.session.access_token, nextPassword); setNextPassword(''); } await onAccountUpdated(profile); } catch (settingsError) { setError(settingsError?.message === 'short-password' ? 'Use at least 8 characters for the new password.' : 'Those account settings could not be saved. Apply the latest Supabase migration and try again.'); } finally { setSubmitting(false); } }}>
@@ -4078,7 +4242,7 @@ function MediaDetailFields({ form, setForm, section, terminology, compact = fals
   </div>;
 }
 
-function AddMediaDialog({ section, terminology, shelves, initialShelfIds = [], initialItem = null, sourceCollectionTitle = '', importMode = false, shelvesLoading = false, shelvesError = '', onRetryShelves, onClose, onSave }) {
+function AddMediaDialog({ section, terminology, shelves, initialShelfIds = [], initialItem = null, sourceCollectionTitle = '', importMode = false, fixedShelf = false, shelvesLoading = false, shelvesError = '', onRetryShelves, onClose, onSave }) {
   useEscape(onClose);
   const [form, setForm] = useState(() => mediaForm(initialItem || {}, section === 'screen' ? 'film' : section));
   const [priorityWatch, setPriorityWatch] = useState(false);
@@ -4108,11 +4272,11 @@ function AddMediaDialog({ section, terminology, shelves, initialShelfIds = [], i
         {section === 'screen' && <button type="button" className={cls('add-status-option priority', priorityWatch && 'active')} aria-pressed={priorityWatch} onClick={() => setPriorityWatch((current) => !current)}><span>{priorityWatch ? <Check size={12} /> : <Plus size={12} />}</span><strong>{priorityWatch ? 'Priority Watch' : 'Mark Priority Watch'}</strong></button>}
       </div>
     </section>
-    <fieldset className="shelf-picker" disabled={shelvesLoading}><legend>Choose at least one shelf <span>Required</span></legend>{shelvesLoading
+    <fieldset className="shelf-picker" disabled={shelvesLoading}><legend>{fixedShelf ? 'Collaborative shelf' : 'Choose at least one shelf'} <span>Required</span></legend>{shelvesLoading
       ? <p className="shelf-picker-state">Loading your shelves…</p>
       : shelvesError
         ? <div className="shelf-picker-state error"><span>{shelvesError}</span><Button type="button" onClick={onRetryShelves}>Try Again</Button></div>
-        : shelves.map((shelf) => <label className={shelfIds.includes(shelf.shelf_id) ? 'selected' : ''} key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} /><span>{shelf.name}</span></label>)}</fieldset>
+        : shelves.map((shelf) => <label className={shelfIds.includes(shelf.shelf_id) ? 'selected' : ''} key={shelf.shelf_id}><input type="checkbox" checked={shelfIds.includes(shelf.shelf_id)} disabled={fixedShelf} onChange={() => setShelfIds((ids) => ids.includes(shelf.shelf_id) ? ids.filter((id) => id !== shelf.shelf_id) : [...ids, shelf.shelf_id])} /><span>{shelf.name}{fixedShelf ? ' · shared with you' : ''}</span></label>)}</fieldset>
     {error && <p className="auth-error">{error}</p>}<div className="dialog-actions"><button type="button" className="text-button" onClick={onClose}>Cancel</button><Button type="submit" icon={importMode ? Download : Plus} disabled={saving || shelvesLoading || Boolean(shelvesError) || !shelfIds.length}>{saving ? (importMode ? 'Importing…' : 'Adding…') : (importMode ? 'Import to Your Collection' : 'Add Item')}</Button></div>
   </form></div>;
 }

@@ -5,9 +5,11 @@ import { mediaReactionIdentity, qualifyingInterestCount } from './media-reaction
 import { chooseLibrary, normalizeLibrary } from './library-system.js';
 
 const MEDIA_SELECT = 'id,legacy_id,collection_id,library_id,type,title,year,status,priority,notes,poster_url,creator,director,description,format,platforms,genres,rating,star_rating,owned,runtime,external_ids,deleted_at,created_at,updated_at';
+const COLLABORATIVE_MEDIA_SELECT = `${MEDIA_SELECT},contributor_id,contributed_to_shelf_id`;
 const PRE_OWNED_MEDIA_SELECT = MEDIA_SELECT.replace(',owned', '');
 const LEGACY_MEDIA_SELECT = PRE_OWNED_MEDIA_SELECT.replace(',star_rating', '');
 const MEDIA_CARD_SELECT = 'id,legacy_id,collection_id,library_id,type,title,year,status,priority,poster_url,creator,format,platforms,rating,star_rating,owned,deleted_at,created_at,updated_at';
+const COLLABORATIVE_MEDIA_CARD_SELECT = `${MEDIA_CARD_SELECT},contributor_id,contributed_to_shelf_id`;
 const MEDIA_DETAIL_SELECT = 'id,notes,creator,director,description,genres,runtime';
 const SECTION_TYPES = { screen: ['film', 'television'], book: ['book'], game: ['game'] };
 
@@ -17,13 +19,25 @@ function query(table, parameters) {
 
 async function selectMediaItems(parameters, options) {
   try {
-    return await supabaseSelect(query('media_items', { ...parameters, select: MEDIA_SELECT }), options);
+    return await supabaseSelect(query('media_items', { ...parameters, select: COLLABORATIVE_MEDIA_SELECT }), options);
   } catch {
     try {
-      return await supabaseSelect(query('media_items', { ...parameters, select: PRE_OWNED_MEDIA_SELECT }), options);
+      return await supabaseSelect(query('media_items', { ...parameters, select: MEDIA_SELECT }), options);
     } catch {
-      return supabaseSelect(query('media_items', { ...parameters, select: LEGACY_MEDIA_SELECT }), options);
+      try {
+        return await supabaseSelect(query('media_items', { ...parameters, select: PRE_OWNED_MEDIA_SELECT }), options);
+      } catch {
+        return supabaseSelect(query('media_items', { ...parameters, select: LEGACY_MEDIA_SELECT }), options);
+      }
     }
+  }
+}
+
+async function selectMediaCards(parameters, options) {
+  try {
+    return await supabaseSelect(query('media_items', { ...parameters, select: COLLABORATIVE_MEDIA_CARD_SELECT }), options);
+  } catch {
+    return supabaseSelect(query('media_items', { ...parameters, select: MEDIA_CARD_SELECT }), options);
   }
 }
 
@@ -81,6 +95,9 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
       sourceCollectionId: shelf.source_collection_id || null,
       sourceSection: shelf.source_section || shelf.section,
       virtual: Boolean(shelf.virtual),
+      collaborative: Boolean(shelf.collaborative),
+      canCollaborate: Boolean(shelf.can_collaborate),
+      collaboratorIds: Array.isArray(shelf.collaborator_ids) ? shelf.collaborator_ids : [],
     })),
     loadedSections: loadedSections || ['screen', 'book', 'game'],
     media: mediaItems.map((item) => {
@@ -112,6 +129,9 @@ export function mapSnapshot(collection, shelves, mediaItems, memberships, intere
         added_at: item.created_at,
         updated_at: item.updated_at,
         deleted_at: item.deleted_at || null,
+        contributorId: item.contributor_id || null,
+        contributedShelfId: item.contributed_to_shelf_id || null,
+        contributor: item.contributor_id ? profileById.get(item.contributor_id) || null : null,
         lists: membership.map((entry) => entry.shelf_id),
         list_positions: Object.fromEntries(membership.map((entry) => [entry.shelf_id, entry.position])),
         external_ids: item.external_ids || {},
@@ -290,12 +310,11 @@ async function loadSectionDirect(collection, section, options) {
   };
   const [shelves, mediaItems] = await Promise.all([
     loadShelves(),
-    supabaseSelect(query('media_items', {
+    selectMediaCards({
       collection_id: 'eq.' + collection.id,
       type: sectionMediaFilter(section),
-      select: MEDIA_CARD_SELECT,
       order: 'created_at.asc',
-    }), { fresh, accessToken }),
+    }, { fresh, accessToken }),
   ]);
   const mediaIds = mediaItems.map((item) => item.id);
   const workKeys = new Set(mediaItems.map(mediaReactionIdentity));
@@ -320,6 +339,7 @@ async function loadSectionDirect(collection, section, options) {
   const profileIds = [...new Set([
     ...interests.map((row) => row.user_id),
     ...reactions.map((row) => row.user_id),
+    ...mediaItems.map((row) => row.contributor_id).filter(Boolean),
   ])];
   const publicProfiles = profileIds.length ? await supabaseSelect(query('public_profiles', {
     id: 'in.(' + profileIds.join(',') + ')', select: 'id,username,display_name',
@@ -355,7 +375,11 @@ async function loadLibraryDirect(collection, library, options) {
   }), { fresh, accessToken }) : [];
   const workKeys = new Set(mediaItems.map(mediaReactionIdentity));
   const visibleReactions = reactions.filter((row) => workKeys.has(row.work_key));
-  const profileIds = [...new Set([...interests.map((row) => row.user_id), ...visibleReactions.map((row) => row.user_id)])];
+  const profileIds = [...new Set([
+    ...interests.map((row) => row.user_id),
+    ...visibleReactions.map((row) => row.user_id),
+    ...mediaItems.map((row) => row.contributor_id).filter(Boolean),
+  ])];
   const publicProfiles = profileIds.length ? await supabaseSelect(query('public_profiles', {
     id: 'in.(' + profileIds.join(',') + ')', select: 'id,username,display_name',
   }), { fresh, accessToken }) : [];

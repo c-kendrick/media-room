@@ -19,3 +19,11 @@ export const respondClubInvitation = (token, invitationId, accept) => rpc(token,
 export const transferClubOwnership = (token, clubId, userId) => rpc(token, 'transfer_club_ownership', { target_club_id: clubId, target_user_id: userId });
 export const removeClubMember = (token, clubId, userId) => rpc(token, 'remove_club_member', { target_club_id: clubId, target_user_id: userId });
 export const leaveClub = (token, clubId) => rpc(token, 'leave_club', { target_club_id: clubId });
+export const setShelfCollaborator = (token, shelfId, userId, enabled) => rpc(token, 'set_shelf_collaborator', {
+  target_shelf_id: shelfId,
+  target_user_id: userId,
+  collaboration_enabled: enabled,
+});
+export const acknowledgeShelfCollaboration = (token, collaborationId) => rpc(token, 'acknowledge_shelf_collaboration', {
+  target_collaboration_id: collaborationId,
+});

@@ -958,8 +958,8 @@ test('add and edit share contextual media details while only shelf placement is 
   assert.match(app, /section === 'other' && <label>\{terminology\?\.creator \|\| 'Creator'\}<input value=\{form\.creator\}/);
   assert.match(app, /Mark as Owned/);
   assert.match(app, /section === 'screen'[\s\S]*Mark Priority Watch/);
-  assert.match(app, /if \(priorityWatch && currentUserId\) await setMediaReaction\(accessToken, created\[0\]\.id, 'priority', true\)/);
-  assert.match(app, /<legend>Choose at least one shelf <span>Required<\/span><\/legend>/);
+  assert.match(app, /if \(priorityWatch && currentUserId\) await setMediaReaction\(accessToken, created\.id, 'priority', true\)/);
+  assert.match(app, /fixedShelf \? 'Collaborative shelf' : 'Choose at least one shelf'/);
   assert.match(app, /section === 'game'[\s\S]*Platforms \(comma separated\)[\s\S]*: <label>Format/);
   assert.match(app, /section === 'screen' && <label>Runtime \(minutes\)/);
   assert.doesNotMatch(app, /!compact && <label>Runtime/);
@@ -1499,7 +1499,7 @@ test('all single-item additions require a shelf and foreign imports open and sav
   assert.match(app, /mediaForm\(initialItem \|\| \{\}, section === 'screen' \? 'film' : section\)/);
   assert.match(app, /if \(!shelfIds\.length\) \{ setError\('Choose at least one shelf\.'/);
   assert.match(app, /disabled=\{saving \|\| shelvesLoading \|\| Boolean\(shelvesError\) \|\| !shelfIds\.length\}/);
-  assert.match(app, /Choose at least one shelf <span>Required<\/span>/);
+  assert.match(app, /fixedShelf \? 'Collaborative shelf' : 'Choose at least one shelf'/);
   assert.match(app, /createMediaItem\(accessToken, \{ \.\.\.item, collection_id: draft\.destination\.collectionId, library_id: draft\.destination\.selectedLibrary\?\.id \}\)/);
   assert.match(app, /createdId = created\[0\]\.id;[\s\S]*replaceMediaShelfMemberships\(accessToken, createdId, \[\], shelfIds\)/);
   assert.match(app, /cacheSnapshot\(optimisticDestination, draft\.destination\.collectionId\)/);
@@ -2349,6 +2349,79 @@ test('persistent watchlist requests are server-authoritative and ownership safe'
   assert.match(styles, /@media\(max-width:620px\)[\s\S]*\.move-actions \.watchlist-move-primary\{order:1\}[\s\S]*\.move-actions \.watchlist-keep-tertiary\{order:3/);
 });
 
+test('obsolete watchlist requests resolve after independent completion and Not now stays pending', async () => {
+  const requestMigration = await read('supabase/migrations/20260726010000_watchlist_requests.sql');
+  const cleanupMigration = await read('supabase/migrations/20260813010000_collaborative_shelves_and_request_cleanup.sql');
+  const app = await read('src/App.jsx');
+  assert.match(cleanupMigration, /before update of deleted_at or delete on public\.media_items/);
+  assert.match(cleanupMigration, /old\.deleted_at is null and new\.deleted_at is not null[\s\S]*request_type='move_watched_item'[\s\S]*status='pending'/);
+  assert.match(cleanupMigration, /tg_op = 'DELETE'[\s\S]*delete from public\.watchlist_requests[\s\S]*request_type='move_watched_item'/);
+  assert.match(requestMigration, /response = 'not_now'[\s\S]*return jsonb_build_object\('status', 'pending'\)/);
+  assert.match(app, /isStampRequest[\s\S]*className="watchlist-not-now"[\s\S]*onClick=\{onDismiss\}>Not now/);
+  assert.match(requestMigration, /reaction_enabled[\s\S]*else[\s\S]*delete from public\.media_reactions[\s\S]*final_response = 'clear_stamp'[\s\S]*status = 'pending'/);
+  assert.match(requestMigration, /list_watchlist_requests[\s\S]*wr\.target_user_id = auth\.uid\(\) and wr\.status = 'pending'/);
+});
+
+test('collaborative shelves are invitation, social eligibility, provenance, and RLS enforced', async () => {
+  const migration = await read('supabase/migrations/20260813010000_collaborative_shelves_and_request_cleanup.sql');
+  const app = await read('src/App.jsx');
+  const writes = await read('src/media-write.js');
+  const social = await read('src/social.js');
+  const data = await read('src/supabase-data.js');
+  const styles = await read('src/public.css');
+
+  assert.match(migration, /create table public\.shelf_collaborations/);
+  assert.match(migration, /unique \(shelf_id, collaborator_id\)/);
+  assert.match(migration, /create or replace function public\.collaboration_socially_eligible[\s\S]*public\.friendships[\s\S]*public\.club_memberships/);
+  assert.match(migration, /create or replace function public\.set_shelf_collaborator[\s\S]*Shelf owner access required/);
+  assert.match(migration, /collaboration_enabled[\s\S]*active=true[\s\S]*popup_acknowledged_at=null/);
+  assert.match(migration, /collaboration_enabled[\s\S]*active=false[\s\S]*revocation_reason='owner_revoked'/);
+  assert.match(migration, /revoke_collaboration_after_unfriend[\s\S]*revoke_collaboration_after_club_change/);
+  assert.match(migration, /revocation_reason='social_access_lost'/);
+  const socialRevocation = migration.slice(migration.indexOf('create or replace function public.revoke_ineligible_shelf_collaborations'), migration.indexOf('drop trigger if exists revoke_collaboration_after_unfriend'));
+  assert.doesNotMatch(socialRevocation, /active=true/);
+
+  assert.match(migration, /add column if not exists contributor_id[\s\S]*contributed_to_shelf_id/);
+  assert.match(migration, /create or replace function public\.create_collaborative_shelf_item/);
+  assert.match(migration, /Active shelf collaboration required/);
+  assert.match(migration, /insert into public\.media_items[\s\S]*auth\.uid\(\),target_shelf_id[\s\S]*insert into public\.shelf_media_items/);
+  assert.match(migration, /Active collaborators can update their contributed media/);
+  assert.match(migration, /Active collaborators can delete their contributed media/);
+  assert.match(migration, /contributor_id=auth\.uid\(\)[\s\S]*shelf_collaboration_is_active/);
+  assert.match(migration, /Collaborative item provenance cannot be changed/);
+  assert.match(migration, /if public\.can_manage_collection\(old\.collection_id\) then[\s\S]*return (old|new)/);
+  assert.doesNotMatch(migration, /Active collaborators can (update|delete)[\s\S]*public\.can_manage_collection/);
+
+  assert.match(social, /rpc\(token, 'set_shelf_collaborator'/);
+  assert.match(social, /rpc\(token, 'acknowledge_shelf_collaboration'/);
+  assert.match(writes, /rpc\/create_collaborative_shelf_item/);
+  assert.match(data, /canCollaborate: Boolean\(shelf\.can_collaborate\)/);
+  assert.match(data, /contributorId: item\.contributor_id/);
+  assert.match(app, />Invite to collaborate</);
+  assert.match(app, /user\.friend \|\| user\.shared_clubs\?\.length/);
+  assert.match(app, /canAdd=\{\(canEdit \|\| shelf\.canCollaborate\)/);
+  assert.match(app, /canEditSelectedMedia[\s\S]*selectedMedia\?\.contributorId === account\?\.profile\?\.id[\s\S]*selectedMedia\?\.lists\?\.includes\(selectedMedia\.contributedShelfId\)[\s\S]*selectedContributionShelf\?\.canCollaborate/);
+  assert.match(app, /canManageShelves=\{canEditCollection\}/);
+  assert.match(app, /item\.contributor[\s\S]*personDisplayName\(item\.contributor\)[\s\S]*added/);
+  assert.match(styles, /\.shelf-collaboration-dotted-strip/);
+  assert.match(styles, /\.drawer-contributor/);
+});
+
+test('collaboration invitations have one-time login acknowledgement, persistent history, and direct shelf navigation', async () => {
+  const migration = await read('supabase/migrations/20260813010000_collaborative_shelves_and_request_cleanup.sql');
+  const app = await read('src/App.jsx');
+  assert.match(migration, /'shelf_collaboration_notifications'/);
+  assert.match(migration, /popup_acknowledged_at/);
+  assert.match(migration, /'notification_count'[\s\S]*collaboration\.popup_acknowledged_at is null/);
+  assert.match(migration, /create or replace function public\.acknowledge_shelf_collaboration/);
+  assert.match(app, /notifications\.find\(\(notification\) => !notification\.popup_acknowledged_at\)/);
+  assert.match(app, /function ShelfCollaborationInviteDialog/);
+  assert.match(app, /function AccountShelfCollaborations/);
+  assert.match(app, /<AccountShelfCollaborations notifications=\{collaborationNotifications\}/);
+  assert.match(app, /Open Shelf/);
+  assert.match(app, /media-room:view-copied-shelf[\s\S]*collection_id: notification\.collection_id[\s\S]*shelf_id: notification\.shelf_id/);
+});
+
 test('legacy shelf groups convert to the alternating canonical set order', () => {
   const items = shelfItems(30);
   assert.deepEqual(legacyVisualOrderToCanonical(items).map((item) => item.database_id), [
@@ -2471,14 +2544,14 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /aria-label="Shelves"[\s\S]*<ListOrdered size=\{14\} \/>Shelves/);
   assert.match(styles, /\.drawer-collection-name\{[^}]*color:var\(--brand-brown\)/);
   assert.match(app, /function ShelfMembershipDialog[\s\S]*role="dialog"[\s\S]*visibleShelves\.map[\s\S]*onToggle\(shelf\.shelf_id\)/);
-  assert.match(app, /const pagerOnlyActions = !canRemoveMirror && !canEdit && !canReorderShelf/);
+  assert.match(app, /const pagerOnlyActions = !canRemoveMirror && !canEdit && !canAdd && !canReorderShelf/);
   assert.match(app, /className=\{cls\('shelf-actions', pagerOnlyActions && 'pager-only'\)\}/);
   assert.match(app, /cls\('page media-page', data\.mainWatchlist \? 'main-watchlist-page' : 'collection-page'\)/);
   assert.match(styles, /\.shelf-head h2 span\{background:var\(--brand-brown\)\}/);
   assert.match(app, /className="shelf-action-group shelf-add-actions"/);
   assert.match(app, /className="shelf-mobile-top-row"[\s\S]*shelf-edit-actions[\s\S]*shelf-order-actions[\s\S]*className="shelf-mobile-bottom-row"[\s\S]*shelf-content-actions[\s\S]*shelf-add-actions[\s\S]*shelf-set-actions/);
   assert.match(app, /shelf\.ownerName && 'main-watchlist-shelf'/);
-  assert.match(app, /function ShelfEditDialog\(\{ shelf, canArrange, onArrange, canCurateMain, onToggleMain, canTransfer, onTransfer, onClose, onSave \}\)/);
+  assert.match(app, /function ShelfEditDialog\(\{ shelf, collaborationCandidates = \[\], onCollaborationChange, canArrange, onArrange, canCurateMain, onToggleMain, canTransfer, onTransfer, onClose, onSave \}\)/);
   assert.match(app, /canTransfer && <details className="shelf-transfer-section">/);
   assert.match(app, /shelf-edit-main-watchlist[\s\S]*onToggleMain\(enabled\)[\s\S]*>Include this in Main Watchlist</);
   assert.match(app, /const previous = mainWatchlist; const enabled = event\.target\.checked; setMainWatchlist\(enabled\); try \{ await onToggleMain\(enabled\); \} catch \{ setMainWatchlist\(previous\); \}/);
