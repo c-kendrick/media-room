@@ -631,8 +631,10 @@ export default function App() {
     ? `${selectedMainWatchlistClub.name} Watchlist`
     : memberClubs[0] ? `${memberClubs[0].name} Watchlist` : 'Main Watchlist';
   const adminMemberClubs = adminClubs.filter((club) => club.member_ids.includes(account?.profile?.id));
-  const memberViewOwnerIds = new Set(adminMemberClubs.flatMap((club) => club.member_ids));
+  const friendOwnerIds = (userHub?.users || []).filter((user) => user.friend).map((user) => user.id);
+  const memberViewOwnerIds = new Set([...adminMemberClubs.flatMap((club) => club.member_ids), ...friendOwnerIds]);
   if (account?.profile?.id) memberViewOwnerIds.add(account.profile.id);
+  const collaborativeShelfIds = new Set((userHub?.shelf_collaboration_notifications || []).map((notification) => notification.shelf_id));
   const displayedCollections = account?.profile?.role === 'admin' && !viewAsAdmin
     ? collections.filter((collection) => collection.slug === 'kits-collection' || memberViewOwnerIds.has(collection.owner_id))
     : collections;
@@ -1743,7 +1745,7 @@ export default function App() {
     canEditCollection
     || (selectedMedia?.contributorId === account?.profile?.id
       && selectedMedia?.lists?.includes(selectedMedia.contributedShelfId)
-      && selectedContributionShelf?.canCollaborate),
+      && (selectedContributionShelf?.canCollaborate || collaborativeShelfIds.has(selectedMedia.contributedShelfId))),
   );
   const isAdminAccount = account?.profile?.role === 'admin';
   const isAdmin = isAdminAccount && viewAsAdmin && !sharedMode;
@@ -1881,7 +1883,7 @@ export default function App() {
         {error && <div className="error-banner">{sharedMode ? 'The shared collection could not refresh. Access may have been closed or revoked.' : `The public collection could not refresh: ${error}`}</div>}
 
         <main className={cls(collectionLoading && 'collection-loading')} aria-busy={collectionLoading}>
-          <MediaView key={data.collectionId} data={data} loading={collectionLoading} loadError={error} libraryLoadState={data.selectedLibrary?.id ? libraryLoadStates[libraryRequestKey(accountScope, data.collectionId, data.selectedLibrary.id)] : null} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onRetryLibrary={() => data.selectedLibrary?.id ? loadLibrary(data.selectedLibrary.id, { fresh: true }) : refresh({ fresh: true, targetCollectionId: data.collectionId })} onInvalidateLibrary={invalidateLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { dataRef.current = nextData; setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={openMediaDrawer} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} collaborationCandidates={(userHub?.users || []).filter((user) => user.friend || user.shared_clubs?.length)} shareToken={shareToken} />
+          <MediaView key={data.collectionId} data={data} loading={collectionLoading} loadError={error} libraryLoadState={data.selectedLibrary?.id ? libraryLoadStates[libraryRequestKey(accountScope, data.collectionId, data.selectedLibrary.id)] : null} initialSection={rememberedSection.current} onLoadSection={loadSection} onLoadLibrary={loadLibrary} onRetryLibrary={() => data.selectedLibrary?.id ? loadLibrary(data.selectedLibrary.id, { fresh: true }) : refresh({ fresh: true, targetCollectionId: data.collectionId })} onInvalidateLibrary={invalidateLibrary} onEnsureSectionDetails={ensureSectionDetails} onSectionChange={(section) => { rememberedSection.current = section; if (!sharedMode) writeLastPage(account?.profile?.id, data.collectionId, section); }} onDataChange={(nextData) => { dataRef.current = nextData; setData(nextData); cacheSnapshot(nextData, nextData.collectionId); }} notify={setToast} openMedia={openMediaDrawer} canEdit={canEditCollection} canReact={canReact} currentUserId={account?.profile?.id} onReaction={saveReaction} isAdmin={isAdmin} accessToken={account?.session?.access_token} refresh={refresh} requestConfirmation={setConfirmation} mainWatchlistTitle={mainWatchlistTitle} mainWatchlistClubs={memberClubs} mainWatchlistClubId={mainWatchlistClubId} onMainWatchlistClubChange={chooseMainWatchlist} onExport={() => exportCollection(data)} onStarRatingChange={saveStarRating} ownCollection={ownCollection} loadCopyDestinations={async () => ownCollection ? loadMediaSnapshot({ fresh: true, collectionId: ownCollection.id, libraryId: readLastLibrary(ownCollection.id), accessToken }) : null} sourceOwnerName={personDisplayName(collectionOwnerIdentity(collections.find((entry) => entry.id === data.collectionId), userHub?.users, account?.profile), 'Collection owner')} collaborationCandidates={(userHub?.users || []).filter((user) => user.friend || user.shared_clubs?.length)} collaborativeShelfIds={collaborativeShelfIds} shareToken={shareToken} />
         </main>
         <footer><span>Published from Kit’s Local Media Room.</span><span className="provider-credits">Poster data from <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>, <a href="https://books.google.com/" target="_blank" rel="noreferrer">Google Books</a>, <a href="https://openlibrary.org/" target="_blank" rel="noreferrer">Open Library</a> and <a href="https://www.steamgriddb.com/" target="_blank" rel="noreferrer">SteamGridDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</span></footer>
       </div>
@@ -2172,7 +2174,7 @@ function StarRating({ value, editable = false, onChange, label = 'Star rating' }
   </span>;
 }
 
-function MediaView({ data, loading = false, loadError = '', libraryLoadState = null, initialSection, onLoadSection, onLoadLibrary, onRetryLibrary, onInvalidateLibrary, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, ownCollection, loadCopyDestinations, onViewCopiedShelf, sourceOwnerName, collaborationCandidates = [], shareToken }) {
+function MediaView({ data, loading = false, loadError = '', libraryLoadState = null, initialSection, onLoadSection, onLoadLibrary, onRetryLibrary, onInvalidateLibrary, onEnsureSectionDetails, onSectionChange, onDataChange, notify, openMedia, canEdit, canReact, currentUserId, onReaction, isAdmin, accessToken, refresh, requestConfirmation, mainWatchlistTitle, mainWatchlistClubs, mainWatchlistClubId, onMainWatchlistClubChange, onExport, onStarRatingChange, ownCollection, loadCopyDestinations, onViewCopiedShelf, sourceOwnerName, collaborationCandidates = [], collaborativeShelfIds = new Set(), shareToken }) {
   const [section, setSection] = useState(() => data.selectedLibrary?.type || (MEDIA_SECTIONS.has(initialSection) ? initialSection : 'screen'));
   const [query, setQuery] = useState('');
   const [listFilters, setListFilters] = useState([]);
@@ -2244,7 +2246,11 @@ function MediaView({ data, loading = false, loadError = '', libraryLoadState = n
   useEffect(() => { setOptimisticShelfDetails({}); }, [data.collectionId, data.mediaShelves, section]);
   useEffect(() => { setOptimisticMainShelfIds(data.mediaShelves.filter((shelf) => !shelf.deleted_at && shelf.section === 'screen' && shelf.showInMainWatchlist).map((shelf) => shelf.shelf_id)); }, [data.collectionId, data.mediaShelves]);
   const shelfIndex = new Map(optimisticShelfIds.map((id, index) => [id, index]));
-  const shelves = sourceShelves.map((shelf) => ({ ...shelf, ...(optimisticShelfDetails[shelf.shelf_id] || {}) })).sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
+  const shelves = sourceShelves.map((shelf) => ({
+    ...shelf,
+    ...(optimisticShelfDetails[shelf.shelf_id] || {}),
+    canCollaborate: Boolean(shelf.canCollaborate || collaborativeShelfIds.has(shelf.shelf_id)),
+  })).sort((a, b) => (shelfIndex.get(a.shelf_id) ?? Number.MAX_SAFE_INTEGER) - (shelfIndex.get(b.shelf_id) ?? Number.MAX_SAFE_INTEGER));
   const collaborativeAddShelf = !canEdit
     ? shelves.find((shelf) => addToShelfIds.includes(shelf.shelf_id) && shelf.canCollaborate)
     : null;
