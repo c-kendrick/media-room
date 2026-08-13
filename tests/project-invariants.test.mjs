@@ -2422,6 +2422,17 @@ test('collaboration invitations have one-time login acknowledgement, persistent 
   assert.match(app, /media-room:view-copied-shelf[\s\S]*collection_id: notification\.collection_id[\s\S]*shelf_id: notification\.shelf_id/);
 });
 
+test('collaborators always receive Add Item and friends appear in member-view navigation', async () => {
+  const app = await read('src/App.jsx');
+  assert.match(app, /collaborativeShelfIds = new Set\(\(userHub\?\.shelf_collaboration_notifications \|\| \[\]\)\.map\(\(notification\) => notification\.shelf_id\)\)/);
+  assert.match(app, /canCollaborate: Boolean\(shelf\.canCollaborate \|\| collaborativeShelfIds\.has\(shelf\.shelf_id\)\)/);
+  assert.match(app, /canAdd=\{\(canEdit \|\| shelf\.canCollaborate\) && !shelf\.virtual\}/);
+  assert.match(app, /<Button className="shelf-control-button shelf-add-button" icon=\{Plus\} onClick=\{onAdd\}>Add Item<\/Button>/);
+  assert.match(app, /selectedContributionShelf\?\.canCollaborate \|\| collaborativeShelfIds\.has\(selectedMedia\.contributedShelfId\)/);
+  assert.match(app, /friendOwnerIds = \(userHub\?\.users \|\| \[\]\)\.filter\(\(user\) => user\.friend\)\.map\(\(user\) => user\.id\)/);
+  assert.match(app, /memberViewOwnerIds = new Set\(\[\.\.\.adminMemberClubs\.flatMap\(\(club\) => club\.member_ids\), \.\.\.friendOwnerIds\]\)/);
+});
+
 test('legacy shelf groups convert to the alternating canonical set order', () => {
   const items = shelfItems(30);
   assert.deepEqual(legacyVisualOrderToCanonical(items).map((item) => item.database_id), [
