@@ -2454,6 +2454,26 @@ test('collaborators always receive Add Item and friends appear in member-view na
   assert.match(app, /memberViewOwnerIds = new Set\(\[\.\.\.adminMemberClubs\.flatMap\(\(club\) => club\.member_ids\), \.\.\.friendOwnerIds\]\)/);
 });
 
+test('active collaborators can enrich only media they contributed to their collaborative shelf', async () => {
+  const app = await read('src/App.jsx');
+  const poster = await read('supabase/functions/enrich-poster/index.ts');
+  const details = await read('supabase/functions/enrich-details/index.ts');
+
+  assert.match(app, /canReviewPoster=\{Boolean\(\(canEditSelectedMedia \|\| isAdmin\)/);
+  for (const edge of [poster, details]) {
+    const batchEnrichment = edge.slice(edge.indexOf('if (body.enrich_section)'), edge.indexOf('const { data: item'));
+    assert.match(batchEnrichment, /collection\.owner_id !== user\.id && !isAdmin/);
+    assert.doesNotMatch(batchEnrichment, /canEnrichMediaItem/);
+    assert.match(edge, /async function canEnrichMediaItem/);
+    assert.match(edge, /item\.contributor_id !== userId \|\| !item\.contributed_to_shelf_id/);
+    assert.match(edge, /rpc\('shelf_collaboration_is_active'/);
+    assert.match(edge, /rpc\('collaborative_media_membership_is_valid'/);
+    assert.match(edge, /collaborationActive === true && membershipValid === true/);
+    assert.match(edge, /select\('[^']*contributor_id,contributed_to_shelf_id'\)/);
+    assert.match(edge, /if \(!await canEnrichMediaItem\(client, item, user\.id, isAdmin\)\)/);
+  }
+});
+
 test('legacy shelf groups convert to the alternating canonical set order', () => {
   const items = shelfItems(30);
   assert.deepEqual(legacyVisualOrderToCanonical(items).map((item) => item.database_id), [

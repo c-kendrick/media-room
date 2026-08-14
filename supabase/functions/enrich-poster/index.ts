@@ -7,7 +7,7 @@ const json = (value: unknown, status = 200, headers: Record<string, string> = {}
 const normalized = (value: unknown) => String(value || '').trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const yearFrom = (value: unknown) => Number(String(value || '').slice(0, 4)) || null;
 
-type MediaItem = { id: string; collection_id: string; type: 'film' | 'television' | 'book' | 'game'; title: string; year: number | null; poster_url?: string | null };
+type MediaItem = { id: string; collection_id: string; type: 'film' | 'television' | 'book' | 'game'; title: string; year: number | null; poster_url?: string | null; contributor_id?: string | null; contributed_to_shelf_id?: string | null };
 type Candidate = { id: string | number; title: string; year: number | null; poster_url: string; provider: string; year_fallback?: boolean };
 type TmdbEndpoint = 'movie' | 'tv';
 type TmdbMatch = { id: number; title?: string; name?: string; poster_path?: string; release_date?: string; first_air_date?: string };
@@ -18,6 +18,18 @@ async function enforceRateLimit(client: ReturnType<typeof createClient>, action:
   const retryAfter = Number(data?.retry_after) || 0;
   if (data?.allowed === false) return json({ error: `Please wait ${retryAfter} seconds before enriching again.`, retry_after: retryAfter }, 429, { 'Retry-After': String(retryAfter) });
   return null;
+}
+
+async function canEnrichMediaItem(client: ReturnType<typeof createClient>, item: MediaItem, userId: string, isAdmin: boolean) {
+  const { data: collection } = await client.from('collections').select('owner_id').eq('id', item.collection_id).single();
+  if (!collection) return false;
+  if (collection.owner_id === userId || isAdmin) return true;
+  if (item.contributor_id !== userId || !item.contributed_to_shelf_id) return false;
+  const [{ data: collaborationActive, error: collaborationError }, { data: membershipValid, error: membershipError }] = await Promise.all([
+    client.rpc('shelf_collaboration_is_active', { target_shelf_id: item.contributed_to_shelf_id, target_user_id: userId }),
+    client.rpc('collaborative_media_membership_is_valid', { target_media_item_id: item.id, target_shelf_id: item.contributed_to_shelf_id, target_user_id: userId }),
+  ]);
+  return !collaborationError && !membershipError && collaborationActive === true && membershipValid === true;
 }
 
 async function tmdbSearch(key: string, endpoint: TmdbEndpoint, title: string, year?: number | null): Promise<TmdbMatch[]> {
@@ -149,10 +161,9 @@ Deno.serve(async (request) => {
     }
 
     const { media_item_id, query, choose_url } = body;
-    const { data: item, error } = await client.from('media_items').select('id,collection_id,type,title,year').eq('id', media_item_id).single();
+    const { data: item, error } = await client.from('media_items').select('id,collection_id,type,title,year,contributor_id,contributed_to_shelf_id').eq('id', media_item_id).single();
     if (error || !item) return json({ error: 'Media item was not found.' }, 404);
-    const { data: collection } = await client.from('collections').select('owner_id').eq('id', item.collection_id).single();
-    if (!collection || (collection.owner_id !== user.id && !isAdmin)) return json({ error: 'Only the collection owner or an administrator can enrich this poster.' }, 403);
+    if (!await canEnrichMediaItem(client, item, user.id, isAdmin)) return json({ error: 'Only the collection owner, an administrator, or the active collaborator who added this item can enrich its poster.' }, 403);
     if (choose_url) {
       const { error: updateError } = await client.from('media_items').update({ poster_url: choose_url }).eq('id', item.id);
       return updateError ? json({ error: updateError.message }, 400) : json({ poster_url: choose_url, source: 'chosen' });
