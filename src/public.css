@@ -373,7 +373,10 @@
 .shelf-picker-state{box-sizing:border-box;width:100%;min-height:44px;margin:0;padding:11px 12px;border:1px dashed #d8cbbd;border-radius:5px;background:#fffaf2;color:#7b7065;font-family:var(--serif);font-size:11px;display:flex;align-items:center}
 .shelf-picker-state.error{justify-content:space-between;gap:12px;color:#8d4038}.shelf-picker-state .button{min-height:30px;padding:0 10px;border-radius:4px;background:transparent;color:#6d5146;font-size:9px;white-space:nowrap}
 .dialog-actions{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:24px}
-.dialog-actions .button{border-radius:999px;background:#2f2b26;color:#fff;border-color:#2f2b26;box-shadow:none}
+.dialog-actions .button{border-radius:999px;background:var(--brand-brown);color:#fff;border-color:var(--brand-brown);box-shadow:none;transition:background .15s ease,border-color .15s ease,transform .15s ease,box-shadow .15s ease}
+.dialog-actions .button:hover:not(:disabled){background:color-mix(in srgb,var(--brand-brown) 84%,#000);border-color:color-mix(in srgb,var(--brand-brown) 84%,#000)}
+.dialog-actions .button:active:not(:disabled){transform:translateY(1px)}
+.dialog-actions .button:focus-visible{outline:3px solid rgba(139,73,62,.24);outline-offset:2px}
 .text-button{border:0;background:transparent;color:#7e7468;cursor:pointer;padding:8px 10px}
 
 .account-dialog{border-radius:6px!important;background:#fbf6ee!important;box-shadow:0 24px 80px rgba(44,34,23,.25)!important}
@@ -390,11 +393,12 @@
 
 /* Collaborative shelves reuse the walnut dialog, dotted bezel and compact people rows. */
 .collaborative-shelf-label{display:inline-flex!important;align-items:center;gap:5px;margin-top:5px;color:#8a5848!important;font-size:8px!important;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
-.shelf-collaboration-editor{grid-column:1/-1;margin-top:4px;border:1px solid #d7c6b5;border-radius:6px;background:#fffaf2;overflow:hidden}
+.shelf-collaboration-editor{grid-column:1/-1;margin-top:14px;border:1px solid #d7c6b5;border-radius:6px;background:#fffaf2;overflow:hidden;box-shadow:0 5px 16px rgba(76,52,37,.04)}
 .shelf-collaboration-dotted-strip{min-height:22px;background-color:#6f302d;background-image:radial-gradient(circle,#d9b59a 1.25px,transparent 1.4px);background-size:10px 10px;background-position:2px 2px}
-.shelf-collaboration-toggle{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;width:100%;padding:13px 14px;border:0;background:#f8efe5;color:#4a3a32;text-align:left;cursor:pointer}
+.shelf-collaboration-toggle{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;width:100%;min-height:58px;padding:10px 12px;border:0;background:#fbf4eb;color:#4a3a32;text-align:left;cursor:pointer}
+.shelf-collaboration-toggle:hover{background:#f6eadf}.shelf-collaboration-toggle:focus-visible{outline:2px solid #9a6553;outline-offset:-3px}
 .shelf-collaboration-toggle>span:nth-child(2){display:grid;gap:3px}.shelf-collaboration-toggle b{font-family:var(--serif);font-size:14px}.shelf-collaboration-toggle small{font-size:8px;line-height:1.45;color:#796b61}.shelf-collaboration-toggle>svg{transition:transform .15s}.shelf-collaboration-editor.open .shelf-collaboration-toggle>svg{transform:rotate(180deg)}
-.shelf-collaboration-mark,.shelf-collaboration-invite-mark{display:grid;place-items:center;width:34px;height:34px;border:1px solid #b99d88;border-radius:50%;background:#efe0d1;color:#6f302d}
+.shelf-collaboration-mark,.shelf-collaboration-invite-mark{display:grid;place-items:center;width:32px;height:32px;border:1px solid #b99d88;border-radius:50%;background:#efe0d1;color:#6f302d}
 .shelf-collaboration-people{display:grid;gap:7px;padding:12px;background:#fffaf2;border-top:1px solid #ded0c2;max-height:270px;overflow-y:auto}
 .shelf-collaborator-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:9px;min-height:48px;padding:7px 9px;border:1px solid #ded0c2;border-radius:5px;background:#fdf8f0;color:#55483f;text-align:left;cursor:pointer}.shelf-collaborator-row:hover:not(:disabled){border-color:#a98673;background:#f7ebdf}.shelf-collaborator-row.active{border-color:#9a6857;box-shadow:inset 3px 0 0 #6f302d}.shelf-collaborator-row>span:nth-child(2){display:grid;gap:2px}.shelf-collaborator-row strong{font-family:var(--serif);font-size:12px}.shelf-collaborator-row small{font-size:8px;color:#85766b}.shelf-collaborator-row:disabled{opacity:.62;cursor:wait}
 .shelf-collaboration-state{display:inline-flex!important;align-items:center;justify-content:flex-end;gap:4px;color:#7a4a3d;font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.shelf-collaboration-empty{margin:0;padding:13px;border:1px dashed #cdb9a7;color:#7d6f65;font-size:9px;line-height:1.5;text-align:center}
@@ -598,6 +602,9 @@
 .reading-list-designation{grid-template-columns:auto 1fr!important;align-items:flex-start!important;padding:11px 12px;border:1px solid #d9cdbf;border-radius:6px;background:#fffaf2;cursor:pointer}
 .reading-list-designation input,.inline-shelf-designation input{width:auto!important;height:auto!important;margin:2px 0 0!important;accent-color:var(--clay)}
 .reading-list-designation>span{display:grid;gap:3px}.reading-list-designation b{font-size:10px}.reading-list-designation small{color:#81776d;font-size:8px;font-weight:400}
+.shelf-option-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:15px}
+.shelf-option-grid .reading-list-designation{box-sizing:border-box;min-width:0;min-height:76px;margin:0;padding:10px}
+.shelf-option-grid .reading-list-designation:focus-within{border-color:#9a6553;box-shadow:0 0 0 2px rgba(111,67,47,.1)}
 .create-shelf-dialog .reading-list-designation{margin-top:2px}
 .media-card.is-optimistic{opacity:.62;pointer-events:none;animation:optimistic-arrival .25s ease-out}
 @keyframes optimistic-arrival{from{opacity:0;transform:translateY(5px)}to{opacity:.62;transform:none}}
@@ -1075,4 +1082,92 @@
   .library-create-button svg{position:absolute;left:50%;top:50%;display:block;margin:0;transform:translate(-50%,-50%)}
   .library-edit-actions{order:3;flex:0 0 auto;padding:0}
   .library-edit-actions>button{width:40px!important;height:40px!important;min-height:40px!important}
+}
+
+/* Shared popup shell: the Fight Club strip remains the canonical dotted accent. */
+:is(.media-edit-dialog,.record-dialog,.search-modal,.account-dialog,.media-drawer,.collection-bin-drawer){position:relative}
+:is(.media-edit-dialog,.record-dialog,.search-modal,.account-dialog,.media-drawer,.collection-bin-drawer):not(.fight-club-dialog):not(.watchlist-request-dialog):not(.shelf-collaboration-invite-dialog)::before,
+.fight-club-dotted-strip,
+.watchlist-request-dotted-strip,
+.shelf-collaboration-invite-dialog>.shelf-collaboration-dotted-strip{
+  content:"";
+  position:absolute;
+  z-index:1;
+  inset:0 0 auto;
+  box-sizing:border-box;
+  width:100%;
+  min-height:9px;
+  height:9px;
+  border:0;
+  border-radius:5px 5px 0 0;
+  background-color:#8b493e;
+  background-image:radial-gradient(circle,#e7cdbb 1px,transparent 1.5px);
+  background-position:0 0;
+  background-size:7px 7px;
+  pointer-events:none;
+}
+.media-drawer::before,.collection-bin-drawer::before{border-radius:0}
+.fight-club-dotted-strip,.watchlist-request-dotted-strip,.shelf-collaboration-invite-dialog>.shelf-collaboration-dotted-strip{position:static}
+.record-dialog,.search-modal{border-radius:6px}
+.watchlist-request-dialog{grid-template-rows:9px auto minmax(0,1fr)}
+.watchlist-request-dialog>.close{top:26px!important}
+.watchlist-request-list::before{height:9px;opacity:1}
+.shelf-collaboration-invite-dialog{grid-template-rows:9px minmax(0,1fr)!important}
+.shelf-collaboration-invite-dialog>.close{top:21px!important}
+
+/* Compact Edit Shelf controls. */
+.shelf-transfer-section{
+  margin-top:14px;
+  padding:12px;
+  border:1px solid #d9cdbf;
+  border-radius:6px;
+  background:#fffaf2;
+}
+.shelf-transfer-section>header{display:grid;gap:3px;margin-bottom:10px}
+.shelf-transfer-section>header>b{color:#5d4d45;font-family:var(--serif);font-size:13px}
+.shelf-transfer-section>header>small,.shelf-transfer-section>small{color:#81756a;font-size:8px;line-height:1.45}
+.shelf-transfer-section>small{display:block;margin-top:8px}
+.shelf-transfer-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.shelf-transfer-actions button{
+  box-sizing:border-box;
+  min-width:0;
+  min-height:58px;
+  padding:9px 10px;
+  border:1px solid #d5c7b8;
+  border-radius:6px;
+  background:#fbf4eb;
+  color:#5f554d;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  align-items:center;
+  justify-content:stretch;
+  gap:9px;
+  text-align:left;
+  cursor:pointer;
+}
+.shelf-transfer-actions button:hover:not(:disabled){border-color:#ae8c79;background:#f4e7da}
+.shelf-transfer-actions button>span{min-width:0;display:grid;gap:2px}
+.shelf-transfer-actions button b{font-size:9px}.shelf-transfer-actions button small{color:#81756a;font-size:7px;line-height:1.35}
+.shelf-transfer-actions button:disabled{opacity:.5;cursor:not-allowed}
+
+/* Popup affirmative actions use the established walnut brand token. */
+.dialog-footer .button.primary{
+  border-color:var(--brand-brown);
+  background:var(--brand-brown);
+}
+.dialog-footer .button.primary:hover:not(:disabled){
+  border-color:color-mix(in srgb,var(--brand-brown) 84%,#000);
+  background:color-mix(in srgb,var(--brand-brown) 84%,#000);
+}
+.library-editor-dialog .dialog-actions .button,.shelf-transfer-dialog .dialog-actions .button{
+  border-color:var(--brand-brown)!important;
+  background:var(--brand-brown)!important;
+}
+.library-editor-dialog .dialog-actions .button:hover:not(:disabled),.shelf-transfer-dialog .dialog-actions .button:hover:not(:disabled){
+  background:color-mix(in srgb,var(--brand-brown) 84%,#000)!important;
+}
+
+@media(max-width:390px){
+  .shelf-option-grid,.shelf-transfer-actions{grid-template-columns:1fr}
+  .shelf-option-grid .reading-list-designation{min-height:58px}
 }
