@@ -1,7 +1,7 @@
 # Critical Rules
 
 1. Implement the requested changes, then create a new draft pull request for me to review and merge manually. After providing a draft PR, assume it has been merged before any later request. For every later feature or fix, update the default branch, create a new branch, and open a new draft PR. Do not check the previous PR’s merge status, reuse its branch, push additional commits to it, or continue working from it unless I explicitly state that it has not been merged or ask you to add more work to that PR.
-2. GitHub authentication is almost always already valid, even when the sandbox cannot access stored keyring credentials or initially appears unauthenticated. Treat existing authentication as the expected default. Keyring access failures or an unsuccessful credential lookup are not proof that authentication is unavailable. Test actual Git and GitHub repository access before asking me to log in. Only request authentication after confirming that the required operations genuinely fail because credentials are unavailable. If authentication is required, provide the exact PowerShell commands.
+2. GitHub authentication is expected to already work. Do not ask me to authenticate because gh auth status, a credential-helper lookup, keyring access, or another preliminary authentication check fails. Those failures are not evidence that publishing is unavailable. When the task requires publishing, attempt the actual configured Git push and PR-creation workflow first. Only ask me to authenticate if the required push or PR operation itself fails with a genuine authentication or permission error after using the repository’s existing configured access.
 
 ## Implementation
 
