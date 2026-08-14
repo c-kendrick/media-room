@@ -2568,6 +2568,11 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, />Move shelf<[\s\S]*>Copy shelf</);
   assert.doesNotMatch(app.slice(app.indexOf('function ShelfEditDialog'), app.indexOf('function ShelfTransferDialog')), /shelf-collaboration-dotted-strip/);
   assert.match(styles, /Shared popup shell:[\s\S]*fight-club-dotted-strip[\s\S]*background-color:#8b493e;[\s\S]*background-size:7px 7px/);
+  assert.match(styles, /--popup-accent-overlap-top:1px;[\s\S]*--popup-accent-overlap-right:1px;[\s\S]*--popup-accent-overlap-left:1px/);
+  assert.match(styles, /:is\(\.media-drawer,\.collection-bin-drawer\)\{[\s\S]*--popup-accent-overlap-top:0px;[\s\S]*--popup-accent-overlap-right:0px/);
+  assert.match(styles, /:is\(\.media-edit-dialog,\.record-dialog,\.search-modal,\.media-drawer,\.collection-bin-drawer\)\{overflow-x:clip\}/);
+  assert.match(styles, /border-radius:inherit;[\s\S]*border-bottom-right-radius:0;[\s\S]*border-bottom-left-radius:0/);
+  assert.doesNotMatch(styles, /\.media-drawer::before,\.collection-bin-drawer::before\{border-radius:0\}/);
   assert.match(app, /shelf-edit-main-watchlist[\s\S]*onToggleMain\(enabled\)[\s\S]*>Include this in Main Watchlist</);
   assert.match(app, /const previous = mainWatchlist; const enabled = event\.target\.checked; setMainWatchlist\(enabled\); try \{ await onToggleMain\(enabled\); \} catch \{ setMainWatchlist\(previous\); \}/);
   const mediaShelf = app.slice(app.indexOf('function MediaShelf'), app.indexOf('function ArrangeShelfDialog'));

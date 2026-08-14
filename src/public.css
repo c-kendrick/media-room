@@ -1085,7 +1085,18 @@
 }
 
 /* Shared popup shell: the Fight Club strip remains the canonical dotted accent. */
-:is(.media-edit-dialog,.record-dialog,.search-modal,.account-dialog,.media-drawer,.collection-bin-drawer){position:relative}
+:is(.media-edit-dialog,.record-dialog,.search-modal,.account-dialog,.media-drawer,.collection-bin-drawer,.watchlist-request-dialog,.watchlist-request-list){
+  --popup-accent-overlap-top:1px;
+  --popup-accent-overlap-right:1px;
+  --popup-accent-overlap-left:1px;
+  position:relative;
+}
+:is(.media-drawer,.collection-bin-drawer){
+  --popup-accent-overlap-top:0px;
+  --popup-accent-overlap-right:0px;
+  --popup-accent-overlap-left:1px;
+}
+:is(.media-edit-dialog,.record-dialog,.search-modal,.media-drawer,.collection-bin-drawer){overflow-x:clip}
 :is(.media-edit-dialog,.record-dialog,.search-modal,.account-dialog,.media-drawer,.collection-bin-drawer):not(.fight-club-dialog):not(.watchlist-request-dialog):not(.shelf-collaboration-invite-dialog)::before,
 .fight-club-dotted-strip,
 .watchlist-request-dotted-strip,
@@ -1093,21 +1104,28 @@
   content:"";
   position:absolute;
   z-index:1;
-  inset:0 0 auto;
+  top:calc(-1 * var(--popup-accent-overlap-top));
+  right:calc(-1 * var(--popup-accent-overlap-right));
+  left:calc(-1 * var(--popup-accent-overlap-left));
   box-sizing:border-box;
-  width:100%;
-  min-height:9px;
-  height:9px;
+  width:auto;
+  min-height:calc(9px + var(--popup-accent-overlap-top));
+  height:calc(9px + var(--popup-accent-overlap-top));
   border:0;
-  border-radius:5px 5px 0 0;
+  border-radius:inherit;
+  border-bottom-right-radius:0;
+  border-bottom-left-radius:0;
   background-color:#8b493e;
   background-image:radial-gradient(circle,#e7cdbb 1px,transparent 1.5px);
   background-position:0 0;
   background-size:7px 7px;
   pointer-events:none;
 }
-.media-drawer::before,.collection-bin-drawer::before{border-radius:0}
-.fight-club-dotted-strip,.watchlist-request-dotted-strip,.shelf-collaboration-invite-dialog>.shelf-collaboration-dotted-strip{position:static}
+.fight-club-dotted-strip,.watchlist-request-dotted-strip,.shelf-collaboration-invite-dialog>.shelf-collaboration-dotted-strip{
+  position:static;
+  width:calc(100% + var(--popup-accent-overlap-left) + var(--popup-accent-overlap-right));
+  margin:calc(-1 * var(--popup-accent-overlap-top)) calc(-1 * var(--popup-accent-overlap-right)) 0 calc(-1 * var(--popup-accent-overlap-left));
+}
 .record-dialog,.search-modal{border-radius:6px}
 .watchlist-request-dialog{grid-template-rows:9px auto minmax(0,1fr)}
 .watchlist-request-dialog>.close{top:26px!important}
