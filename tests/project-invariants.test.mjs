@@ -935,6 +935,27 @@ test('custom libraries can be permanently deleted from the Bin without weakening
   assert.match(migration, /delete from public\.media_items as item where item\.library_id = target\.id;[\s\S]*delete from public\.shelves as shelf where shelf\.library_id = target\.id;[\s\S]*delete from public\.libraries as library where library\.id = target\.id;/);
 });
 
+test('missing permanent-library RPC is restored and deletion errors remain actionable', async () => {
+  const app = await read('src/App.jsx');
+  const migration = await read('supabase/migrations/20260814010000_restore_permanent_library_deletion.sql');
+  assert.match(migration, /create or replace function public\.permanently_delete_library\(target_library_id uuid\)/);
+  assert.match(migration, /if target\.is_protected then[\s\S]*Default libraries cannot be permanently deleted/);
+  assert.match(migration, /if target\.deleted_at is null then[\s\S]*Only libraries in the Bin can be permanently deleted/);
+  assert.match(migration, /delete from public\.media_items as item where item\.library_id = target\.id;[\s\S]*delete from public\.shelves as shelf where shelf\.library_id = target\.id;[\s\S]*delete from public\.libraries as library where library\.id = target\.id;/);
+  assert.match(migration, /grant execute on function public\.permanently_delete_library\(uuid\) to authenticated/);
+  assert.match(migration, /notify pgrst, 'reload schema'/);
+  assert.match(app, /\$\{library\.name\} could not be deleted: \$\{error\.message\} It remains in the Bin\./);
+});
+
+test('drawer Edit details button uses the walnut brand treatment', async () => {
+  const app = await read('src/App.jsx');
+  const styles = await read('src/public.css');
+  assert.match(app, /drawer-edit-button primary[\s\S]*Edit details/);
+  assert.match(styles, /\.drawer-owner-actions \.primary\{background:var\(--brand-brown\)!important;border-color:var\(--brand-brown\)!important;color:#fffaf2\}/);
+  assert.match(styles, /\.drawer-owner-actions \.primary:hover:not\(:disabled\)\{background:color-mix\(in srgb,var\(--brand-brown\) 84%,#000\)!important/);
+  assert.doesNotMatch(styles, /\.drawer-owner-actions \.primary\{background:#2f2b26/);
+});
+
 test('shelf creation remains cache-authoritative after reload failures and stale library responses', async () => {
   const app = await read('src/App.jsx');
   assert.match(app, /sectionRequests\.current\.run\([\s\S]*onResolve: \(loaded\) => mergeLoadedSection\(targetCollectionId, loaded\)/);

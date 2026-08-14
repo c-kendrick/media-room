@@ -2764,7 +2764,9 @@ function MediaView({ data, loading = false, loadError = '', libraryLoadState = n
               } catch (error) {
                 setBinLibraries(previousLibraries);
                 onDataChange(previousData);
-                notify(`${library.name} could not be deleted. It has been restored to the Bin.`);
+                notify(error?.message
+                  ? `${library.name} could not be deleted: ${error.message} It remains in the Bin.`
+                  : `${library.name} could not be deleted. It remains in the Bin.`);
                 throw error;
               }
             },
