@@ -3827,10 +3827,11 @@ function ShelfEditDialog({ shelf, collaborationCandidates = [], onCollaborationC
     <span className="eyebrow">EDIT SHELF</span><h2>{shelf.name}</h2>
     {!shelf.required && <label>Shelf name<input autoFocus value={name} maxLength="100" onChange={(event) => setName(event.target.value)} required /></label>}
     <label>Subtitle <span className="field-hint">Optional</span><input autoFocus={shelf.required} value={subtitle} maxLength="180" onChange={(event) => setSubtitle(event.target.value)} placeholder="Add a short note beneath this shelf title" /></label>
-    <label className="reading-list-designation"><input type="checkbox" checked={numbered} onChange={(event) => setNumbered(event.target.checked)} /><span><b>Numbered shelf</b><small>Show each item's shelf position beneath its card.</small></span></label>
-    {canCurateMain && <label className="reading-list-designation shelf-edit-main-watchlist"><input type="checkbox" checked={mainWatchlist} onChange={async (event) => { const previous = mainWatchlist; const enabled = event.target.checked; setMainWatchlist(enabled); try { await onToggleMain(enabled); } catch { setMainWatchlist(previous); } }} /><span><b>Include this in Main Watchlist</b><small>Mirror this Film & TV shelf in the shared Main Watchlist.</small></span></label>}
+    <div className="shelf-option-grid">
+      <label className="reading-list-designation"><input type="checkbox" checked={numbered} onChange={(event) => setNumbered(event.target.checked)} /><span><b>Numbered shelf</b><small>Show each item's shelf position beneath its card.</small></span></label>
+      {canCurateMain && <label className="reading-list-designation shelf-edit-main-watchlist"><input type="checkbox" checked={mainWatchlist} onChange={async (event) => { const previous = mainWatchlist; const enabled = event.target.checked; setMainWatchlist(enabled); try { await onToggleMain(enabled); } catch { setMainWatchlist(previous); } }} /><span><b>Include this in Main Watchlist</b><small>Mirror this Film & TV shelf in the shared Main Watchlist.</small></span></label>}
+    </div>
     <section className={cls('shelf-collaboration-editor', collaboratorsOpen && 'open')}>
-      <div className="shelf-collaboration-dotted-strip" aria-hidden="true" />
       <button className="shelf-collaboration-toggle" type="button" aria-expanded={collaboratorsOpen} onClick={() => setCollaboratorsOpen((open) => !open)}>
         <span className="shelf-collaboration-mark"><Users size={16} /></span>
         <span><b>Invite to collaborate</b><small>Friends and mutual Club members can add and manage only their own contributions.</small></span>
@@ -3853,15 +3854,14 @@ function ShelfEditDialog({ shelf, collaborationCandidates = [], onCollaborationC
     {canArrange && <div className="shelf-edit-mobile-actions">
       {canArrange && <button className="shelf-control-button arrange-button" type="button" onClick={onArrange}><ListOrdered size={15} /><span>Arrange Shelf</span></button>}
     </div>}
-    {canTransfer && <details className="shelf-transfer-section">
-      <summary>Move or copy shelf</summary>
-      <p>Use another active library of the same technical type. Copies are independent and Main Watchlist inclusion starts disabled.</p>
+    {canTransfer && <section className="shelf-transfer-section" aria-labelledby="shelf-transfer-options-title">
+      <header><b id="shelf-transfer-options-title">Shelf location</b><small>Move this shelf or make an independent copy in a compatible library.</small></header>
       <div className="shelf-transfer-actions">
-        <button type="button" disabled={shelf.required} title={shelf.required ? 'Protected shelves cannot be moved' : 'Move to another library'} onClick={() => onTransfer('move')}><Redo2 size={16} />Move to another library</button>
-        <button type="button" onClick={() => onTransfer('copy-owner')}><Copy size={16} />Copy to another library</button>
+        <button type="button" disabled={shelf.required} title={shelf.required ? 'Protected shelves cannot be moved' : 'Move to another library'} onClick={() => onTransfer('move')}><Redo2 size={16} /><span><b>Move shelf</b><small>Transfer it to another library.</small></span></button>
+        <button type="button" onClick={() => onTransfer('copy-owner')}><Copy size={16} /><span><b>Copy shelf</b><small>Create a separate duplicate.</small></span></button>
       </div>
       {shelf.required && <small>Protected shelves can be copied but cannot be moved.</small>}
-    </details>}
+    </section>}
     <small className="character-count">{subtitle.length} / 180</small>
     <div className="dialog-actions"><button className="text-button" type="button" onClick={onClose}>Cancel</button><Button type="submit" icon={Pencil} disabled={!shelf.required && !name.trim()}>Save Shelf</Button></div>
   </form></div>;

@@ -2563,7 +2563,11 @@ test('dialogs use browser history and shelf controls keep the requested phone la
   assert.match(app, /className="shelf-mobile-top-row"[\s\S]*shelf-edit-actions[\s\S]*shelf-order-actions[\s\S]*className="shelf-mobile-bottom-row"[\s\S]*shelf-content-actions[\s\S]*shelf-add-actions[\s\S]*shelf-set-actions/);
   assert.match(app, /shelf\.ownerName && 'main-watchlist-shelf'/);
   assert.match(app, /function ShelfEditDialog\(\{ shelf, collaborationCandidates = \[\], onCollaborationChange, canArrange, onArrange, canCurateMain, onToggleMain, canTransfer, onTransfer, onClose, onSave \}\)/);
-  assert.match(app, /canTransfer && <details className="shelf-transfer-section">/);
+  assert.match(app, /canTransfer && <section className="shelf-transfer-section" aria-labelledby="shelf-transfer-options-title">/);
+  assert.match(app, /className="shelf-option-grid"[\s\S]*>Numbered shelf<[\s\S]*>Include this in Main Watchlist</);
+  assert.match(app, />Move shelf<[\s\S]*>Copy shelf</);
+  assert.doesNotMatch(app.slice(app.indexOf('function ShelfEditDialog'), app.indexOf('function ShelfTransferDialog')), /shelf-collaboration-dotted-strip/);
+  assert.match(styles, /Shared popup shell:[\s\S]*fight-club-dotted-strip[\s\S]*background-color:#8b493e;[\s\S]*background-size:7px 7px/);
   assert.match(app, /shelf-edit-main-watchlist[\s\S]*onToggleMain\(enabled\)[\s\S]*>Include this in Main Watchlist</);
   assert.match(app, /const previous = mainWatchlist; const enabled = event\.target\.checked; setMainWatchlist\(enabled\); try \{ await onToggleMain\(enabled\); \} catch \{ setMainWatchlist\(previous\); \}/);
   const mediaShelf = app.slice(app.indexOf('function MediaShelf'), app.indexOf('function ArrangeShelfDialog'));
