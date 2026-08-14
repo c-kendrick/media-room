@@ -1901,7 +1901,7 @@ export default function App() {
           canEdit={canEditSelectedMedia}
           canManageShelves={canEditCollection}
           onStarRatingChange={(starRating) => saveStarRating(selectedMedia.database_id, starRating)}
-          canReviewPoster={Boolean((canEditCollection || isAdmin) && !data.mainWatchlist && selectedMedia.type !== 'other')}
+          canReviewPoster={Boolean((canEditSelectedMedia || isAdmin) && !data.mainWatchlist && selectedMedia.type !== 'other')}
           onFindPosters={() => searchPosterCandidates(account.session.access_token, selectedMedia.database_id)}
           onChoosePoster={async (posterUrl) => {
             const previousData = data;

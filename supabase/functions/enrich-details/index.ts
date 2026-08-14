@@ -9,7 +9,7 @@ const yearFrom = (value: unknown) => Number(String(value || '').slice(0, 4)) || 
 
 type MediaType = 'film' | 'television' | 'book' | 'game';
 type Details = { year?: number | null; creator?: string | null; director?: string | null; description?: string | null; format?: string | null; platforms?: string[]; genres?: string[]; runtime?: number | null };
-type MediaItem = Details & { id: string; collection_id: string; type: MediaType; title: string };
+type MediaItem = Details & { id: string; collection_id: string; type: MediaType; title: string; contributor_id?: string | null; contributed_to_shelf_id?: string | null };
 type Candidate = { id: string | number; title: string; year: number | null; provider: string; details: Details; year_fallback?: boolean };
 type TmdbEndpoint = 'movie' | 'tv';
 type TmdbMatch = { id: number; title?: string; name?: string; release_date?: string; first_air_date?: string };
@@ -22,6 +22,18 @@ async function enforceRateLimit(client: ReturnType<typeof createClient>, action:
   const retryAfter = Number(data?.retry_after) || 0;
   if (data?.allowed === false) return json({ error: `Please wait ${retryAfter} seconds before enriching again.`, retry_after: retryAfter }, 429, { 'Retry-After': String(retryAfter) });
   return null;
+}
+
+async function canEnrichMediaItem(client: ReturnType<typeof createClient>, item: MediaItem, userId: string, isAdmin: boolean) {
+  const { data: collection } = await client.from('collections').select('owner_id').eq('id', item.collection_id).single();
+  if (!collection) return false;
+  if (collection.owner_id === userId || isAdmin) return true;
+  if (item.contributor_id !== userId || !item.contributed_to_shelf_id) return false;
+  const [{ data: collaborationActive, error: collaborationError }, { data: membershipValid, error: membershipError }] = await Promise.all([
+    client.rpc('shelf_collaboration_is_active', { target_shelf_id: item.contributed_to_shelf_id, target_user_id: userId }),
+    client.rpc('collaborative_media_membership_is_valid', { target_media_item_id: item.id, target_shelf_id: item.contributed_to_shelf_id, target_user_id: userId }),
+  ]);
+  return !collaborationError && !membershipError && collaborationActive === true && membershipValid === true;
 }
 
 async function tmdbSearch(key: string, endpoint: TmdbEndpoint, title: string, year?: number | null): Promise<TmdbMatch[]> {
@@ -169,10 +181,9 @@ Deno.serve(async (request) => {
       return json({ enriched, reviewed: targets.length, unmatched: targets.length - enriched, warnings: [...warnings] });
     }
 
-    const { data: item, error } = await client.from('media_items').select('id,collection_id,type,title,year,creator,director,description,format,platforms,genres,runtime').eq('id', body.media_item_id).single();
+    const { data: item, error } = await client.from('media_items').select('id,collection_id,type,title,year,creator,director,description,format,platforms,genres,runtime,contributor_id,contributed_to_shelf_id').eq('id', body.media_item_id).single();
     if (error || !item) return json({ error: 'Media item was not found.' }, 404);
-    const { data: collection } = await client.from('collections').select('owner_id').eq('id', item.collection_id).single();
-    if (!collection || (collection.owner_id !== user.id && !isAdmin)) return json({ error: 'Only the collection owner or an administrator can enrich these details.' }, 403);
+    if (!await canEnrichMediaItem(client, item, user.id, isAdmin)) return json({ error: 'Only the collection owner, an administrator, or the active collaborator who added this item can enrich its details.' }, 403);
     if (body.candidate) {
       const applied = blankOnly(item, body.candidate);
       if (Object.keys(applied).length) {
